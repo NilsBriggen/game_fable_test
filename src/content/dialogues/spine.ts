@@ -20,7 +20,7 @@ export const spineDialogues: DialogueDef[] = [
         choices: [{ text: '(continue)', next: 'clause2' }],
       },
       clause2: {
-        speaker: 'player', text: '"I swear further: that we shall accept no judge in these matters who is not himself of the land and dwelling among us — no stranger sent from outside to rule where he does not belong."',
+        speaker: 'player', text: '"I swear further: that we shall accept no judge in these matters who is not himself of the land and dwelling among us, nor one who has bought his office — no stranger, and no man\'s purse, sent to rule where it does not belong."',
         choices: [{ text: '(continue)', next: 'clause3' }],
       },
       clause3: {
@@ -28,7 +28,7 @@ export const spineDialogues: DialogueDef[] = [
         choices: [{ text: '(continue)', next: 'close' }],
       },
       close: {
-        speaker: 'npc.werner-stauffacher', text: '"So sworn." He presses his seal-ring into the warm wax himself, and one by one the others do the same. "Now it is not one man\'s word, or three. It is the Länder\'s."',
+        speaker: 'npc.werner-stauffacher', text: '"So sworn." He sets Schwyz\'s own seal to the warm wax — not his ring, the Land\'s — and Uri and Unterwalden\'s witnesses ready theirs beside it. "Now it is not one man\'s word, or three. It is the Länder\'s."',
         effects: [{ quest: ['advance', 'quest.der-eid', 'sealing'] }],
         end: true,
       },
@@ -47,7 +47,7 @@ export const spineDialogues: DialogueDef[] = [
           { text: 'Hang back at the square\'s edge and watch.', next: 'watch-tell' },
         ],
       },
-      bowed: { speaker: 'narrator', text: 'The clerk marks something in his ledger and loses interest in you at once. Around the square, a few Uri faces turn away.', effects: [{ quest: ['advance', 'quest.der-hut', 'apple-shot'] }], end: true },
+      bowed: { speaker: 'narrator', text: 'The clerk marks something in his ledger and loses interest in you at once. Around the square, a few Uri faces turn away.', effects: [{ setFlag: ['gessler-hat-choice', 'bowed'] }, { quest: ['advance', 'quest.der-hut', 'apple-shot'] }], end: true },
       confronted: {
         speaker: 'npc.vogt-schreiber-ludwig', text: '"You. Yes, you — I watched you walk right past the Landvogt\'s hat as if it were a scarecrow." He raises two fingers, and men-at-arms drift closer. "Explain yourself, or don\'t."',
         choices: [
@@ -56,12 +56,12 @@ export const spineDialogues: DialogueDef[] = [
           { text: 'Put a hand to your weapon instead.', next: 'fight' },
         ],
       },
-      released: { speaker: 'npc.vogt-schreiber-ludwig', text: '"Mind the pole next time." He waves the guards back, disappointed.', effects: [{ quest: ['advance', 'quest.der-hut', 'apple-shot'] }], end: true },
+      released: { speaker: 'npc.vogt-schreiber-ludwig', text: '"Mind the pole next time." He waves the guards back, disappointed.', effects: [{ setFlag: ['gessler-hat-choice', 'walked-past'] }, { quest: ['advance', 'quest.der-hut', 'apple-shot'] }], end: true },
       fight: { speaker: 'narrator', text: 'The guards close in before you can say another word.', effects: [{ encounter: 'enc.altdorf-square' }], next: 'after-fight' },
-      'after-fight': { speaker: 'narrator', text: 'The square empties around the fight\'s aftermath — word of it will reach the Vogt within the hour, one way or another.', effects: [{ quest: ['advance', 'quest.der-hut', 'apple-shot'] }], end: true },
+      'after-fight': { speaker: 'narrator', text: 'The square empties around the fight\'s aftermath — word of it will reach the Vogt within the hour, one way or another.', effects: [{ setFlag: ['gessler-hat-choice', 'fought'] }, { quest: ['advance', 'quest.der-hut', 'apple-shot'] }], end: true },
       'watch-tell': {
         speaker: 'narrator', text: 'A crossbowman in worn hunting leathers walks past the pole without so much as a glance at it. The guards are on him in a breath. "Wilhelm Tell of Bürglen does not bow to a hat on a stick," he says, loud enough for the square to hear.',
-        effects: [{ quest: ['advance', 'quest.der-hut', 'apple-shot'] }],
+        effects: [{ setFlag: ['gessler-hat-choice', 'watched'] }, { quest: ['advance', 'quest.der-hut', 'apple-shot'] }],
         end: true,
       },
     },

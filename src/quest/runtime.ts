@@ -38,7 +38,7 @@ export interface RuntimeWrites {
   teleport(poiId: string): void;
   addCompanion(npcId: string): void;
   removeCompanion(npcId: string): void;
-  runCutsceneById(id: string): Promise<void>;
+  runCutsceneById(id: string, questId?: string): Promise<void>;
   advanceTime(hours: number): void;
   setChapterAsync(chapter: string): Promise<void>;
   setTimeExact(y: number, m: number, d: number, h?: number): void;
@@ -47,7 +47,7 @@ export interface RuntimeWrites {
   discoverPoi(poiId: string): void;
   npcMove(npcId: string, poiId: string): void;
   npcRemove(npcId: string): void;
-  runDialogueById(id: string): Promise<void>;
+  runDialogueById(id: string, questId?: string): Promise<void>;
   restParty(hours: number): void;
   setMusic(id: string): void;
   endAct(id: string): void;

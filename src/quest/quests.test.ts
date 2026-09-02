@@ -120,6 +120,38 @@ describe('QuestMachine', () => {
     expect(active).toEqual([{ id: 'quest.a', title: 'Test Quest A', stage: 'stage1', objective: 'Stage one begins.', marker: undefined }]);
   });
 
+  it("critic wave3-quest.md #9: quest-advanced is pre-order — listeners see the new stage before onEnter's own effects run", async () => {
+    const events: string[] = [];
+    let now = 1000;
+    const deps: QuestMachineDeps = {
+      getQuestDef: (id) => (id === 'quest.a' ? questA : undefined),
+      runEffects: async (effects) => { events.push(`effects:${JSON.stringify(effects)}`); },
+      now: () => now,
+      poiPosition: () => null,
+      emit: (event, ...args) => { if (event === 'quest-advanced') events.push(`quest-advanced:${args.join(':')}`); },
+    };
+    const machine = new QuestMachine(deps);
+    await machine.start('quest.a');
+    events.length = 0;
+    await machine.advance('quest.a', 'stage2');
+    expect(events[0]).toBe('quest-advanced:quest.a:stage2'); // event fires before...
+    expect(events[1]).toContain('effects:'); // ...stage2's onEnter effects run
+    expect(machine.stage('quest.a')).toBe('stage2'); // and the stage is already updated by the time the event fires
+  });
+
+  it('reset() clears a quest entirely so it can be start()ed again (Morgarten-loss retry)', async () => {
+    const { machine } = makeMachine();
+    await machine.start('quest.a');
+    await machine.complete('quest.a');
+    expect(machine.isDone('quest.a')).toBe(true);
+    machine.reset('quest.a');
+    expect(machine.isStarted('quest.a')).toBe(false);
+    expect(machine.isDone('quest.a')).toBe(false);
+    await machine.start('quest.a');
+    expect(machine.isStarted('quest.a')).toBe(true);
+    expect(machine.stage('quest.a')).toBe('stage1');
+  });
+
   it('serialize/restore round-trips quest state exactly', async () => {
     const { machine } = makeMachine();
     await machine.start('quest.a');

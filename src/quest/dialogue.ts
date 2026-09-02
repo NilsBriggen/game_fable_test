@@ -1,9 +1,11 @@
 /**
  * Dialogue runner. ARCHITECTURE.md §5.6. Node graph walk: variant text, conditional choices, rolled
  * skill checks (deterministic across reloads — the roll is cached in quest vars under the pseudo-quest
- * id `_dialogue`, keyed `dialogueId:nodeId`), `{player}`/`{playerFamily}`/`{origin}`/`{time}` substitution.
- * When no UI is registered, the runner auto-picks the first enabled choice after logging the node text
- * with `console.info`, so quests can be driven headless (harness, tests).
+ * id `_dialogue`, keyed `dialogueId:nodeId:choiceIndex[:speakerEntity]` — see `checkKey`),
+ * `{player}`/`{playerFamily}`/`{origin}`/`{time}` substitution. Requests the `dialogue` game state on
+ * entry and `explore` on exit (ARCHITECTURE.md §4), always, even on an early return. When no UI is
+ * registered, the runner auto-picks the first enabled choice after logging the node text with
+ * `console.info`, so quests can be driven headless (harness, tests).
  */
 import type { EntityId } from '@core/ecs';
 import type { DialogueChoice, DialogueDef, DialogueNode } from '@core/schemas';
@@ -30,6 +32,8 @@ export interface DialogueRuntime extends Runtime {
   rollD20(): number;
   ui(): DialogueUiHandle | undefined;
   emitDialogueEvent(event: 'dialogue-started' | 'dialogue-ended', id: string): void;
+  /** ARCHITECTURE.md §4 state machine: dialogue runs in the `dialogue` state, camera framing the speaker. */
+  requestState(state: string): void;
 }
 
 const CHECK_VARS_QUEST = '_dialogue';
@@ -41,8 +45,23 @@ export function computeCheckOdds(check: { skill: string; dc: number }, rt: Dialo
   return Math.round((successes / 20) * 100);
 }
 
-function resolveCheck(dialogueId: string, nodeId: string, check: { skill: string; dc: number }, rt: DialogueRuntime): boolean {
-  const key = `${dialogueId}:${nodeId}`;
+/**
+ * Cache key for a rolled choice: `dialogueId:nodeId:choiceIndex`, plus the talking entity when known.
+ * Critic wave3-quest.md #7/#8: keying only by `dialogueId:nodeId` let two different checks *on the same
+ * node* (e.g. a stealth choice and a speech choice) share one cached result, and let one generic-NPC
+ * roll (e.g. `dlg.generic.toll-collector`) decide the outcome for every instance of that archetype in
+ * the game. `choiceIndex` fixes the first; folding in `speakerEntity` (when the dialogue was opened
+ * against a specific world entity, as exploration does for generic crowd NPCs) fixes the second, since
+ * two different toll-collectors are two different entities.
+ */
+function checkKey(dialogueId: string, nodeId: string, choiceIndex: number, speakerEntity?: EntityId): string {
+  return speakerEntity !== undefined ? `${dialogueId}:${nodeId}:${choiceIndex}:${speakerEntity}` : `${dialogueId}:${nodeId}:${choiceIndex}`;
+}
+
+function resolveCheck(
+  dialogueId: string, nodeId: string, choiceIndex: number, check: { skill: string; dc: number }, rt: DialogueRuntime, speakerEntity?: EntityId,
+): boolean {
+  const key = checkKey(dialogueId, nodeId, choiceIndex, speakerEntity);
   const cached = rt.getVar(CHECK_VARS_QUEST, key);
   if (typeof cached === 'boolean') return cached;
   const bonus = Math.floor(rt.getSkillLevel(check.skill) / 10) + rt.skillAttrMod(check.skill);
@@ -52,10 +71,14 @@ function resolveCheck(dialogueId: string, nodeId: string, check: { skill: string
   return success;
 }
 
-function resolveRoot(def: DialogueDef, rt: DialogueRuntime): string {
+function resolveRoot(def: DialogueDef, rt: DialogueRuntime, dialogueId: string): string {
   if (typeof def.root === 'string') return def.root;
   for (const entry of def.root) if (evaluateCondition(entry.condition, rt)) return entry.node;
-  return def.root.length ? def.root[def.root.length - 1].node : '';
+  // Critic wave3-quest.md #9: silently falling back to the *last* listed entry made an unrelated
+  // chapter's node play (e.g. Arnold von Melchtal's ch2 line in the 1291 prologue). Warn and end
+  // instead — a missing root condition is a content bug that should be visible, not papered over.
+  console.warn(`[dialogue] ${dialogueId}: no root condition matched and no fallback node is defined`);
+  return '';
 }
 
 function resolveText(node: DialogueNode, rt: DialogueRuntime): string {
@@ -88,39 +111,45 @@ function resolveSpeakerPortrait(node: DialogueNode, rt: DialogueRuntime): string
   return rt.npcPortrait(node.speaker);
 }
 
-interface ShownChoice { c: DialogueChoice; enabled: boolean }
+interface ShownChoice { c: DialogueChoice; enabled: boolean; originalIndex: number }
 
-function buildChoiceViews(node: DialogueNode, dialogueId: string, rt: DialogueRuntime): ShownChoice[] {
+function buildChoiceViews(node: DialogueNode, rt: DialogueRuntime): ShownChoice[] {
   const out: ShownChoice[] = [];
-  for (const c of node.choices ?? []) {
+  (node.choices ?? []).forEach((c, originalIndex) => {
     const enabled = evaluateCondition(c.condition, rt);
-    if (enabled || c.showDisabled) out.push({ c, enabled });
-  }
+    if (enabled || c.showDisabled) out.push({ c, enabled, originalIndex });
+  });
   return out;
 }
 
-export async function runDialogue(dialogueId: string, rt: DialogueRuntime, speakerEntity?: EntityId): Promise<DialogueOutcome> {
+export async function runDialogue(
+  dialogueId: string, rt: DialogueRuntime, speakerEntity?: EntityId, questId?: string,
+): Promise<DialogueOutcome> {
   const def = rt.getDialogueDef(dialogueId);
   if (!def) {
     console.warn(`[dialogue] unknown dialogue "${dialogueId}"`);
     return { ended: true, lastNode: '', effectsRun: 0 };
   }
+  // ARCHITECTURE.md §4: explore ⇄ dialogue. Always paired with requestState('explore') below, however
+  // the loop exits (normal end, missing node, disabled pick) — see the `finally`.
+  rt.requestState('dialogue');
   rt.emitDialogueEvent('dialogue-started', dialogueId);
-  let nodeId = resolveRoot(def, rt);
+  let nodeId = resolveRoot(def, rt, dialogueId);
   let lastNode = nodeId;
   let effectsRun = 0;
   const ui = rt.ui();
 
+  try {
   while (true) {
     const node = def.nodes[nodeId];
     if (!node) {
-      console.warn(`[dialogue] ${dialogueId}: missing node "${nodeId}"`);
+      if (nodeId) console.warn(`[dialogue] ${dialogueId}: missing node "${nodeId}"`);
       break;
     }
     lastNode = nodeId;
     const text = substitute(resolveText(node, rt), rt);
     if (node.effects) {
-      await runEffects(node.effects, rt);
+      await runEffects(node.effects, rt, questId);
       effectsRun += node.effects.length;
     }
     const speakerName = resolveSpeakerName(node, rt, speakerEntity);
@@ -140,7 +169,7 @@ export async function runDialogue(dialogueId: string, rt: DialogueRuntime, speak
       break;
     }
 
-    const shown = buildChoiceViews(node, dialogueId, rt);
+    const shown = buildChoiceViews(node, rt);
     const views = shown.map(({ c, enabled }) => ({
       text: c.text,
       enabled,
@@ -159,11 +188,11 @@ export async function runDialogue(dialogueId: string, rt: DialogueRuntime, speak
     if (!chosen || !chosen.enabled) break;
 
     if (chosen.c.effects) {
-      await runEffects(chosen.c.effects, rt);
+      await runEffects(chosen.c.effects, rt, questId);
       effectsRun += chosen.c.effects.length;
     }
     if (chosen.c.check) {
-      const success = resolveCheck(dialogueId, nodeId, chosen.c.check, rt);
+      const success = resolveCheck(dialogueId, nodeId, chosen.originalIndex, chosen.c.check, rt, speakerEntity);
       if (success) {
         if (chosen.c.next) {
           nodeId = chosen.c.next;
@@ -181,7 +210,10 @@ export async function runDialogue(dialogueId: string, rt: DialogueRuntime, speak
     }
     break;
   }
+  } finally {
+    rt.emitDialogueEvent('dialogue-ended', dialogueId);
+    rt.requestState('explore');
+  }
 
-  rt.emitDialogueEvent('dialogue-ended', dialogueId);
   return { ended: true, lastNode, effectsRun };
 }

@@ -7,6 +7,11 @@ export const muster1315: QuestDef = {
   description: 'A year of readiness: strengthen the letzi at Sattel, recruit, scout Leopold\'s muster at Zug, and weigh the Hünenberg warning.',
   stages: [
     {
+      id: 'travel-sattel', journal: 'A year of readiness begins. The letzi at Sattel needs raising before the work becomes impossible in the snow.',
+      marker: 'poi.sattel-letzi', objectiveText: 'Make for the letzi at Sattel.',
+      advanceWhen: [{ cond: { discovered: 'poi.sattel-letzi' }, to: 'letzi-craft' }],
+    },
+    {
       id: 'letzi-craft', journal: 'The letzi wall at Sattel must be raised before the snow makes the work impossible.',
       marker: 'poi.sattel-letzi', objectiveText: 'Strengthen the letzi at Sattel.',
       onEnter: [{ dialogue: 'dlg.muster-letzi' }],
@@ -17,7 +22,12 @@ export const muster1315: QuestDef = {
       onEnter: [{ dialogue: 'dlg.muster-recruit' }],
     },
     {
-      id: 'scout-zug', journal: "Duke Leopold's column musters at Zug — someone must see how many they are.",
+      id: 'travel-zug', journal: "Word says Duke Leopold's column is mustering at Zug — someone must see how many they are.",
+      marker: 'poi.zug', objectiveText: 'Make for Zug.',
+      advanceWhen: [{ cond: { discovered: 'poi.zug' }, to: 'scout-zug' }],
+    },
+    {
+      id: 'scout-zug', journal: "Duke Leopold's column musters at Zug.",
       marker: 'poi.zug', objectiveText: 'Scout the Habsburg muster at Zug.',
       onEnter: [{ dialogue: 'dlg.muster-scout' }],
     },

@@ -49,6 +49,7 @@ function fakeRt(opts: Options): DialogueRuntime & { effectsLog: string[] } {
     rollD20: () => (opts.rolls ? opts.rolls[Math.min(rollIndex++, opts.rolls.length - 1)] : 10),
     ui: () => opts.ui,
     emitDialogueEvent: () => {},
+    requestState: () => {},
   };
   return rt;
 }
@@ -177,6 +178,70 @@ describe('runDialogue', () => {
     expect(outcome.lastNode).toBe('n');
     expect(infoSpy).toHaveBeenCalled();
     infoSpy.mockRestore();
+  });
+
+  it('critic wave3-quest.md #7/#8: two different checks on the same node get independent cached rolls', async () => {
+    const dialogues: Record<string, DialogueDef> = {
+      'dlg.test': {
+        id: 'dlg.test', historical: 'invented', note: 'x', root: 'n',
+        nodes: {
+          n: {
+            speaker: 'narrator', text: 'Pick a way past.',
+            choices: [
+              { text: 'stealth', check: { skill: 'stealth', dc: 15, fail: 'stealth-fail' }, next: 'stealth-ok' },
+              { text: 'speech', check: { skill: 'speech', dc: 15, fail: 'speech-fail' }, next: 'speech-ok' },
+            ],
+          },
+          'stealth-ok': { speaker: 'narrator', text: 'stealth ok', end: true },
+          'stealth-fail': { speaker: 'narrator', text: 'stealth fail', end: true },
+          'speech-ok': { speaker: 'narrator', text: 'speech ok', end: true },
+          'speech-fail': { speaker: 'narrator', text: 'speech fail', end: true },
+        },
+      },
+    };
+    // Both choices roll 20 (always succeeds); the point is the cache *keys* don't collide, not the roll.
+    const shownTexts: string[] = [];
+    const ui: DialogueUiHandle = {
+      show: async (n) => { shownTexts.push(n.text); return n.choices.length ? 0 : 0; },
+      hide: () => {},
+    };
+    const rt = fakeRt({ dialogues, ui, rolls: [20] });
+    await runDialogue('dlg.test', rt); // picks 'stealth' (index 0), caches dlg.test:n:0
+    // Force choice 1 ('speech') by picking index 1 this time, with a fresh runtime sharing the same vars.
+    const sharedVars: Record<string, Record<string, unknown>> = {};
+    const rt1 = fakeRt({ dialogues, ui, rolls: [2], vars: sharedVars }); // would FAIL speech at dc15 if rolled fresh
+    let picked1 = '';
+    ui.show = async (n) => { picked1 = n.text; return n.choices.length ? 0 : 0; }; // stealth again -> caches success
+    await runDialogue('dlg.test', rt1);
+    const rt2 = fakeRt({ dialogues, ui, rolls: [2], vars: sharedVars }); // speech: fresh roll of 2 -> should fail (dc15)
+    let picked2 = '';
+    ui.show = async (n) => { picked2 = n.text; return n.choices.length > 1 ? 1 : 0; };
+    await runDialogue('dlg.test', rt2);
+    expect(picked2).toBe('speech fail'); // independent from the cached stealth-success at choice 0
+  });
+
+  it('critic wave3-quest.md #7: generic dialogues (many NPC instances) cache per speakerEntity, not globally', async () => {
+    const dialogues: Record<string, DialogueDef> = {
+      'dlg.generic.toll-collector': {
+        id: 'dlg.generic.toll-collector', historical: 'invented', note: 'x', root: 'n',
+        nodes: {
+          n: { speaker: 'narrator', text: 'Pay?', choices: [{ text: 'talk your way past', check: { skill: 'speech', dc: 15, fail: 'fail' }, next: 'ok' }] },
+          ok: { speaker: 'narrator', text: 'ok', end: true },
+          fail: { speaker: 'narrator', text: 'fail', end: true },
+        },
+      },
+    };
+    const sharedVars: Record<string, Record<string, unknown>> = {};
+    let shown = '';
+    const ui: DialogueUiHandle = { show: async (n) => { shown = n.text; return 0; }, hide: () => {} };
+    // Entity 1: rolls a 20 -> succeeds and caches success under its own entity id.
+    const rtA = fakeRt({ dialogues, ui, vars: sharedVars, rolls: [20] });
+    await runDialogue('dlg.generic.toll-collector', rtA, 101);
+    expect(shown).toBe('ok');
+    // Entity 2 (a *different* toll collector instance): rolls a 1 -> must fail on its own, not inherit entity 1's cached success.
+    const rtB = fakeRt({ dialogues, ui, vars: sharedVars, rolls: [1] });
+    await runDialogue('dlg.generic.toll-collector', rtB, 202);
+    expect(shown).toBe('fail');
   });
 
   it('an unknown dialogue id logs a warning and returns a closed outcome', async () => {

@@ -19,7 +19,7 @@ export interface QuestRuntimeState {
 
 export interface QuestMachineDeps {
   getQuestDef(id: string): QuestDef | undefined;
-  runEffects(effects: Effect[] | undefined): Promise<void>;
+  runEffects(effects: Effect[] | undefined, questId?: string): Promise<void>;
   now(): number;
   poiPosition(id: string): { x: number; z: number } | null;
   emit(event: string, ...args: unknown[]): void;
@@ -89,7 +89,7 @@ export class QuestMachine {
     const q = this.ensure(id);
     q.started = this.deps.now();
     this.deps.emit('quest-started', id);
-    await this.deps.runEffects(def.onStart);
+    await this.deps.runEffects(def.onStart, id);
     if (def.stages.length) await this.enterStage(id, def.stages[0].id);
   }
 
@@ -97,7 +97,6 @@ export class QuestMachine {
     if (!this.isStarted(id) || this.isDone(id)) return;
     if (this.stage(id) === stageId) return;
     await this.enterStage(id, stageId);
-    this.deps.emit('quest-advanced', id, stageId);
   }
 
   private async enterStage(id: string, stageId: string): Promise<void> {
@@ -105,12 +104,15 @@ export class QuestMachine {
     const stage = def?.stages.find((s) => s.id === stageId);
     const q = this.ensure(id);
     q.stage = stageId;
+    // Pre-order: listeners (HUD objective, journal, save thumbnails) must see the stage change
+    // before onEnter's own effects (which may re-enter checkAdvance, start other quests, etc.) run.
+    this.deps.emit('quest-advanced', id, stageId);
     if (!stage) {
       console.warn(`[quest] ${id}: unknown stage "${stageId}"`);
       return;
     }
     this.addJournal(stage.journal, id);
-    await this.deps.runEffects(stage.onEnter);
+    await this.deps.runEffects(stage.onEnter, id);
   }
 
   async complete(id: string): Promise<void> {
@@ -119,7 +121,7 @@ export class QuestMachine {
     q.done = true;
     this.deps.emit('quest-completed', id);
     const def = this.deps.getQuestDef(id);
-    await this.deps.runEffects(def?.onComplete);
+    await this.deps.runEffects(def?.onComplete, id);
   }
 
   async fail(id: string): Promise<void> {
@@ -129,7 +131,12 @@ export class QuestMachine {
     q.failed = true;
     this.deps.emit('quest-failed', id);
     const def = this.deps.getQuestDef(id);
-    await this.deps.runEffects(def?.onFail);
+    await this.deps.runEffects(def?.onFail, id);
+  }
+
+  /** Clears a quest's runtime state entirely so it can be `start()`ed again (retry loops). */
+  reset(id: string): void {
+    this.quests.delete(id);
   }
 
   /** Cheap: only started+active quests, only their current stage's `advanceWhen`. */
@@ -141,7 +148,7 @@ export class QuestMachine {
       if (!stage?.advanceWhen) continue;
       for (const rule of stage.advanceWhen) {
         if (evaluateCondition(rule.cond, rt)) {
-          void this.advance(id, rule.to);
+          this.advance(id, rule.to).catch((e) => console.error(`[quest] advanceWhen ${id} -> ${rule.to} threw`, e));
           break;
         }
       }

@@ -2,7 +2,7 @@
 import type { Effect } from '@core/dsl';
 import type { Runtime } from './runtime';
 
-export async function runEffect(effect: Effect, rt: Runtime): Promise<void> {
+export async function runEffect(effect: Effect, rt: Runtime, questId?: string): Promise<void> {
   if ('setFlag' in effect) {
     const [k, v] = effect.setFlag;
     rt.setFlag(k, v);
@@ -43,7 +43,19 @@ export async function runEffect(effect: Effect, rt: Runtime): Promise<void> {
     return;
   }
   if ('encounter' in effect) {
+    // Issue 1 (critic wave3-quest.md #1): clear BEFORE awaiting, and key by the current quest, so a
+    // stage's advanceWhen can never read a stale 'win' left over from an earlier or unrelated fight
+    // while this one is still in flight. '_system.lastCombat.*' is kept too, for content/tests that
+    // don't have quest context (e.g. a bare `runEffects` call outside any quest stage).
+    const key = questId ?? '_system';
+    rt.setVar(key, 'combat.outcome', undefined);
+    rt.setVar(key, 'combat.dead', undefined);
+    rt.setVar(key, 'combat.downed', undefined);
+    rt.setVar('_system', 'lastCombat.outcome', undefined);
     const result = await rt.runEncounter(effect.encounter);
+    rt.setVar(key, 'combat.outcome', result.outcome);
+    rt.setVar(key, 'combat.dead', result.dead.length);
+    rt.setVar(key, 'combat.downed', result.downed.length);
     rt.setVar('_system', 'lastCombat.outcome', result.outcome);
     rt.setVar('_system', 'lastCombat.dead', result.dead.length);
     rt.setVar('_system', 'lastCombat.downed', result.downed.length);
@@ -62,7 +74,7 @@ export async function runEffect(effect: Effect, rt: Runtime): Promise<void> {
     return;
   }
   if ('cutscene' in effect) {
-    await rt.runCutsceneById(effect.cutscene);
+    await rt.runCutsceneById(effect.cutscene, questId);
     return;
   }
   if ('advanceTime' in effect) {
@@ -100,7 +112,7 @@ export async function runEffect(effect: Effect, rt: Runtime): Promise<void> {
     return;
   }
   if ('dialogue' in effect) {
-    await rt.runDialogueById(effect.dialogue);
+    await rt.runDialogueById(effect.dialogue, questId);
     return;
   }
   if ('rest' in effect) {
@@ -120,7 +132,7 @@ export async function runEffect(effect: Effect, rt: Runtime): Promise<void> {
   void _exhaustive;
 }
 
-export async function runEffects(effects: Effect[] | undefined, rt: Runtime): Promise<void> {
+export async function runEffects(effects: Effect[] | undefined, rt: Runtime, questId?: string): Promise<void> {
   if (!effects) return;
-  for (const e of effects) await runEffect(e, rt);
+  for (const e of effects) await runEffect(e, rt, questId);
 }

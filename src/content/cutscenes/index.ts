@@ -29,11 +29,11 @@ export const cutscenes: CutsceneDef[] = [
     steps: [
       { camera: { pos: [-150, 15, -140], lookAt: [-186, 10, -74] }, time: 22, weather: 'clear', letterbox: true },
       { caption: 'By torchlight on the Rütli meadow, the men set their seals to the letter.', seconds: 5 },
-      { caption: 'In time the clerks will render its sense in German: mutual aid against any who does violence within the valleys; no judge who is not of the land and dwelling in it; disputes settled by the sworn among them.', seconds: 6 },
+      { caption: 'In time the clerks will render its sense in German: mutual aid against any who does violence within the valleys; no judge who is not of the land and dwelling in it, nor one who has bought his office; disputes settled by the sworn among them.', seconds: 6 },
       {
         effects: [
           { giveItem: ['item.bundesbrief-copy', 1] },
-          { journal: 'The letter was sealed in the first days of August: mutual aid, no foreign judges, arbitration between the Länder — renewing, so the old men said, an alliance older still.' },
+          { journal: 'The letter was sealed in the first days of August: mutual aid, no judge who is not of the land and dwelling in it, nor one who has bought his office, arbitration between the Länder — renewing, so the old men said, an alliance older still.' },
           { rep: ['uri', 5] }, { rep: ['schwyz', 5] }, { rep: ['unterwalden', 5] },
           { setChapter: 'ch1-1307' },
           { quest: ['complete', 'quest.der-eid'] },
@@ -55,7 +55,7 @@ export const cutscenes: CutsceneDef[] = [
           { setFlag: ['apfelschuss-done', true] },
           { rep: ['habsburg', -10] },
           { journal: 'As it is told in Uri: the shaft cleaved the apple clean, and the boy never flinched.' },
-          { quest: ['advance', 'quest.der-hut', 'tellsplatte'] },
+          { quest: ['advance', 'quest.der-hut', 'travel-tellsplatte'] },
         ],
       },
       { fade: 'clear', seconds: 1 },
@@ -71,7 +71,11 @@ export const cutscenes: CutsceneDef[] = [
       {
         effects: [
           { journal: "As it is told: Tell sprang from the boat at the flat rock below Sisikon and was gone into the Axen woods before Gessler's men could land." },
-          { quest: ['advance', 'quest.der-hut', 'hohle-gasse'] },
+          // Critic wave3-quest.md #6: §5/§10 makes Tell a Chapter 1 companion — two dialogue variants
+          // already assume `hasCompanion:'npc.wilhelm-tell'`; he was never actually added. He leaves the
+          // party again at `quest.der-hut`'s `epilogue` stage.
+          { addCompanion: 'npc.wilhelm-tell' },
+          { quest: ['advance', 'quest.der-hut', 'travel-hohle-gasse'] },
         ],
       },
       { fade: 'clear', seconds: 1 },
@@ -84,7 +88,10 @@ export const cutscenes: CutsceneDef[] = [
       { camera: { pos: [400, 40, -3200], lookAt: [338, 10, -3336] }, time: 9, weather: 'snow', letterbox: true },
       { caption: 'The column breaks against the slope and the lake takes the rest. Duke Leopold is away toward Zug before the rout is done.', seconds: 6 },
       {
+        // Critic wave3-quest.md #5: the clock was still reading the muster year (Jan 1314) when this
+        // journal entry claimed 15 November 1315 — set it to the actual battle date first.
         effects: [
+          { setTime: [1315, 11, 15, 15] },
           { journal: '15 November, 1315: the column from Zug is broken between the lake and the Figlenfluh, as the chroniclers will tell it within a generation.' },
           { rep: ['habsburg', -15] },
           { quest: ['complete', 'quest.morgarten'] },
@@ -101,7 +108,9 @@ export const cutscenes: CutsceneDef[] = [
       { camera: { pos: [0, 15, -780], lookAt: [-68, 2, -741] }, time: 10, weather: 'clear', letterbox: true },
       { caption: 'At Brunnen, on the ninth of December, the Bundesbrief is read again — this time in German, for every man on the quay to understand.', seconds: 6 },
       {
+        // Critic wave3-quest.md #5: same fix — the clock otherwise still reads mid-November (Morgarten).
         effects: [
+          { setTime: [1315, 12, 9, 10] },
           { journal: "The Pact of Brunnen renews the covenant of 1291 in the German tongue. Here, for now, the tale of the Eidgenossen's first years ends." },
           { quest: ['complete', 'quest.brunnen-1315'] },
           { end: 'act1' },

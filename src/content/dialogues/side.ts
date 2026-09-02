@@ -109,7 +109,7 @@ export const sideDialogues: DialogueDef[] = [
     root: 'entry',
     nodes: {
       entry: {
-        speaker: 'npc.burkhard-wyrsch', text: '"We\'re holding a shoot by the lime tree come market day, {player} — every man in Uri with a crossbow worth the name is entering. Care to put your aim where your boasting is?"',
+        speaker: 'npc.burkhard-wyrsch', text: '"We\'re holding a shoot by the lime tree come market day, {player} — every man in Uri with a crossbow worth the name is entering. Let\'s see if your aim matches your talk."',
         choices: [{ text: 'Enter the contest.', next: 'enter' }],
       },
       enter: { speaker: 'npc.burkhard-wyrsch', text: '"Good. The mark\'s at eighty paces, same distance they say Tell shot from — though nobody\'s foolish enough to put an apple on a head for this one."', effects: [{ quest: ['advance', 'quest.schuetzenkoenig', 'contest'] }], end: true },

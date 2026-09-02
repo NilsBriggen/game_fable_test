@@ -12,13 +12,25 @@ export const marchenstreit: QuestDef = {
       onEnter: [{ dialogue: 'dlg.marchenstreit-rat' }],
     },
     {
+      id: 'travel-einsiedeln', journal: 'Word carries ahead of you, toward Einsiedeln.',
+      marker: 'poi.einsiedeln', objectiveText: 'Make for Einsiedeln abbey.',
+      advanceWhen: [
+        { cond: { all: [{ discovered: 'poi.einsiedeln' }, { var: ['quest.marchenstreit', 'restraint', false] }] }, to: 'raid' },
+        { cond: { all: [{ discovered: 'poi.einsiedeln' }, { var: ['quest.marchenstreit', 'restraint', true] }] }, to: 'speech-path' },
+      ],
+    },
+    {
       id: 'raid', journal: 'The raiding party moves on Einsiedeln abbey before dawn — plunder, and monks dragged back to Schwyz.',
       marker: 'poi.einsiedeln', objectiveText: 'The raid on Einsiedeln abbey.',
-      onEnter: [{ encounter: 'enc.einsiedeln-gate' }, { rep: ['einsiedeln', -20] }],
+      // Anselm (companion pool, LORE.md §5/§10) is torn on this raid; `dlg.bruder-anselm`'s
+      // `conflicted` variant already assumes he is present for it. Critic wave3-quest.md #6/§6 step 10:
+      // restraint decides whether he stays — a brutal raid he did not choose costs the party his company.
+      // `removeCompanion` on someone who was never a member is a safe no-op, so this is unconditional.
+      onEnter: [{ removeCompanion: 'npc.bruder-anselm' }, { encounter: 'enc.einsiedeln-gate' }, { rep: ['einsiedeln', -20] }],
       advanceWhen: [
-        { cond: { var: ['_system', 'lastCombat.outcome', 'win'] }, to: 'aftermath' },
-        { cond: { var: ['_system', 'lastCombat.outcome', 'fled'] }, to: 'aftermath' },
-        { cond: { var: ['_system', 'lastCombat.outcome', 'lose'] }, to: 'aftermath' },
+        { cond: { var: ['quest.marchenstreit', 'combat.outcome', 'win'] }, to: 'aftermath' },
+        { cond: { var: ['quest.marchenstreit', 'combat.outcome', 'fled'] }, to: 'aftermath' },
+        { cond: { var: ['quest.marchenstreit', 'combat.outcome', 'lose'] }, to: 'aftermath' },
       ],
     },
     {

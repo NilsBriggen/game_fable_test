@@ -28,7 +28,7 @@ export interface CutsceneRuntime extends Runtime {
   requestState(state: string): void;
 }
 
-async function runStep(id: string, step: CutsceneStep, rt: CutsceneRuntime): Promise<void> {
+async function runStep(id: string, step: CutsceneStep, rt: CutsceneRuntime, questId?: string): Promise<void> {
   const ui = rt.cutsceneUi();
   const rig = rt.cameraRig();
   if (step.time !== undefined) rt.setWorldTime(step.time);
@@ -42,11 +42,22 @@ async function runStep(id: string, step: CutsceneStep, rt: CutsceneRuntime): Pro
     if (ui) await ui.caption(step.caption, step.seconds ?? 3);
     else console.info(`[cutscene:${id}] ${step.caption}`);
   }
-  if (step.dialogue) await rt.runDialogueById(step.dialogue);
-  if (step.effects) await runEffects(step.effects, rt);
+  // Critic wave3-quest.md #2: a cutscene step must never itself pop a dialogue open — content should
+  // not use this field for Act 1; kept only so a future scripted conversation *inside* a scene (both
+  // parties already framed by the cutscene camera) has a place to hook in without a schema change.
+  if (step.dialogue) await rt.runDialogueById(step.dialogue, questId);
+  if (step.effects) await runEffects(step.effects, rt, questId);
 }
 
-export async function runCutscene(cutsceneId: string, rt: CutsceneRuntime): Promise<void> {
+/**
+ * Runs a cutscene's steps to completion (camera/letterbox/captions/effects), then returns to `explore`.
+ * `questId`, when known, is threaded into every step's effects so nested `{encounter}`/`{quest}` calls
+ * key their state correctly (see effects.ts). `QuestServiceImpl.runCutscene` wraps this call with the
+ * cutscene-nesting guard (critic wave3-quest.md #2): any `{quest: [...]}` effect run from inside a
+ * cutscene's steps is deferred until *this* cutscene (and any cutscene it is itself nested under) has
+ * fully finished all of its own steps — so a follow-on quest's dialogue can never open mid-scene.
+ */
+export async function runCutscene(cutsceneId: string, rt: CutsceneRuntime, questId?: string): Promise<void> {
   const def = rt.getCutsceneDef(cutsceneId);
   if (!def) {
     console.warn(`[cutscene] unknown cutscene "${cutsceneId}"`);
@@ -57,8 +68,11 @@ export async function runCutscene(cutsceneId: string, rt: CutsceneRuntime): Prom
   const ui = rt.cutsceneUi();
   rig?.setMode('cutscene');
   ui?.letterbox(true);
-  for (const step of def.steps) await runStep(cutsceneId, step, rt);
-  ui?.letterbox(false);
-  rig?.setMode('follow');
-  rt.requestState('explore');
+  try {
+    for (const step of def.steps) await runStep(cutsceneId, step, rt, questId);
+  } finally {
+    ui?.letterbox(false);
+    rig?.setMode('follow');
+    rt.requestState('explore');
+  }
 }

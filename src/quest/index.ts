@@ -42,18 +42,33 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   private repMap = new Map<FactionId, number>();
   private flags = new Map<string, unknown>();
   private chapterId = 'prologue-1291';
+  private chapterSet = false;
   private tickAcc = 0;
   private activeDialogueId = '';
+  /** >0 while a `runCutscene()` call (possibly several nested) is mid-flight. */
+  private cutsceneDepth = 0;
+  /** Effects queued by `runEffects` while `cutsceneDepth > 0`; drained once the outermost cutscene ends. */
+  private deferredEffects: Array<() => Promise<void>> = [];
 
   constructor(private readonly ctx: GameContext) {
     const deps: QuestMachineDeps = {
       getQuestDef: (id) => ctx.content.quests.get(id),
-      runEffects: (effects) => this.runEffects(effects),
+      runEffects: (effects, questId) => this.runEffects(effects, questId),
       now: () => ctx.clock.time,
       poiPosition: (id) => ctx.services.tryGet('exploration')?.poiPosition(id) ?? null,
       emit: (event, ...args) => { (this.bus.emit as (e: string, ...a: unknown[]) => void)(event, ...args); },
     };
     this.machine = new QuestMachine(deps);
+    // Critic wave3-quest.md #7: a lost Morgarten must be recoverable, not a dead end — send the player
+    // back through the whole muster-year hub rather than an instant re-fight.
+    this.bus.on('quest-failed', (id) => {
+      if (id !== 'quest.morgarten') return;
+      // Reset quest.morgarten too — otherwise it stays permanently `done` (failed) and the retried
+      // muster hub's own `{quest:['start','quest.morgarten']}` effect silently no-ops.
+      this.machine.reset('quest.morgarten');
+      this.machine.reset('quest.muster-1315');
+      this.questOp('start', 'quest.muster-1315').catch((e) => console.error('[quest] retry-from-muster failed', e));
+    });
   }
 
   // ---------------------------------------------------------------- helpers
@@ -155,7 +170,12 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     if (p != null) this.ctx.services.tryGet('party')?.grantSkillXp(p, skill, amount);
   }
   async runEncounter(id: string): Promise<CombatResult> {
-    return this.ctx.services.get('combat').start(id);
+    const combat = this.ctx.services.tryGet('combat');
+    if (!combat) {
+      console.warn(`[quest] runEncounter: no combat service registered — resolving "${id}" as a default win`);
+      return { outcome: 'win', rounds: 0, downed: [], dead: [], xp: {}, loot: [], log: [] };
+    }
+    return combat.start(id);
   }
   teleport(poiId: string): void {
     const p = this.playerEntity();
@@ -178,7 +198,7 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     const entity = this.findNpcEntity(npcId);
     if (entity != null) this.ctx.services.tryGet('party')?.removeMember(entity);
   }
-  async runCutsceneById(id: string): Promise<void> { return this.runCutscene(id); }
+  async runCutsceneById(id: string, questId?: string): Promise<void> { return this.runCutscene(id, questId); }
   advanceTime(hours: number): void { this.ctx.clock.advanceHours(hours); }
   async setChapterAsync(chapter: string): Promise<void> { return this.setChapter(chapter); }
   setTimeExact(y: number, m: number, d: number, h?: number): void { this.ctx.clock.set(gameTimeFor(y, m, d, h ?? 0)); }
@@ -204,7 +224,7 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     if (party?.isMember(entity)) party.removeMember(entity);
     this.ctx.world.destroy(entity);
   }
-  async runDialogueById(id: string): Promise<void> { await this.runDialogue(id); }
+  async runDialogueById(id: string, questId?: string): Promise<void> { await this.runDialogue(id, undefined, questId); }
   restParty(hours: number): void { this.ctx.services.tryGet('party')?.rest(hours); }
   setMusic(id: string): void { console.info(`[music] ${id}`); }
   endAct(id: string): void {
@@ -256,10 +276,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   requestState(state: string): void { this.ctx.events.emit('request-state', state); }
 
   // ---------------------------------------------------------------- QuestService (public API)
-  start(questId: string): void { void this.questOp('start', questId); }
-  advance(questId: string, stageId: string): void { void this.questOp('advance', questId, stageId); }
-  complete(questId: string): void { void this.questOp('complete', questId); }
-  fail(questId: string): void { void this.questOp('fail', questId); }
+  start(questId: string): void { this.questOp('start', questId).catch((e) => console.error(`[quest] start(${questId}) failed`, e)); }
+  advance(questId: string, stageId: string): void { this.questOp('advance', questId, stageId).catch((e) => console.error(`[quest] advance(${questId},${stageId}) failed`, e)); }
+  complete(questId: string): void { this.questOp('complete', questId).catch((e) => console.error(`[quest] complete(${questId}) failed`, e)); }
+  fail(questId: string): void { this.questOp('fail', questId).catch((e) => console.error(`[quest] fail(${questId}) failed`, e)); }
   stage(questId: string): string | null { return this.machine.stage(questId); }
   reputation(faction: string): number { return this.getRep(faction); }
   reputationBand(faction: string) { return repBand(this.getRep(faction)); }
@@ -270,18 +290,53 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   }
   factionDef(id: string): FactionDef | undefined { return this.ctx.content.factions.get(id); }
   evaluate(cond: QuestCondition | undefined): boolean { return evaluateCondition(cond, this); }
-  async runEffects(effects: Effect[] | undefined): Promise<void> { return runEffectsFn(effects, this); }
-  async runDialogue(dialogueId: string, speakerEntity?: EntityId): Promise<DialogueOutcome> {
-    this.activeDialogueId = dialogueId;
-    return runDialogueFn(dialogueId, this, speakerEntity);
+  /**
+   * Critic wave3-quest.md #2: while a cutscene is mid-flight (`cutsceneDepth>0`), any effects run here
+   * (a quest stage's onStart/onEnter/onComplete/onFail, a dialogue node/choice, a cutscene step) are
+   * queued instead of run inline, so a follow-on quest's dialogue/cutscene can never open on top of a
+   * scene that hasn't finished its own steps yet. `runCutscene` drains the queue once the *outermost*
+   * cutscene call returns — see below.
+   */
+  async runEffects(effects: Effect[] | undefined, questId?: string): Promise<void> {
+    if (this.cutsceneDepth > 0) {
+      // Do NOT return a promise tied to the deferred job's completion: whoever called us (a cutscene
+      // step, most likely) must not block waiting for work that is deliberately scheduled for *after*
+      // this very cutscene call returns — that would deadlock (the drain that resolves the job only
+      // runs once the outer runCutscene() call itself has finished awaiting all of its own steps).
+      this.deferredEffects.push(() => runEffectsFn(effects, this, questId).catch((e) => console.error('[quest] deferred effects threw', e)));
+      return;
+    }
+    return runEffectsFn(effects, this, questId);
   }
-  async runCutscene(cutsceneId: string): Promise<void> { return runCutsceneFn(cutsceneId, this); }
+  async runDialogue(dialogueId: string, speakerEntity?: EntityId, questId?: string): Promise<DialogueOutcome> {
+    this.activeDialogueId = dialogueId;
+    return runDialogueFn(dialogueId, this, speakerEntity, questId);
+  }
+  async runCutscene(cutsceneId: string, questId?: string): Promise<void> {
+    this.cutsceneDepth++;
+    try {
+      await runCutsceneFn(cutsceneId, this, questId);
+    } finally {
+      this.cutsceneDepth--;
+    }
+    if (this.cutsceneDepth === 0) {
+      while (this.deferredEffects.length) {
+        const job = this.deferredEffects.shift()!;
+        await job();
+      }
+    }
+  }
   journal(): JournalEntry[] { return this.machine.journalEntries; }
   addJournal(text: string, questId?: string): void { this.machine.addJournal(text, questId); }
   activeQuests() { return this.machine.activeQuests(); }
   chapter(): string { return this.chapterId; }
   async setChapter(chapter: string): Promise<void> {
+    // Critic wave3-quest.md #9: main.ts's newGame() calls setChapter('prologue-1291') and then
+    // exploration.populate(chapter) itself — a second setChapter with the same chapter (or any
+    // accidental double-call) must not re-populate the world or duplicate the chapter journal entry.
+    if (this.chapterSet && chapter === this.chapterId) return;
     this.chapterId = chapter;
+    this.chapterSet = true;
     const start = CHAPTER_START[chapter];
     if (start) this.ctx.clock.set(gameTimeFor(...start));
     this.ctx.services.tryGet('party')?.applyChapter(chapter);

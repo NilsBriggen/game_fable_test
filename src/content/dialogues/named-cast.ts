@@ -22,7 +22,7 @@ export const namedCastDialogues: DialogueDef[] = [
         choices: [{ text: 'The Landsgemeinde is called. You are asked to come.', effects: [{ setFlag: ['stauffacher.summoned', true] }], end: true }, { text: 'Just passing through, Ammann.', end: true }],
       },
       ch1: {
-        speaker: 'npc.werner-stauffacher', text: 'Sixteen years since the Rütli, {player}, and still that hat sits on its pole. Frau Gertrud tells me I brood on it too much.',
+        speaker: 'npc.werner-stauffacher', text: 'Sixteen years since the Rütli, {player}, and still that hat sits on its pole. My own household tells me I brood on it too much.',
         choices: [
           { text: 'What will Schwyz do about it?', next: 'ch1-resolve' },
           { text: 'How fares your house at Steinen?', next: 'ch1-house' },
@@ -30,7 +30,7 @@ export const namedCastDialogues: DialogueDef[] = [
         ],
       },
       'ch1-resolve': { speaker: 'npc.werner-stauffacher', text: 'What we swore on the Rütli, we hold to. When Uri and Unterwalden move, Schwyz will not be found wanting.', next: undefined, end: true },
-      'ch1-house': { speaker: 'npc.werner-stauffacher', text: 'Well enough — though a Vogt\'s clerk came asking after my seal-ring again. They do not forget who signed first.', end: true },
+      'ch1-house': { speaker: 'npc.werner-stauffacher', text: 'Well enough — though a Vogt\'s clerk came asking after the seal of Schwyz again. They do not forget which Land sealed first.', end: true },
       ch2: {
         speaker: 'npc.werner-stauffacher', text: 'Grey in the beard now, {player} of {origin}, and still they call me Ammann. Leopold musters at Zug — I feel it in my knees before I hear it from the scouts.',
         variants: [{ condition: { questStarted: 'quest.morgarten' }, text: 'Hold the slope when the day comes, {player}. I mean to command from the Haufen\'s front rank, not behind it.' }],
@@ -55,8 +55,12 @@ export const namedCastDialogues: DialogueDef[] = [
       },
       'prologue-other': { speaker: 'npc.walter-fuerst', text: 'Altdorf is astir since the news came down from Flüelen. Find the Freiherr, if you\'ve not already — he\'ll want to hear it plainly, not third-hand.', end: true },
       ch1: {
-        speaker: 'npc.walter-fuerst', text: 'My son-in-law keeps his own counsel about that hat on the pole, {player}. I worry for him more than he lets on.',
-        variants: [{ condition: { questStage: ['quest.der-hut', 'altdorf-pole'] }, text: 'Mind how you pass the square today, {player}. The Vogt\'s men are watching close, and I\'d rather not visit you in the tower.' }],
+        speaker: 'npc.walter-fuerst', text: 'My kinsman keeps his own counsel about that hat on the pole, {player}. I worry for him more than he lets on.',
+        variants: [
+          { condition: { questStage: ['quest.der-hut', 'altdorf-pole'] }, text: 'Mind how you pass the square today, {player}. The Vogt\'s men are watching close, and I\'d rather not visit you in the tower.' },
+          { condition: { flag: 'gessler-hat-choice', eq: 'bowed' }, text: 'I heard you bowed to the hat, {player}. No shame in it — a bent knee costs less than a broken one.' },
+          { condition: { flag: 'gessler-hat-choice', eq: 'walked-past' }, text: 'They say you walked that square and talked your own way clear of the guards after, {player}. My kinsman would have liked to see that.' },
+        ],
         end: true,
       },
       ch2: { speaker: 'npc.walter-fuerst', text: 'I am too old for the letzi wall now, but my grandsons are not, and neither are you. Bei Sankt Verena, watch yourself at Sattel.', end: true },
@@ -66,10 +70,17 @@ export const namedCastDialogues: DialogueDef[] = [
   {
     id: 'dlg.arnold-von-melchtal', historical: 'legend', note: 'Wholly L. LORE.md §5.',
     root: [
+      // Critic wave3-quest.md #9: Arnold is spawned in every chapter (npcs.ts) but this dialogue had no
+      // 1291 node, so a broken root fallback made him speak his 1314 Morgarten line in the prologue.
+      { condition: { chapter: 'prologue-1291' }, node: 'prologue' },
       { condition: { chapter: 'ch1-1307' }, node: 'ch1' },
       { condition: { chapter: 'ch2-1314' }, node: 'ch2' },
     ],
     nodes: {
+      prologue: {
+        speaker: 'npc.arnold-von-melchtal', text: 'A young Obwalden herdsman, not yet grown into the man Uri and Schwyz will one day call kinsman of the sworn. "Word is a King has died, {player}," he says. "My father says that changes little for men like us. I am not so sure."',
+        end: true,
+      },
       ch1: {
         speaker: 'npc.arnold-von-melchtal', text: 'My father cannot see the alp he tended his whole life, {player}, because a bailiff\'s man took his eyes for it. Tell me I am wrong to want the Vogt gone.',
         variants: [{ condition: { hasCompanion: 'npc.wilhelm-tell' }, text: 'You keep good company these days — a man who puts a bolt exactly where he means to.' }],
@@ -144,7 +155,15 @@ export const namedCastDialogues: DialogueDef[] = [
       },
       meeting: { speaker: 'npc.werner-von-attinghausen', text: 'There will be. Steinen, or near it — word will reach you. Go carefully, and go quietly; not every ear on the road loves us.', end: true },
       'prologue-other': { speaker: 'npc.werner-von-attinghausen', text: 'Uri answers to no bailiff while I hold the Landammann\'s staff, {player}. That much I intend to keep true.', end: true },
-      ch1: { speaker: 'npc.werner-von-attinghausen', text: 'I counsel patience where Werner Stauffacher counsels the sword, {player}. History may prove either of us right — I only hope it is not too costly finding out.', end: true },
+      ch1: {
+        speaker: 'npc.werner-von-attinghausen', text: 'I counsel patience where Werner Stauffacher counsels the sword, {player}. Which of us is right, the years ahead will show — I only hope the showing costs us little.',
+        variants: [
+          { condition: { flag: 'gessler-hat-choice', eq: 'bowed' }, text: 'Word reached me that you bowed to the hat, {player}. A wise-enough head for a bad season — I do not fault it.' },
+          { condition: { flag: 'gessler-hat-choice', eq: 'watched' }, text: 'They tell me you stood by and watched Tell refuse that hat, {player}, and said nothing yourself. A cautious man\'s way through a dangerous morning.' },
+          { condition: { flag: 'gessler-hat-choice', eq: 'fought' }, text: 'I heard there was steel drawn in the square over that hat, {player}, and your name attached to it. The Vogt will remember it, and so will I.' },
+        ],
+        end: true,
+      },
       ch2: { speaker: 'npc.werner-von-attinghausen', text: 'I am too old now for the letzi wall, but Uri\'s men march regardless, and my blessing goes with them, for what an old man\'s blessing is worth.', end: true },
     },
   },
@@ -172,7 +191,7 @@ export const namedCastDialogues: DialogueDef[] = [
         speaker: 'npc.abt-johannes', text: '"Vater Abt" is a courtesy you still extend me, I notice, even with Schwyz men at my gate.' + ' The March pastures are the abbey\'s by charter, {player} — I did not invent that title, only inherited it.',
         choices: [
           { text: '"Charters can be read more than one way, Vater Abt."', check: { skill: 'speech', dc: 16, fail: 'negotiate-fail' }, next: 'negotiate-success' },
-          { text: 'Say nothing, and let the men behind you speak instead.', end: true },
+          { text: 'Say nothing, and let the men behind you speak instead.', effects: [{ quest: ['advance', 'quest.marchenstreit', 'raid'] }], end: true },
         ],
       },
       'negotiate-success': { speaker: 'npc.abt-johannes', text: 'You argue like a man who has read the Bundesbrief\'s own clause on arbitration. Very well — I will not bar the gate, but this is not forgiveness, only patience.', effects: [{ rep: ['einsiedeln', 10] }, { setVar: ['quest.marchenstreit', 'negotiated', true] }, { quest: ['advance', 'quest.marchenstreit', 'aftermath'] }], end: true },
@@ -210,7 +229,7 @@ export const namedCastDialogues: DialogueDef[] = [
     ],
     nodes: {
       warning: {
-        speaker: 'narrator', text: 'An arrow thuds into the letzi post at dawn, a scrap of parchment bound to the shaft. In Heinrich von Hünenberg\'s hand, unsigned but unmistakable: "Hütet euch am Morgarten, am Tag St. Otmars." Beware at Morgarten, on St Otmar\'s day.',
+        speaker: 'narrator', text: 'An arrow thuds into the letzi post at dawn, a scrap of parchment bound to the shaft. In Heinrich von Hünenberg\'s hand, unsigned but unmistakable: "Hütet euch am Morgarten, am Tag vor St. Otmar." Beware at Morgarten, the day before St Otmar\'s.',
         choices: [
           { text: 'Trust the warning — prepare the ambush at Morgarten in earnest.', effects: [{ setFlag: ['hunenberg-warning', true] }, { rep: ['habsburg', 2] }, { quest: ['advance', 'quest.muster-1315', 'ready'] }], end: true },
           { text: 'Distrust it — it could as easily be a trap.', effects: [{ setFlag: ['hunenberg-warning', false] }, { quest: ['advance', 'quest.muster-1315', 'ready'] }], end: true },
@@ -325,7 +344,7 @@ export const namedCastDialogues: DialogueDef[] = [
   {
     id: 'dlg.ritter-eberhard-von-mulinen', historical: 'invented', note: 'Antagonist lieutenant; Mülinen family H, individual I. Chapter-2-only. LORE.md §5/§10.', root: 'ch2',
     nodes: {
-      ch2: { speaker: 'npc.ritter-eberhard-von-mulinen', text: 'An Aargau knight in the Duke\'s column, plate glinting under a surcoat, eyes the Waldstätte men on the ridgeline the way a hawk eyes a field of mice. He does not speak to peasants.', end: true },
+      ch2: { speaker: 'npc.ritter-eberhard-von-mulinen', text: 'An Aargau knight in the Duke\'s column, a coat of plates glinting under a surcoat, eyes the Waldstätte men on the ridgeline the way a hawk eyes a field of mice. He does not speak to peasants.', end: true },
     },
   },
   // ---------------------------------------------------------------- Vogt-Schreiber Ludwig

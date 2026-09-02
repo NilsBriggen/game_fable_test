@@ -7,7 +7,12 @@ export const brunnen1315: QuestDef = {
   description: 'At Brunnen, the Bundesbrief is renewed — this time in German. Act 1 ends here.',
   stages: [
     {
-      id: 'pact', journal: 'Word goes out to gather at Brunnen for the renewal of the covenant.',
+      id: 'travel-brunnen', journal: 'Word goes out to gather at Brunnen for the renewal of the covenant.',
+      marker: 'poi.brunnen', objectiveText: 'Make for Brunnen.',
+      advanceWhen: [{ cond: { discovered: 'poi.brunnen' }, to: 'pact' }],
+    },
+    {
+      id: 'pact', journal: 'The quay at Brunnen fills for the renewal of the covenant.',
       marker: 'poi.brunnen', objectiveText: 'Attend the Pact of Brunnen.',
       onEnter: [{ cutscene: 'cs.pakt-von-brunnen' }],
     },

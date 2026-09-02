@@ -103,6 +103,29 @@ describe('runEffect / runEffects', () => {
     expect(setVar).toHaveBeenCalledWith('_system', 'lastCombat.outcome', 'win');
   });
 
+  it('critic wave3-quest.md #1: clears the outcome var BEFORE awaiting combat, keyed per quest — a stage watching for a win cannot see a stale value from a still-running fight', async () => {
+    let resolveCombat!: (r: { outcome: string }) => void;
+    const pending = new Promise((resolve) => { resolveCombat = resolve as never; });
+    const rt = fakeRuntime({
+      // Simulate a *previous* fight's leftover 'win' already sitting in this quest's slot.
+      getVar: (qid, k) => (qid === 'quest.x' && k === 'combat.outcome' ? 'win' : undefined),
+      runEncounter: async () => { await pending; return { outcome: 'win', rounds: 1, downed: [], dead: [], xp: {}, loot: [], log: [] }; },
+    });
+    const p = runEffect({ encounter: 'enc.hohle-gasse' }, rt, 'quest.x');
+    // While the new fight is still in flight, the effect must already have cleared the slot.
+    await Promise.resolve(); // let the synchronous prefix of runEffect run
+    expect(rt.calls.filter((c) => c.startsWith('setVar:quest.x:combat.outcome'))[0]).toBe('setVar:quest.x:combat.outcome=undefined');
+    resolveCombat({ outcome: 'win' });
+    await p;
+    expect(rt.calls).toContain('setVar:quest.x:combat.outcome=win');
+  });
+
+  it('encounter keys the outcome by the current questId, not a single global slot', async () => {
+    const rt = fakeRuntime();
+    await runEffect({ encounter: 'enc.brunnen-quay' }, rt, 'quest.der-eid');
+    expect(rt.calls).toContain('setVar:quest.der-eid:combat.outcome=win');
+  });
+
   it('dialogue and cutscene effects await their runtime hooks', async () => {
     const rt = fakeRuntime();
     await runEffect({ dialogue: 'dlg.ruetli-oath' }, rt);

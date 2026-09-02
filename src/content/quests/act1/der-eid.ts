@@ -20,7 +20,21 @@ export const derEid: QuestDef = {
       id: 'escort', journal: 'A boat carries the elder toward Steinen and the meeting place — but the Brunnen quay road is not always safe for Habsburg toll-men to travel unchallenged, nor for those who cross them.',
       marker: 'poi.brunnen', objectiveText: 'Escort the elder past the Brunnen quay.',
       onEnter: [{ encounter: 'enc.brunnen-quay' }],
-      advanceWhen: [{ cond: { var: ['_system', 'lastCombat.outcome', 'win'] }, to: 'ruetli-oath' }, { cond: { var: ['_system', 'lastCombat.outcome', 'fled'] }, to: 'ruetli-oath' }],
+      advanceWhen: [
+        { cond: { var: ['quest.der-eid', 'combat.outcome', 'win'] }, to: 'travel-ruetli' },
+        { cond: { var: ['quest.der-eid', 'combat.outcome', 'fled'] }, to: 'travel-ruetli' },
+        { cond: { var: ['quest.der-eid', 'combat.outcome', 'lose'] }, to: 'escort-recover' },
+      ],
+    },
+    {
+      id: 'escort-recover', journal: "The toll-men beat you back from the quay. The elder's boat pulls off to a hidden inlet to wait out the hour — you will have to try the quay again.",
+      marker: 'poi.brunnen', objectiveText: 'Regroup and try the Brunnen quay again.',
+      onEnter: [{ quest: ['advance', 'quest.der-eid', 'escort'] }],
+    },
+    {
+      id: 'travel-ruetli', journal: 'Word passes quietly: gather at the Rütli meadow after dark.',
+      marker: 'poi.ruetli', objectiveText: 'Make for the Rütli meadow.',
+      advanceWhen: [{ cond: { discovered: 'poi.ruetli' }, to: 'ruetli-oath' }],
     },
     {
       id: 'ruetli-oath', journal: 'Night falls on the Rütli meadow. Werner Stauffacher, Walter Fürst and Arnold von Melchtal — and their witnesses — gather to swear.',
