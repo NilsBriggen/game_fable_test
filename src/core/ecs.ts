@@ -195,20 +195,26 @@ export class World {
 
   static deserialize(s: SerializedWorld): World {
     const w = new World();
-    w.nextId = s.nextId;
+    w.load(s);
+    return w;
+  }
+
+  /** Replace this world's contents in place from a serialized world (keeps references to this World valid). */
+  load(s: SerializedWorld): void {
+    this.clear();
+    this.nextId = s.nextId;
     for (const e of s.entities) {
-      w.alive.add(e.id);
-      if (e.tag) w.tags.set(e.id, e.tag);
+      this.alive.add(e.id);
+      if (e.tag) this.tags.set(e.id, e.tag);
       for (const [name, data] of Object.entries(e.components)) {
         const t = registry.get(name);
         if (!t) {
           console.warn(`ECS: unknown component "${name}" in save; dropped`);
           continue;
         }
-        w.add(e.id, t, data as object);
+        this.add(e.id, t, data as object);
       }
     }
-    return w;
   }
 
   clear(): void {

@@ -56,8 +56,8 @@ and may be imported by anyone. `src/main.ts` is the only place that imports ever
 | World unit | **1 unit = 1 metre.** |
 | Axes | Three.js default: **+Y up**. **+X = east, +Z = south** (so a top-down map image with (0,0) top-left maps to world (x, z) directly). North is −Z. |
 | Origin | World (0, 0, 0) at lake level in the middle of the Urnersee, just off the Rütli. Lake surface is **y = 0**. Real Lake Lucerne is 434 m a.s.l.; UI shows `y + 434` when displaying altitude. |
-| Map extent | **16 000 × 16 000 m** (x, z ∈ [−8000, 8000]). |
-| Geographic scale | **[ASSUMPTION]** The real three-canton region (~60 km E–W × 45 km N–S, Gotthard included) is compressed **~1 : 4 horizontally** and **1 : 3 vertically**. Pilatus (real 2 128 m, +1 694 above lake) renders at ~565 m above lake. Relative geography (which valley leads where, what is visible from where) is preserved; absolute distances are not. Traversal of the full map on foot ≈ 35–40 min at run speed, comparable to Skyrim. |
+| Map extent | **16 000 × 17 000 m** (x ∈ [−8000, 8000], z ∈ [−6500, 10500]). The shared projection and every named place's coordinates live in `src/content/gazetteer.ts` (integrator-owned). |
+| Geographic scale | **[ASSUMPTION]** The real three-canton region (~60 km E–W × 45 km N–S, Gotthard included) is compressed **1 : 4.5 horizontally** and **1 : 3 vertically**. Pilatus (real 2 128 m, +1 694 above lake) renders at ~565 m above lake. Relative geography (which valley leads where, what is visible from where) is preserved; absolute distances are not. Traversal of the full map on foot ≈ 35–40 min at run speed, comparable to Skyrim. |
 | Time | Game clock in **seconds of game time**; 1 real second = 20 game seconds by default (a day ≈ 72 real minutes). Calendar is Julian, starting **1 August 1291**. Story time-skips set the clock explicitly. |
 | Angles | Radians internally; degrees only in UI. |
 | Player speeds | walk 1.8 m/s, jog 4.0 m/s (default), sprint 6.5 m/s. |

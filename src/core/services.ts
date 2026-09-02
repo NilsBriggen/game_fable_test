@@ -35,6 +35,10 @@ export interface WorldService {
   placeInstances(modelId: string, transforms: TransformLike[]): InstanceHandle;
   /** load (cached) a prop/character model as a fresh Object3D you own */
   spawnModel(modelId: string, opts?: { variant?: string; scale?: number }): Object3D;
+  /** other modules register their own procedural model factories (e.g. exploration registers 'char.*') */
+  registerModel(modelId: string, factory: (opts: { variant?: string; scale?: number; rng: Rng }) => Object3D): void;
+  hasModel(modelId: string): boolean;
+  listModels(): string[];
   getSceneRoots(): { terrain: Object3D; props: Object3D; water: Object3D; dynamic: Object3D };
   getRenderer(): WebGLRenderer;
   getScene(): Scene;

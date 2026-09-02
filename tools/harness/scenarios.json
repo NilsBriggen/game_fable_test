@@ -1,18 +1,261 @@
 [
-  { "id": "title", "description": "Title screen", "state": "title" },
-  { "id": "lake-overview-seelisberg", "description": "Urnersee from the Seelisberg viewpoint above the Rütli, morning", "state": "explore", "hour": 8, "weather": "clear", "camera": { "pos": [-900, 420, 300], "lookAt": [200, 0, -1200] } },
-  { "id": "ruetli-dawn", "description": "The Rütli meadow at dawn, follow camera", "state": "explore", "hour": 6, "weather": "clear", "spawnAt": "poi.ruetli", "yaw": 0.8, "camera": "follow" },
-  { "id": "altdorf-square-noon", "description": "Altdorf village square at noon", "state": "explore", "hour": 12, "weather": "clear", "spawnAt": "poi.altdorf", "camera": "follow" },
-  { "id": "gotthard-schoellenen", "description": "Schöllenen gorge and Teufelsbrücke", "state": "explore", "hour": 10, "weather": "overcast", "spawnAt": "poi.teufelsbruecke", "camera": "follow" },
-  { "id": "schwyz-village-dusk", "description": "Schwyz under the Mythen at dusk", "state": "explore", "hour": 19, "weather": "clear", "spawnAt": "poi.schwyz", "camera": "follow" },
-  { "id": "sarnen-night-rain", "description": "Sarnen at night in rain", "state": "explore", "hour": 23, "weather": "rain", "spawnAt": "poi.sarnen", "camera": "follow" },
-  { "id": "morgarten-winter", "description": "Morgarten slope above the Ägerisee, November", "state": "explore", "hour": 9, "weather": "overcast", "season": "winter", "spawnAt": "poi.morgarten", "camera": "follow" },
-  { "id": "flyover-streaming", "description": "Camera flight Flüelen → Brunnen → Luzern; hitch detection", "state": "explore", "hour": 11, "weather": "clear",
-    "camera": { "pos": [300, 250, 2200], "lookAt": [0, 0, 0] },
-    "flyover": [ { "pos": [300, 250, 2200], "lookAt": [0, 0, 0] }, { "pos": [900, 300, 100], "lookAt": [0, 0, -1500] }, { "pos": [-1500, 350, -2500], "lookAt": [-2500, 0, -4000] } ] },
-  { "id": "combat-morgarten-setup", "description": "Morgarten encounter, deployment phase", "state": "explore", "hour": 8, "season": "winter", "weather": "overcast", "chapter": "ch2-1314", "spawnAt": "poi.morgarten", "encounter": "enc.morgarten" },
-  { "id": "combat-brunnen-quay", "description": "Prologue tutorial fight at the Brunnen quay, after 4 scripted turns", "state": "explore", "hour": 15, "spawnAt": "poi.brunnen", "encounter": "enc.brunnen-quay", "combatScript": "auto:4" },
-  { "id": "dialogue-gessler-hat", "description": "Gessler's hat dialogue in Altdorf", "state": "explore", "hour": 11, "chapter": "ch1-1307", "spawnAt": "poi.altdorf", "dialogue": "dlg.gessler-hat" },
-  { "id": "menu-inventory", "description": "Inventory / character screen", "state": "explore", "hour": 12, "spawnAt": "poi.altdorf", "menu": "inventory" },
-  { "id": "menu-map", "description": "World map", "state": "explore", "hour": 12, "spawnAt": "poi.altdorf", "menu": "map" }
+  {
+    "id": "title",
+    "description": "Title screen",
+    "state": "title"
+  },
+  {
+    "id": "lake-overview-seelisberg",
+    "description": "Urnersee from the Seelisberg viewpoint above the R\u00fctli, morning",
+    "state": "explore",
+    "hour": 8,
+    "weather": "clear",
+    "camera": {
+      "pos": [
+        -405,
+        190,
+        -247
+      ],
+      "lookAt": [
+        300,
+        0,
+        900
+      ]
+    }
+  },
+  {
+    "id": "free-altdorf",
+    "description": "Free camera: Altdorf and the Reuss valley toward Fl\u00fcelen (no player needed)",
+    "state": "explore",
+    "hour": 12,
+    "weather": "clear",
+    "camera": {
+      "pos": [
+        420,
+        60,
+        2350
+      ],
+      "lookAt": [
+        574,
+        9,
+        2051
+      ]
+    }
+  },
+  {
+    "id": "free-morgarten",
+    "description": "Free camera: Morgarten slope above the \u00c4gerisee, winter (no player needed)",
+    "state": "explore",
+    "hour": 9,
+    "weather": "overcast",
+    "season": "winter",
+    "camera": {
+      "pos": [
+        520,
+        150,
+        -3150
+      ],
+      "lookAt": [
+        250,
+        95,
+        -3450
+      ]
+    }
+  },
+  {
+    "id": "free-schoellenen",
+    "description": "Free camera: Sch\u00f6llenen gorge (no player needed)",
+    "state": "explore",
+    "hour": 10,
+    "weather": "overcast",
+    "camera": {
+      "pos": [
+        -260,
+        380,
+        7850
+      ],
+      "lookAt": [
+        -338,
+        320,
+        7830
+      ]
+    }
+  },
+  {
+    "id": "free-pilatus-luzern",
+    "description": "Free camera: Luzern basin from Pilatus flank, evening",
+    "state": "explore",
+    "hour": 19,
+    "weather": "clear",
+    "camera": {
+      "pos": [
+        -5500,
+        400,
+        -900
+      ],
+      "lookAt": [
+        -5134,
+        0,
+        -2100
+      ]
+    }
+  },
+  {
+    "id": "ruetli-dawn",
+    "description": "The R\u00fctli meadow at dawn, follow camera",
+    "state": "explore",
+    "hour": 6,
+    "weather": "clear",
+    "spawnAt": "poi.ruetli",
+    "yaw": 0.8,
+    "camera": "follow"
+  },
+  {
+    "id": "altdorf-square-noon",
+    "description": "Altdorf village square at noon",
+    "state": "explore",
+    "hour": 12,
+    "weather": "clear",
+    "spawnAt": "poi.altdorf",
+    "camera": "follow"
+  },
+  {
+    "id": "gotthard-schoellenen",
+    "description": "Sch\u00f6llenen gorge and Teufelsbr\u00fccke",
+    "state": "explore",
+    "hour": 10,
+    "weather": "overcast",
+    "spawnAt": "poi.teufelsbruecke",
+    "camera": "follow"
+  },
+  {
+    "id": "schwyz-village-dusk",
+    "description": "Schwyz under the Mythen at dusk",
+    "state": "explore",
+    "hour": 19,
+    "weather": "clear",
+    "spawnAt": "poi.schwyz",
+    "camera": "follow"
+  },
+  {
+    "id": "sarnen-night-rain",
+    "description": "Sarnen at night in rain",
+    "state": "explore",
+    "hour": 23,
+    "weather": "rain",
+    "spawnAt": "poi.sarnen",
+    "camera": "follow"
+  },
+  {
+    "id": "morgarten-winter",
+    "description": "Morgarten slope above the \u00c4gerisee, November",
+    "state": "explore",
+    "hour": 9,
+    "weather": "overcast",
+    "season": "winter",
+    "spawnAt": "poi.morgarten",
+    "camera": "follow"
+  },
+  {
+    "id": "flyover-streaming",
+    "description": "Camera flight Fl\u00fcelen \u2192 Brunnen \u2192 Luzern; hitch detection",
+    "state": "explore",
+    "hour": 11,
+    "weather": "clear",
+    "camera": {
+      "pos": [
+        270,
+        120,
+        1900
+      ],
+      "lookAt": [
+        270,
+        0,
+        1483
+      ]
+    },
+    "flyover": [
+      {
+        "pos": [
+          270,
+          120,
+          1900
+        ],
+        "lookAt": [
+          270,
+          0,
+          1483
+        ]
+      },
+      {
+        "pos": [
+          -68,
+          160,
+          -300
+        ],
+        "lookAt": [
+          -68,
+          0,
+          -741
+        ]
+      },
+      {
+        "pos": [
+          -4000,
+          300,
+          -1400
+        ],
+        "lookAt": [
+          -5134,
+          0,
+          -2100
+        ]
+      }
+    ]
+  },
+  {
+    "id": "combat-morgarten-setup",
+    "description": "Morgarten encounter, deployment phase",
+    "state": "explore",
+    "hour": 8,
+    "season": "winter",
+    "weather": "overcast",
+    "chapter": "ch2-1314",
+    "spawnAt": "poi.morgarten",
+    "encounter": "enc.morgarten"
+  },
+  {
+    "id": "combat-brunnen-quay",
+    "description": "Prologue tutorial fight at the Brunnen quay, after 4 scripted turns",
+    "state": "explore",
+    "hour": 15,
+    "spawnAt": "poi.brunnen",
+    "encounter": "enc.brunnen-quay",
+    "combatScript": "auto:4"
+  },
+  {
+    "id": "dialogue-gessler-hat",
+    "description": "Gessler's hat dialogue in Altdorf",
+    "state": "explore",
+    "hour": 11,
+    "chapter": "ch1-1307",
+    "spawnAt": "poi.altdorf",
+    "dialogue": "dlg.gessler-hat"
+  },
+  {
+    "id": "menu-inventory",
+    "description": "Inventory / character screen",
+    "state": "explore",
+    "hour": 12,
+    "spawnAt": "poi.altdorf",
+    "menu": "inventory"
+  },
+  {
+    "id": "menu-map",
+    "description": "World map",
+    "state": "explore",
+    "hour": 12,
+    "spawnAt": "poi.altdorf",
+    "menu": "map"
+  }
 ]
