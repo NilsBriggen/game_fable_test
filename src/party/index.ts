@@ -1,6 +1,9 @@
 /**
  * Party module: characters, skills, perks, equipment, inventory, derived stats. ARCHITECTURE.md §5.5, §4.
  * Registers a `PartyService` implementation. See `src/party/rules.ts` for the pure math this operates on.
+ *
+ * Fix round 1 (wave-1 critic, tools/critic/wave1-party.md, score 5/10): every numbered fix below cites the
+ * issue number from that report.
  */
 import type { GameContext } from '@core/context';
 import type { World, EntityId } from '@core/ecs';
@@ -22,11 +25,30 @@ import {
 } from './rules';
 
 // ---------------- module-private component ----------------
-// Formation preset, persisted on the player entity. Not transient: it should survive save/load.
-export interface PartyStateC { formation: 'line' | 'wedge' | 'haufen' | 'skirmish' }
-export const PartyState = defineComponent<PartyStateC>('PartyState', () => ({ formation: 'line' }));
+// Formation preset + the two counters that must survive save/load, persisted on the player entity.
+// Not transient: it should survive save/load.
+export interface PartyStateC {
+  formation: 'line' | 'wedge' | 'haufen' | 'skirmish';
+  /** Monotonic item-instance id counter. Fix round 1, issue 2: this used to be an in-memory `instanceSeq`
+   *  that restarted at 1 every session, so the first `addItem` after a load collided with an id already
+   *  sitting in the loaded inventory (`item-1-1` twice). Living on this persisted component instead means
+   *  it survives serialize/deserialize with no scan-and-repair step needed on `'loaded'`. */
+  nextItemSeq: number;
+  /** Current chapter id (see `CHAPTER_ORDER` below), used for `ItemDef.eraFrom` gating. Fix round 1, issue 8. */
+  chapter: string;
+}
+export const PartyState = defineComponent<PartyStateC>('PartyState', () => ({ formation: 'line', nextItemSeq: 1, chapter: 'prologue-1291' }));
 
 const STACKABLE_KINDS = new Set(['ammo', 'consumable', 'tool', 'misc', 'book', 'key']);
+
+/** Chapter order for era gating (fix round 1, issue 8). Aligned with the quest builder's chapter ids
+ *  (ARCHITECTURE §3.4 `SaveFile.chapter`, LORE §1). An id not in this list (a later act not yet built) is
+ *  treated as "at least as late as the last known chapter", so it never spuriously blocks period gear. */
+const CHAPTER_ORDER = ['prologue-1291', 'ch1-1307', 'ch2-1314'] as const;
+function chapterIndex(chapter: string): number {
+  const i = (CHAPTER_ORDER as readonly string[]).indexOf(chapter);
+  return i < 0 ? CHAPTER_ORDER.length - 1 : i;
+}
 
 interface KitEntry { defId: string; qty?: number }
 interface StartingKit {
@@ -74,6 +96,18 @@ const ORIGIN_SKILL_BONUS: Record<Canton, [SkillId, SkillId]> = {
   unterwalden: ['spear', 'athletics'],
 };
 
+/** Fix round 1, issue 12: `PlayerCreation.background` was documented as "optional starting skill emphasis"
+ *  but only ever granted a kit, never a skill bonus — a hunter and a smith both started crossbow/craft at 10.
+ *  Mirrors `ORIGIN_SKILL_BONUS`'s shape and +5/+5 magnitude. */
+const BACKGROUND_SKILL_BONUS: Record<PlayerCreation['background'], [SkillId, SkillId]> = {
+  saeumer: ['trade', 'athletics'],
+  herder: ['throwing', 'alpine'],
+  fisher: ['athletics', 'trade'],
+  hunter: ['crossbow', 'stealth'],
+  smith: ['craft', 'axe-mace'],
+  novice: ['herbalism', 'speech'],
+};
+
 /** Minimal shape party needs, so tests can construct one without a full GameContext. */
 export interface PartyHost {
   world: World;
@@ -82,22 +116,36 @@ export interface PartyHost {
   events?: { on(event: string, cb: (...args: unknown[]) => void): () => void };
 }
 
+/** Memoised `derived()` entry: `fp` is a cheap fingerprint of everything the computation reads, so a cache
+ *  hit is only trusted when nothing relevant has changed since — see `fingerprint()` and issue 3 below. */
+interface DerivedCacheEntry { fp: string; stats: DerivedStats }
+
 export class PartyServiceImpl implements PartyService {
   private readonly world: World;
   private readonly content: ContentRegistry;
   private readonly clock?: PartyHost['clock'];
   private readonly bus = new EventBus<PartyEvents>();
-  private readonly derivedCache = new Map<EntityId, DerivedStats>();
-  private instanceSeq = 1;
-  private formationFallback: PartyStateC['formation'] = 'line';
+  private readonly derivedCache = new Map<EntityId, DerivedCacheEntry>();
+  /** Formation/item-seq/chapter state before a player entity exists (mainly for tests that call
+   *  `createCharacter` without `createPlayer`). Once a player exists, `state()` reads/writes its
+   *  `PartyState` component instead — see `state()`. */
+  private readonly fallbackState: PartyStateC = { formation: 'line', nextItemSeq: 1, chapter: 'prologue-1291' };
 
   constructor(host: PartyHost) {
     this.world = host.world;
     this.content = host.content;
     this.clock = host.clock;
-    host.events?.on('loaded', () => {
-      for (const id of this.getParty()) this.invalidate(id);
-    });
+    // Fix round 1, issue 3: clear the *whole* cache on load, not just current party members — an enemy's
+    // (or a former party member's) stale entry could otherwise survive under a reused EntityId.
+    host.events?.on('loaded', () => this.invalidate());
+  }
+
+  /** The one place formation/nextItemSeq/chapter live: the player's `PartyState` component once a player
+   *  exists (so it round-trips through save/load), or an in-memory fallback before that. */
+  private state(): PartyStateC {
+    const player = this.getPlayer();
+    if (player === null) return this.fallbackState;
+    return this.world.get(player, PartyState) ?? this.world.add(player, PartyState, { ...this.fallbackState });
   }
 
   // ---------------- creation ----------------
@@ -112,16 +160,18 @@ export class PartyServiceImpl implements PartyService {
       archetype: 'player', born: bornYear, level: 1, down: false,
     });
     this.initSkills(id);
-    this.applyOriginBonus(id, creation.origin);
+    this.bumpSkillsFlat(id, ORIGIN_SKILL_BONUS[creation.origin], 5);
+    this.bumpSkillsFlat(id, BACKGROUND_SKILL_BONUS[creation.background], 5); // fix round 1, issue 12
     this.world.add(id, Perks, { ids: [] });
     this.world.add(id, Equipment, {});
     this.world.add(id, Inventory, { items: [], pfennig: 0, capacityKg: carryCapacityKg(creation.attributes.strength) });
-    this.applyStartingKit(id, creation.background);
     this.world.add(id, PartyMember, { slot: 0, control: 'player' });
     this.world.add(id, Faction, { factionId: creation.origin });
     this.world.add(id, Transform, { x: 0, y: 0, z: 0, yaw: 0 });
     this.world.add(id, Renderable, { modelId: 'char.player', visible: true });
-    this.world.add(id, PartyState, { formation: this.formationFallback });
+    this.world.add(id, PartyState, { ...this.fallbackState });
+    // starting-kit equip must not be blocked by era gating (it's authored, not player-chosen) — see equip()
+    this.applyStartingKit(id, creation.background);
     this.recomputeCharacterLevel(id, true);
     this.recomputeVitals(id);
     return id;
@@ -142,7 +192,7 @@ export class PartyServiceImpl implements PartyService {
     for (const [slot, defId] of Object.entries(def.equipment ?? {})) {
       if (!defId) continue;
       const inst = this.addItem(id, defId, 1);
-      this.equip(id, inst.instanceId, slot as EquipSlot);
+      this.equipInternal(id, inst.instanceId, slot as EquipSlot, false); // authored kit — skip era gate
     }
     this.world.add(id, Faction, { factionId: def.faction });
     this.world.add(id, Transform, { x: 0, y: 0, z: 0, yaw: 0 });
@@ -155,15 +205,18 @@ export class PartyServiceImpl implements PartyService {
 
   private initSkills(id: EntityId, overrides?: Partial<Record<SkillId, number>>): void {
     const levels: SkillsC['levels'] = {};
+    // Every skill defaults to 10, not 0: a level-10 baseline across all 19 skills reads as "a grown adult who
+    // has done some ordinary living", not "no skills at all", and is why every fresh character starts at
+    // character level 4 (`floor(19*10/40)`) rather than level 0 — intentional, see `rules.characterLevel`.
     for (const s of this.content.skills.values()) levels[s.id] = { level: overrides?.[s.id] ?? 10, xp: 0 };
     this.world.add(id, Skills, { levels });
   }
 
-  private applyOriginBonus(id: EntityId, origin: Canton): void {
+  private bumpSkillsFlat(id: EntityId, skills: SkillId[], delta: number): void {
     const skillsC = this.world.require(id, Skills);
-    for (const s of ORIGIN_SKILL_BONUS[origin]) {
+    for (const s of skills) {
       const cur = skillsC.levels[s] ?? { level: 10, xp: 0 };
-      skillsC.levels[s] = { level: cur.level + 5, xp: cur.xp };
+      skillsC.levels[s] = { level: cur.level + delta, xp: cur.xp };
     }
   }
 
@@ -174,7 +227,7 @@ export class PartyServiceImpl implements PartyService {
     for (const [slot, entry] of Object.entries(kit.equip)) {
       if (!entry) continue;
       const inst = this.addItem(id, entry.defId, entry.qty ?? 1);
-      this.equip(id, inst.instanceId, slot as EquipSlot);
+      this.equipInternal(id, inst.instanceId, slot as EquipSlot, false); // authored kit — skip era gate
     }
   }
 
@@ -204,12 +257,18 @@ export class PartyServiceImpl implements PartyService {
       .sort((a, b) => this.world.get(a, PartyMember)!.slot - this.world.get(b, PartyMember)!.slot);
   }
 
-  addMember(id: EntityId, control: 'companion' | 'ally' = 'companion'): void {
+  addMember(id: EntityId, control: 'companion' | 'ally' = 'companion'): boolean {
+    // Fix round 1, issue 7: no cap meant `addMember` silently built a 7-member party against §5.5's
+    // "player + 3", and an entity with no Character would later crash `derived()`.
+    if (!this.world.has(id, Character)) return false;
+    if (this.getParty().length >= 4) return false;
     const used = new Set(this.getParty().map((m) => this.world.get(m, PartyMember)!.slot));
     let slot = 1;
-    while (used.has(slot) && slot < 8) slot++;
+    while (used.has(slot) && slot < 4) slot++;
+    if (used.has(slot)) return false;
     this.world.add(id, PartyMember, { slot, control });
     this.bus.emit('party-changed', this.getParty());
+    return true;
   }
 
   removeMember(id: EntityId): void {
@@ -255,22 +314,27 @@ export class PartyServiceImpl implements PartyService {
     ch.hpMax = newHpMax;
     ch.moraleMax = newMoraleMax;
     this.invalidate(id);
+    this.syncCapacityKg(id); // strength may have just changed carryKg (minor note)
+    this.bus.emit('hp-changed', id, ch.hp, ch.hpMax); // fix round 1, issue 14: hpMax changed, UI must hear it
     return true;
   }
 
   grantSkillXp(id: EntityId, skill: SkillId, amount: number): { leveled: boolean; newLevel?: number } {
+    if (!this.world.has(id, Character)) return { leveled: false }; // minor note: guard entities without Character
     const skillsC = this.world.get(id, Skills) ?? this.world.add(id, Skills, {});
     const prog = skillsC.levels[skill] ?? { level: 0, xp: 0 };
     const result = applySkillXp(prog, amount);
     skillsC.levels[skill] = { level: result.level, xp: result.xp };
     if (result.levelsGained > 0) {
+      // Fix round 1, issue 14: recompute the character level BEFORE emitting — a listener reading
+      // Character.level inside a 'level-up' handler used to see the stale value.
+      this.recomputeCharacterLevel(id);
       this.bus.emit('level-up', id, skill, result.level);
       for (const lvl of result.perksCrossed) {
         for (const p of this.content.perks.values()) {
           if (p.skill === skill && p.level === lvl) this.bus.emit('perk-available', id, p.id);
         }
       }
-      this.recomputeCharacterLevel(id);
     }
     this.invalidate(id);
     return { leveled: result.levelsGained > 0, newLevel: result.levelsGained > 0 ? result.level : undefined };
@@ -309,9 +373,12 @@ export class PartyServiceImpl implements PartyService {
     // +1 attribute point every 3 character levels (ARCHITECTURE §5.5), stored on Character.unspentAttributePoints.
     const pointsGained = attributePointsEarned(newLevel) - attributePointsEarned(ch.level);
     if (pointsGained > 0) ch.unspentAttributePoints += pointsGained;
+    const levelChanged = newLevel !== ch.level;
     ch.hpMax = newHpMax;
     ch.moraleMax = newMoraleMax;
     ch.level = newLevel;
+    this.bus.emit('hp-changed', id, ch.hp, ch.hpMax); // fix round 1, issue 14: hpMax changed here too
+    if (levelChanged) this.bus.emit('character-level-up', id, newLevel, Math.max(0, pointsGained));
   }
 
   hasPerk(id: EntityId, perk: string): boolean {
@@ -332,13 +399,23 @@ export class PartyServiceImpl implements PartyService {
     const perksC = this.world.get(id, Perks) ?? this.world.add(id, Perks, {});
     perksC.ids.push(perk);
     this.invalidate(id);
+    this.syncCapacityKg(id); // a perk may grant carryKg (minor note)
     return true;
+  }
+
+  /** Keep the persisted `Inventory.capacityKg` in sync with `derived().carryKg` (minor note: it used to be
+   *  written once at creation and never again, so the component — and thus save/UI — disagreed with reality
+   *  after a strength point or a carryKg perk). */
+  private syncCapacityKg(id: EntityId): void {
+    const inv = this.world.get(id, Inventory);
+    if (!inv || !this.world.has(id, Character)) return;
+    inv.capacityKg = this.derived(id).carryKg;
   }
 
   // ---------------- equipment ----------------
 
   private inferSlot(def: ItemDef): EquipSlot | null {
-    if (def.kind === 'weapon') return def.weapon?.range ? 'ranged' : 'mainHand';
+    if (def.kind === 'weapon') return def.weapon?.range && !def.weapon.properties.includes('thrown') ? 'ranged' : 'mainHand';
     if (def.kind === 'shield') return 'offHand';
     if (def.kind === 'ammo') return 'ammo';
     if (def.kind === 'armor' && def.armor) return def.armor.slot as EquipSlot;
@@ -347,7 +424,9 @@ export class PartyServiceImpl implements PartyService {
 
   private slotCompatible(def: ItemDef, slot: EquipSlot): boolean {
     switch (slot) {
-      case 'mainHand': return def.kind === 'weapon';
+      // Fix round 1, issue 5 (probe D): a ranged weapon could previously be equipped into mainHand *and*
+      // ranged at once, double-counting it for combat. `thrown` weapons (sling) are hand-held either way.
+      case 'mainHand': return def.kind === 'weapon' && (!def.weapon?.range || def.weapon.properties.includes('thrown'));
       case 'ranged': return def.kind === 'weapon' && !!def.weapon?.range;
       case 'ammo': return def.kind === 'ammo';
       case 'offHand': return def.kind === 'shield' || (def.kind === 'armor' && def.armor?.slot === 'offHand');
@@ -357,21 +436,58 @@ export class PartyServiceImpl implements PartyService {
   }
 
   equip(id: EntityId, instanceId: string, slot?: string): boolean {
+    return this.equipInternal(id, instanceId, slot, true);
+  }
+
+  /** `checkEra` is false only for authored starting kits / NpcDef equipment (`createPlayer`/`createCharacter`)
+   *  — content the builder placed deliberately shouldn't be blocked by the current chapter; only a live,
+   *  player-driven `equip()` call is era-gated. */
+  private equipInternal(id: EntityId, instanceId: string, slot: string | undefined, checkEra: boolean): boolean {
     const inv = this.world.get(id, Inventory);
     if (!inv) return false;
     const inst = inv.items.find((i) => i.instanceId === instanceId);
     if (!inst) return false;
     const def = this.content.items.get(inst.defId);
     if (!def) return false;
+    // Fix round 1, issue 8 (probe K): `item.langspiess`/`item.langschwert` carry `eraFrom` but nothing
+    // enforced it — the 15th-c. pike was equippable in the 1291 prologue.
+    if (checkEra && def.eraFrom && chapterIndex(def.eraFrom) > chapterIndex(this.state().chapter)) return false;
     const eq = this.world.get(id, Equipment) ?? this.world.add(id, Equipment, {});
     const targetSlot = (slot as EquipSlot | undefined) ?? this.inferSlot(def) ?? undefined;
     if (!targetSlot || !this.slotCompatible(def, targetSlot)) return false;
+    if (targetSlot === 'ammo') {
+      // Fix round 1, issue 5: ammo must match the currently-equipped ranged weapon's `weapon.ammo`, so
+      // bolts can no longer be equipped onto a bow (probe D).
+      const rangedInst = eq.ranged ? inv.items.find((i) => i.instanceId === eq.ranged) : undefined;
+      const rangedDef = rangedInst ? this.content.items.get(rangedInst.defId) : undefined;
+      if (!rangedDef?.weapon?.ammo || rangedDef.weapon.ammo !== def.id) return false;
+    }
     if (targetSlot === 'offHand') {
       const mainInst = eq.mainHand ? inv.items.find((i) => i.instanceId === eq.mainHand) : undefined;
       const mainDef = mainInst ? this.content.items.get(mainInst.defId) : undefined;
       if (mainDef?.weapon?.hands === 2) return false;
     }
-    if (targetSlot === 'mainHand' && def.weapon?.hands === 2) delete eq.offHand;
+    if (targetSlot === 'mainHand' && def.weapon?.hands === 2 && eq.offHand) {
+      delete eq.offHand;
+      this.bus.emit('equipped', id, 'offHand', null); // fix round 1, issue 14 (probe H): UI must hear the auto-clear
+    }
+    // Fix round 1, issue 5 (probe D): an item instance can only occupy one slot at a time — clear any other
+    // slot it was sitting in before writing it into the new one.
+    for (const s of Object.keys(eq) as EquipSlot[]) {
+      if (s !== targetSlot && eq[s] === instanceId) {
+        delete eq[s];
+        this.bus.emit('equipped', id, s, null);
+      }
+    }
+    // Swapping to a ranged weapon with different ammo drops the now-mismatched ammo (fix round 1, issue 5).
+    if (targetSlot === 'ranged' && eq.ammo) {
+      const ammoInst = inv.items.find((i) => i.instanceId === eq.ammo);
+      const ammoDef = ammoInst ? this.content.items.get(ammoInst.defId) : undefined;
+      if (def.weapon?.ammo !== ammoDef?.id) {
+        delete eq.ammo;
+        this.bus.emit('equipped', id, 'ammo', null);
+      }
+    }
     eq[targetSlot] = instanceId;
     this.invalidate(id);
     this.bus.emit('equipped', id, targetSlot, instanceId);
@@ -388,13 +504,22 @@ export class PartyServiceImpl implements PartyService {
 
   // ---------------- inventory ----------------
 
-  private newInstanceId(owner: EntityId): string {
-    return `item-${owner}-${this.instanceSeq++}`;
+  private newInstanceId(): string {
+    // Fix round 1, issue 2: no owner in the id, no in-memory counter — see PartyStateC.nextItemSeq above.
+    const s = this.state();
+    return `item-${s.nextItemSeq++}`;
   }
 
   addItem(id: EntityId, defId: string, qty = 1): ItemInstance {
+    if (qty <= 0) qty = 1; // fix round 1, issue 11: reject/clamp a nonsensical qty rather than corrupt state
     const inv = this.world.get(id, Inventory) ?? this.world.add(id, Inventory, {});
     const def = this.content.items.get(defId);
+    if (!def) console.warn(`[party] addItem: unknown item def "${defId}"`); // fix round 1, issue 11
+    // Fix round 1, issue 8: granting era-gated loot is allowed (it might be a quest reward for later), but
+    // it will refuse to *equip* until the chapter catches up — see equip().
+    if (def?.eraFrom && chapterIndex(def.eraFrom) > chapterIndex(this.state().chapter)) {
+      console.warn(`[party] addItem: "${defId}" is era-gated (${def.eraFrom}); granted, but equip() will refuse it until then`);
+    }
     const stackable = !def || STACKABLE_KINDS.has(def.kind);
     if (stackable) {
       const existing = inv.items.find((i) => i.defId === defId);
@@ -404,17 +529,32 @@ export class PartyServiceImpl implements PartyService {
         this.bus.emit('item-added', id, existing);
         return existing;
       }
+      const inst: ItemInstance = { instanceId: this.newInstanceId(), defId, qty, condition: 1 };
+      inv.items.push(inst);
+      this.invalidate(id);
+      this.bus.emit('item-added', id, inst);
+      return inst;
     }
-    const inst: ItemInstance = { instanceId: this.newInstanceId(id), defId, qty, condition: 1 };
-    inv.items.push(inst);
+    // Fix round 1, issue 11 (probe C): a non-stackable kind (weapon/armor/shield) must never collapse
+    // several units into one instance with `qty > 1` — each has its own `condition`, and `qty` on a
+    // "unique" item instance would corrupt equip/transfer bookkeeping. Mint one instance per unit.
+    let last!: ItemInstance;
+    for (let i = 0; i < qty; i++) {
+      last = { instanceId: this.newInstanceId(), defId, qty: 1, condition: 1 };
+      inv.items.push(last);
+    }
     this.invalidate(id);
-    this.bus.emit('item-added', id, inst);
-    return inst;
+    this.bus.emit('item-added', id, last);
+    return last;
   }
 
   removeItem(id: EntityId, defId: string, qty = 1): boolean {
+    if (qty <= 0) return false;
     const inv = this.world.get(id, Inventory);
     if (!inv) return false;
+    // Fix round 1, issue 4 (probe B): removing more than is held used to delete everything present and
+    // still return false — a failed quest hand-in ate the player's items. Refuse up front instead.
+    if (this.countItem(id, defId) < qty) return false;
     const eq = this.world.get(id, Equipment);
     let remaining = qty;
     for (let i = inv.items.length - 1; i >= 0 && remaining > 0; i--) {
@@ -424,7 +564,12 @@ export class PartyServiceImpl implements PartyService {
         remaining -= it.qty;
         inv.items.splice(i, 1);
         if (eq) {
-          for (const s of Object.keys(eq) as EquipSlot[]) if (eq[s] === it.instanceId) delete eq[s];
+          for (const s of Object.keys(eq) as EquipSlot[]) {
+            if (eq[s] === it.instanceId) {
+              delete eq[s];
+              this.bus.emit('equipped', id, s, null); // fix round 1, issue 4/14: UI must hear the auto-unequip
+            }
+          }
         }
       } else {
         it.qty -= remaining;
@@ -432,8 +577,8 @@ export class PartyServiceImpl implements PartyService {
       }
     }
     this.invalidate(id);
-    this.bus.emit('item-removed', id, defId, qty - remaining);
-    return remaining === 0;
+    this.bus.emit('item-removed', id, defId, qty);
+    return true;
   }
 
   countItem(id: EntityId, defId: string): number {
@@ -443,6 +588,9 @@ export class PartyServiceImpl implements PartyService {
   }
 
   transfer(from: EntityId, to: EntityId, instanceId: string, qty?: number): boolean {
+    // Fix round 1, issue 13 (probe E): transferring to/from a dead or unknown entity used to throw
+    // ("ECS: entity 999 is not alive") instead of returning false as the interface promises.
+    if (!this.world.isAlive(from) || !this.world.isAlive(to)) return false;
     const fromInv = this.world.get(from, Inventory);
     if (!fromInv) return false;
     const idx = fromInv.items.findIndex((i) => i.instanceId === instanceId);
@@ -454,7 +602,14 @@ export class PartyServiceImpl implements PartyService {
     if (moveQty === item.qty) {
       fromInv.items.splice(idx, 1);
       const eq = this.world.get(from, Equipment);
-      if (eq) for (const s of Object.keys(eq) as EquipSlot[]) if (eq[s] === instanceId) delete eq[s];
+      if (eq) {
+        for (const s of Object.keys(eq) as EquipSlot[]) {
+          if (eq[s] === instanceId) {
+            delete eq[s];
+            this.bus.emit('equipped', from, s, null);
+          }
+        }
+      }
     } else {
       item.qty -= moveQty;
     }
@@ -471,7 +626,7 @@ export class PartyServiceImpl implements PartyService {
         return true;
       }
     }
-    const newInst: ItemInstance = { instanceId: this.newInstanceId(to), defId: item.defId, qty: moveQty, condition: item.condition };
+    const newInst: ItemInstance = { instanceId: this.newInstanceId(), defId: item.defId, qty: moveQty, condition: item.condition };
     toInv.items.push(newInst);
     this.invalidate(from);
     this.invalidate(to);
@@ -521,12 +676,14 @@ export class PartyServiceImpl implements PartyService {
       ch.hp = Math.min(ch.hpMax, ch.hp + gain);
       if (ch.hp > 0) ch.down = false;
       ch.fatigue = Math.max(0, ch.fatigue - restFatigueLoss(hours));
+      ch.morale = ch.moraleMax; // fix round 1, issue 6: a night's sleep resets morale too (§5.3: the second resource)
       this.bus.emit('hp-changed', id, ch.hp, ch.hpMax);
     }
     this.clock?.advanceHours(hours);
   }
 
-  applyChapter(_chapter: string): void {
+  applyChapter(chapter: string): void {
+    this.state().chapter = chapter; // fix round 1, issue 8: era gating needs to know "now"
     for (const id of this.getParty()) {
       const pm = this.world.get(id, PartyMember);
       if (!pm || pm.control !== 'companion') continue;
@@ -545,32 +702,49 @@ export class PartyServiceImpl implements PartyService {
   // ---------------- formation ----------------
 
   formation(): 'line' | 'wedge' | 'haufen' | 'skirmish' {
-    const player = this.getPlayer();
-    if (player !== null) {
-      const ps = this.world.get(player, PartyState);
-      if (ps) return ps.formation;
-    }
-    return this.formationFallback;
+    return this.state().formation;
   }
 
   setFormation(f: 'line' | 'wedge' | 'haufen' | 'skirmish'): void {
-    const player = this.getPlayer();
-    if (player !== null) {
-      const ps = this.world.get(player, PartyState) ?? this.world.add(player, PartyState, { formation: f });
-      ps.formation = f;
-    }
-    this.formationFallback = f;
+    this.state().formation = f;
   }
 
   // ---------------- derived stats ----------------
 
-  private invalidate(id: EntityId): void {
+  /** Fix round 1, issue 3: `PartyService.invalidate(id?)` is now public (core added it to the interface) —
+   *  other modules call it after editing `Character`/`Equipment`/`Perks`/`Inventory` directly. Omitting `id`
+   *  clears the whole cache (used on `'loaded'`, and available to any caller that needs a hard reset). */
+  invalidate(id?: EntityId): void {
+    if (id === undefined) {
+      this.derivedCache.clear();
+      return;
+    }
     this.derivedCache.delete(id);
   }
 
+  /** A cheap fingerprint of everything `derived()` reads, so a cached entry is only trusted when nothing
+   *  relevant has changed — a safety net for direct component edits that skip `invalidate()` (fix round 1,
+   *  issue 3, probe G: `Character.attributes.agility = 20` used to leave `defense` stale forever). */
+  private fingerprint(id: EntityId): string {
+    const ch = this.world.get(id, Character);
+    const eq = this.world.get(id, Equipment);
+    const perksC = this.world.get(id, Perks);
+    const inv = this.world.get(id, Inventory);
+    const skillsC = this.world.get(id, Skills);
+    const a = ch
+      ? `${ch.attributes.strength},${ch.attributes.agility},${ch.attributes.endurance},${ch.attributes.wits},${ch.attributes.presence},${ch.level},${ch.fatigue},${ch.down ? 1 : 0}`
+      : '';
+    const e = eq ? (Object.keys(eq) as EquipSlot[]).sort().map((k) => `${k}=${eq[k]}`).join(';') : '';
+    const p = perksC ? perksC.ids.slice().sort().join(';') : '';
+    const items = inv ? inv.items.map((i) => `${i.defId}x${i.qty}`).sort().join(';') : '';
+    const skills = skillsC ? Object.keys(skillsC.levels).sort().map((k) => `${k}:${skillsC.levels[k].level}`).join(';') : '';
+    return `${a}|${e}|${p}|${items}|${skills}`;
+  }
+
   derived(id: EntityId): DerivedStats {
+    const fp = this.fingerprint(id);
     const cached = this.derivedCache.get(id);
-    if (cached) return cached;
+    if (cached && cached.fp === fp) return cached.stats;
 
     const ch = this.world.require(id, Character);
     const skillsC = this.world.get(id, Skills);
@@ -635,6 +809,7 @@ export class PartyServiceImpl implements PartyService {
     const mainHand = equipped.find((e) => e.slot === 'mainHand');
     const ranged = equipped.find((e) => e.slot === 'ranged');
     const shield = equipped.find((e) => e.slot === 'offHand' && (e.def.kind === 'shield' || e.def.armor?.defense));
+    const ammo = equipped.find((e) => e.slot === 'ammo');
 
     const result: DerivedStats = {
       defense,
@@ -645,13 +820,16 @@ export class PartyServiceImpl implements PartyService {
       attackBonus,
       soak,
       moraleBonus: perkMods['morale'] ?? 0,
+      // leadershipRadius/moraleBonus are offered for combat's Rally/formation math (ARCHITECTURE §5.3) but
+      // nothing there consumes them yet — not a bug, just noting they are offered, not required (minor note).
       leadershipRadius: 2 + Math.floor(leadershipLevel / 25),
       weapon: mainHand ? { defId: mainHand.def.id, instanceId: mainHand.instance.instanceId } : null,
       ranged: ranged ? { defId: ranged.def.id, instanceId: ranged.instance.instanceId } : null,
       shield: shield ? { defId: shield.def.id, instanceId: shield.instance.instanceId } : null,
+      ammo: ammo ? { defId: ammo.def.id, instanceId: ammo.instance.instanceId, qty: ammo.instance.qty } : null,
       perkMods,
     };
-    this.derivedCache.set(id, result);
+    this.derivedCache.set(id, { fp, stats: result });
     return result;
   }
 

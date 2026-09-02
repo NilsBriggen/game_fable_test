@@ -37,7 +37,7 @@ export const items: ItemDef[] = [
     id: 'item.hunting-bow', name: 'Hunting bow', kind: 'weapon', weightKg: 1.0, value: 120,
     weapon: { skill: 'crossbow', hands: 2, reach: 1, damage: '1d6', damageType: 'thrust', properties: ['reload-1'], range: { short: 10, long: 20 }, ammo: 'item.arrows' },
     description: 'A plain hunting self-bow, kept by herders and foresters for deer and boar.',
-    historical: true, note: 'Bows were hunting tools in the Alpine cantons; the crossbow, not the longbow, was the region\'s war missile weapon.',
+    historical: true, note: 'Bows were hunting tools in the Alpine Länder; the crossbow, not the longbow, was the region\'s war missile weapon.',
   },
   {
     id: 'item.morgenstern', name: 'Morgenstern', kind: 'weapon', weightKg: 2.0, value: 90,
@@ -54,8 +54,9 @@ export const items: ItemDef[] = [
   {
     id: 'item.langschwert', name: 'Langschwert', kind: 'weapon', weightKg: 1.8, value: 450,
     weapon: { skill: 'sword', hands: 2, reach: 1, damage: '1d10', damageType: 'cut', properties: ['two-handed'] },
+    eraFrom: 'ch1-1307',
     description: 'A two-handed longsword, its cruciform hilt long enough for a second hand on the grip.',
-    historical: true, note: 'Longswords proper appear from c. 1300 — early but correct for Chapter 1 (1307) onward.',
+    historical: true, note: 'Longswords proper appear from c. 1300 — early but correct for Chapter 1 (1307) onward; gated to match (critic fix round 1, issue 8).',
   },
   {
     id: 'item.messer', name: 'Messer', kind: 'weapon', weightKg: 0.9, value: 80,
@@ -233,7 +234,7 @@ export const items: ItemDef[] = [
 
   // ==================== TOOLS & MISC ====================
   {
-    id: 'item.rope', name: 'Rope', kind: 'tool', weightKg: 3.0, value: 15,
+    id: 'item.rope', name: 'Rope', kind: 'tool', weightKg: 2.0, value: 15,
     description: 'Ten metres of hemp rope — for climbing, hauling, or going over a castle wall by night.',
     historical: true, note: 'Ordinary hemp rope, unremarkable period equipment used in the Rotzberg tradition (Burgenbruch).',
   },

@@ -12,9 +12,17 @@ export const modifier = attrModifier;
 /** Levels at which a skill's perks unlock. */
 export const PERK_LEVELS = [25, 50, 75, 100] as const;
 
-/** XP required to go from `level` to `level + 1`. ARCHITECTURE §5.5: level-up cost grows ~ level^1.6. */
+/**
+ * XP required to go from `level` to `level + 1`. ARCHITECTURE §5.5: level-up cost grows ~ level^1.6.
+ * Rescaled per wave-1 critic (fix round 1, issue 1): the original `20*(level+1)^1.6` made the first
+ * level-up (10→11) cost 927 XP — unreachable inside Act 1's ~12 fights (~520 XP total). This curve
+ * gives 10→11 ≈ 19 XP (a handful of hits — felt in fight one), 10→25 ≈ 545 XP (first perk roughly
+ * two-thirds through Act 1), while keeping the same ^1.6 shape so higher levels still slow down hard.
+ * `Math.max(1, …)` guarantees a strictly positive cost even at level 0, so `applySkillXp` can never
+ * spin through an infinite/degenerate loop on a zero-cost level.
+ */
 export function xpToNext(level: number): number {
-  return Math.round(20 * Math.pow(level + 1, 1.6));
+  return Math.max(1, Math.round(5 + 0.3 * Math.pow(level + 1, 1.6)));
 }
 
 export interface SkillProgress {
@@ -85,14 +93,13 @@ export function carryCapacityKg(strength: number): number {
   return 20 + 2.5 * strength;
 }
 
-/** Movement speed in m/s: 9 base, minus armour/encumbrance penalties, plus perk bonuses, floor 4.5. */
-export function speedM(penaltyM: number, bonusM: number): number {
-  return Math.max(4.5, 9 - penaltyM + bonusM);
-}
-
-/** HP regen for `hours` of rest: hours * (1 + enduranceMod). */
+/**
+ * HP regen for `hours` of rest: hours * max(1, 1 + enduranceMod). Critic fix round 1, issue 6: the
+ * un-floored `1 + enduranceMod` hits 0 at endurance 8–9 (a below-average child/elder/merchant would
+ * never heal from rest at all); the `Math.max(1, …)` guarantees every character heals *something*.
+ */
 export function restHeal(hours: number, endurance: number): number {
-  return Math.max(0, hours) * (1 + modifier(endurance));
+  return Math.max(0, hours) * Math.max(1, 1 + modifier(endurance));
 }
 
 /** Fatigue lost per hour of rest. */

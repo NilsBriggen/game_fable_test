@@ -43,10 +43,10 @@ export const perks: PerkDef[] = [
     historical: true, note: 'Waldstätte tactics relied on unbroken hedges of spear points; a steady man in the line covered his neighbours.',
   },
   {
-    id: 'perk.spear-75', name: 'Push of Pike', skill: 'spear', level: 75,
+    id: 'perk.spear-75', name: 'Spiessstoss', skill: 'spear', level: 75,
     description: 'A shove behind the point can stagger an entire file: a braced hit may push the target 1 cell and check its charge.',
     grantsAbility: 'ability.push-of-pike',
-    historical: true, note: 'Massed spear formations of the period are described as physically shoving an opposing line, not only stabbing at it.',
+    historical: true, note: 'Massed spear formations of the period are described as physically shoving an opposing line, not only stabbing at it. Renamed from the anachronistic English "Push of Pike" (critic fix round 1, issue 9) — Spiessstoss ("spear-thrust") names the same mechanic in period German.',
   },
 
   // ================= SWORD =================
@@ -137,22 +137,22 @@ export const perks: PerkDef[] = [
     historical: true, note: 'The stirrup-and-belt-hook crossbow of this period was already a mechanically consistent weapon in trained hands.',
   },
   {
-    id: 'perk.crossbow-50', name: 'Snapshot', skill: 'crossbow', level: 50,
+    id: 'perk.crossbow-50', name: 'Schnellschuss', skill: 'crossbow', level: 50,
     description: 'A crossbowman who never fully lowers the weapon can loose the instant a target appears.',
     grantsAbility: 'ability.crossbow-snapshot',
-    historical: true, note: 'Tell\'s crossbow, like the hunting Armbrust of the period, was light enough to bring to bear quickly.',
+    historical: true, note: 'Tell\'s crossbow, like the hunting Armbrust of the period, was light enough to bring to bear quickly. Renamed from the modern English "Snapshot" (critic fix round 1, issue 9) — Schnellschuss ("quick shot") is the plain German equivalent.',
   },
   {
-    id: 'perk.crossbow-75', name: 'Aimed Shot', skill: 'crossbow', level: 75,
+    id: 'perk.crossbow-75', name: 'Gürtelhaken-Drill', skill: 'crossbow', level: 75,
+    description: 'Drilled spanning with the belt hook and stirrup turns reloading into a single practised motion (a bonus action instead of a full one).',
+    modifiers: { reloadStep: -1 },
+    historical: true, note: 'Fix round 1, issue 9: replaces the earlier "Windlass Drill" (a 15th-c. windlass span, banned player-facing gear per LORE §7). The Armbrust of Act 1 already spans by stirrup and belt hook (§7); this perk drills that real period method faster, so it is usable — and historically correct — from Chapter 1 on, not dormant.',
+  },
+  {
+    id: 'perk.crossbow-100', name: 'Aimed Shot', skill: 'crossbow', level: 100,
     description: 'Taking the turn to aim, without moving, all but guarantees the bolt goes where it is meant to.',
     grantsAbility: 'ability.aimed-shot',
-    historical: true, note: 'Hunting and target crossbows of the era were prized for accuracy at the cost of a slow reload — the trade this ability models.',
-  },
-  {
-    id: 'perk.crossbow-100', name: 'Windlass Drill', skill: 'crossbow', level: 100,
-    description: 'Drilled reloading with a windlass span turns the heaviest crossbow\'s reload into a single practised motion (a bonus action instead of a full one). The stirrup-and-belt-hook Armbrust of Act 1 needs no windlass at all — this perk unlocks only in acts after 1400, when the heavier windlass crossbow appears.',
-    modifiers: { reloadStep: -1 },
-    historical: 'legend', note: 'Windlass-spanned crossbows are a 15th-century development; keeping this capstone dormant in 1291–1315 avoids the anachronism while rewarding a maxed skill.',
+    historical: true, note: 'Hunting and target crossbows of the era were prized for accuracy at the cost of a slow reload — the trade this ability models. Moved from 75 to the crossbow capstone (critic fix round 1, issue 9) to make room for Gürtelhaken-Drill at 75.',
   },
 
   // ================= THROWING =================
@@ -189,10 +189,10 @@ export const perks: PerkDef[] = [
     historical: true, note: 'Alpine herders and Säumer were proverbially strong-armed men; brawls at markets and fairs are attested in period court records.',
   },
   {
-    id: 'perk.unarmed-75', name: 'Takedown', skill: 'unarmed', level: 75,
+    id: 'perk.unarmed-75', name: 'Schwingerwurf', skill: 'unarmed', level: 75,
     description: 'A grappling throw puts an armed opponent flat on their back.',
     modifiers: { 'attack.unarmed': 2, proneOnCrit: 1 },
-    historical: true, note: 'Village wrestling technique translated directly to unarming and downing an armed man at close range.',
+    historical: true, note: 'Village wrestling technique translated directly to unarming and downing an armed man at close range. Renamed from the modern English/MMA "Takedown" (critic fix round 1, issue 9) — Schwingerwurf ("wrestler\'s throw") names it via Schwingen, the Alpine wrestling tradition.',
   },
 
   // ================= LIGHT ARMOUR =================
@@ -223,10 +223,10 @@ export const perks: PerkDef[] = [
     historical: true, note: 'A Habsburg knight\'s mail shirt alone weighed 10–12 kg; men-at-arms trained specifically to bear that load all day.',
   },
   {
-    id: 'perk.armor-heavy-50', name: 'Plate Sense', skill: 'armor-heavy', level: 50,
+    id: 'perk.armor-heavy-50', name: 'Plattenrock', skill: 'armor-heavy', level: 50,
     description: 'Knowing how to angle a coat-of-plates turns aside even a heavy blow.',
     modifiers: { 'soak.blunt': 1 },
-    historical: true, note: 'The coat-of-plates (worn over mail by wealthier Habsburg knights) was specifically developed to spread blunt impact.',
+    historical: true, note: 'The coat-of-plates (worn over mail by wealthier Habsburg knights) was specifically developed to spread blunt impact. Renamed from "Plate Sense" (critic fix round 1, issue 9) — "plate" alone reads as the banned plate-harness anachronism; Plattenrock is the coat-of-plates\' own German name.',
   },
   {
     id: 'perk.armor-heavy-75', name: 'Iron Constitution', skill: 'armor-heavy', level: 75,
