@@ -28,6 +28,14 @@
     },
     "final": {
       "status": "pending"
+    },
+    "art": {
+      "status": "in-progress",
+      "modules": [
+        "assets-characters",
+        "world-look"
+      ],
+      "note": "owner authorised asset downloads (CC0/CC-BY with attribution) and stronger model tiers for visual quality"
     }
   },
   "modules": {
@@ -120,6 +128,22 @@
       "fixRounds": 2,
       "openIssues": [],
       "notes": "scored with quest: compliance audit clean; legend/history framing correct"
+    },
+    "assets-characters": {
+      "owner": "builder:art (opus)",
+      "status": "in-progress",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": [],
+      "notes": "rigged characters via spawnCharacter, buildings/props under existing model ids, item meshes, terrain texture fetch"
+    },
+    "world-look": {
+      "owner": "builder:world-look (opus)",
+      "status": "in-progress",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": [],
+      "notes": "PBR splat, real trees/grass, sky/atmosphere, water, styled map"
     }
   },
   "coreChanges": [

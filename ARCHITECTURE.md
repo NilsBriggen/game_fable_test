@@ -14,6 +14,7 @@ Assumptions the integrator made without asking are marked **[ASSUMPTION]**.
 | Concern | Choice | Why |
 |---|---|---|
 | Language | TypeScript 5, `strict: true`, ES2022 modules | Type-checked module boundaries are the cheapest enforcement of the ownership rules. |
+| Assets | **[DECISION, owner-approved]** CC0 / CC-BY assets may be downloaded (ambientCG, Poly Haven, Quaternius, KayKit, OpenGameArt); every asset is listed with licence and author in `public/assets/CREDITS-*.md` and fetched reproducibly by `tools/assets/*`. | Visual quality target raised by the owner after the core modules passed. |
 | Bundler / dev server | Vite 6 | Zero-config, fast HMR, `npm run dev` must always work (Rule: keep the build runnable). |
 | Rendering | Three.js r170 (`MeshStandardMaterial` / `MeshPhysicalMaterial`, `WebGLRenderer`) | Spec mandates r160+. PBR, CSM-style cascaded shadow maps via three's `CSM` addon. |
 | ECS | **Hand-rolled** in `src/core/ecs.ts` (~300 lines) | **[ASSUMPTION]** No third-party ECS. We need deterministic serialization of every component to a save file, and a plain `Map<ComponentType, Map<EntityId, Component>>` store is trivially serializable, debuggable in devtools, and has no build-time codegen. bitecs / miniplex would force typed-array or class-instance layouts that fight the save schema. Performance is not the bottleneck: entity counts are ≤ ~5 000 live. |
@@ -520,7 +521,9 @@ The critic (§9) uses only this output.
 | Role | Tier | Touches |
 |---|---|---|
 | Integrator (this session) | Fable | `src/core`, `src/main.ts`, `ARCHITECTURE.md`, `STATUS.json`, `tools/harness`, wiring |
-| Builder: world | Sonnet | `src/world`, `content/geography.ts`, `public/assets` (terrain textures/models) |
+| Builder: world (geometry) | Sonnet | `src/world/{heightmodel,terrain,geodata,chunkmesh,terrain.worker}.ts`, `content/geography.ts` |
+| Builder: world-look | Opus | `src/world/{terrainMaterial,textures,vegetation,treeGeometry,sky,water,shadowCsm,map}.ts`, `public/assets/textures`, `public/assets/vegetation` |
+| Builder: assets & characters | Opus | `src/world/{models,propGeometry,assets,characters}.ts`, `public/assets/models`, `public/assets/characters`, `tools/assets` |
 | Builder: save | Sonnet | `src/save` |
 | Builder: exploration | Sonnet | `src/exploration`, `content/pois.ts`, `content/npcs.ts` |
 | Builder: combat | Sonnet | `src/combat`, `content/abilities.ts`, `content/encounters.ts` |
