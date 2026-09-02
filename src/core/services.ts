@@ -16,6 +16,20 @@ export type Weather = 'clear' | 'overcast' | 'rain' | 'snow' | 'fog';
 export interface TransformLike { x: number; y: number; z: number; yaw?: number; scale?: number }
 export interface InstanceHandle { id: number; dispose(): void; setVisible(v: boolean): void }
 
+export type CharacterAnim = 'idle' | 'walk' | 'run' | 'attack' | 'hit' | 'down' | 'dead' | 'brace' | 'shoot' | 'reload' | 'talk' | 'cheer' | 'flee';
+export interface CharacterHandle {
+  object: Object3D;
+  /** crossfade to an animation; loop for idle/walk/run, one-shot otherwise (resolves when finished) */
+  play(anim: CharacterAnim, opts?: { loop?: boolean; speed?: number; fade?: number }): Promise<void>;
+  /** drive the walk cycle from actual velocity (m/s); 0 = idle */
+  setSpeed(mps: number): void;
+  update(dt: number): void;
+  setVisible(v: boolean): void;
+  /** true if a rigged asset is used (false = procedural fallback) */
+  rigged: boolean;
+  dispose(): void;
+}
+
 export interface WorldService {
   heightAt(x: number, z: number): number;
   normalAt(x: number, z: number): Vector3;
@@ -35,6 +49,12 @@ export interface WorldService {
   placeInstances(modelId: string, transforms: TransformLike[]): InstanceHandle;
   /** load (cached) a prop/character model as a fresh Object3D you own */
   spawnModel(modelId: string, opts?: { variant?: string; scale?: number }): Object3D;
+  /**
+   * Animated character from the asset library (rigged GLB when available, procedural fallback otherwise).
+   * Callers own the returned object; call `update(dt)` each frame and `dispose()` when done.
+   * Optional until the character-art pipeline lands; consumers fall back to `spawnModel('char.<archetype>')`.
+   */
+  spawnCharacter?(archetype: string, opts?: { variant?: string; mounted?: boolean; seed?: number }): CharacterHandle;
   /** other modules register their own procedural model factories (e.g. exploration registers 'char.*') */
   registerModel(modelId: string, factory: (opts: { variant?: string; scale?: number; rng: Rng }) => Object3D): void;
   hasModel(modelId: string): boolean;
