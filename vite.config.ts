@@ -15,7 +15,7 @@ export default defineConfig({
     rollupOptions: { output: { manualChunks: { three: ['three'] } } },
   },
   worker: { format: 'es' },
-  server: { host: '127.0.0.1' },
+  server: { host: '127.0.0.1', hmr: process.env.HARNESS_NO_HMR ? false : undefined, watch: process.env.HARNESS_NO_HMR ? { ignored: ['**/*'] } : undefined },
   preview: { host: '127.0.0.1' },
   test: { include: ['src/**/*.test.ts'], environment: 'node' },
 } as any);

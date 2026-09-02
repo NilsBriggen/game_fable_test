@@ -17,7 +17,8 @@ const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const PREVIEW = flag('--preview');
 const OUT = path.resolve(root, opt('--out', 'tools/harness/out'));
 const ONLY = opt('--scenario', null)?.split(',');
-const PORT = PREVIEW ? 4173 : 5173;
+// Always use a private port with HMR/watch disabled so concurrent builders editing files cannot reload the page mid-scenario.
+const PORT = Number(opt('--port', 0)) || (PREVIEW ? 4300 : 5300) + Math.floor(Math.random() * 500);
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 const BUDGET = { drawCalls: 2000, triangles: 3_000_000, frameP95: 16.6, heapMB: 512 };
 
@@ -34,10 +35,9 @@ async function waitHttp(url, ms) {
 }
 
 let server = null;
-const alreadyUp = await waitHttp(URL_BASE, 500);
-if (!alreadyUp) {
+{
   const cmd = PREVIEW ? ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'] : ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'];
-  server = spawn('npx', cmd, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
+  server = spawn('npx', cmd, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1', HARNESS_NO_HMR: '1' } });
   server.stdout.on('data', () => {});
   server.stderr.on('data', (d) => process.stderr.write(`[vite] ${d}`));
   if (!(await waitHttp(URL_BASE, 60000))) { console.error('dev server did not start'); process.exit(2); }
