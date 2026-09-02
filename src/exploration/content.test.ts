@@ -85,11 +85,11 @@ describe('npcs.ts content validation', () => {
   const c = buildRegistry();
 
   it('every LORE.md §5 named-cast id is present with the correct historical value', () => {
-    const expected: Record<string, 'true' | 'legend'> = {
+    const expected: Record<string, 'true' | 'legend' | 'invented'> = {
       'npc.werner-stauffacher': 'legend', 'npc.walter-fuerst': 'legend', 'npc.arnold-von-melchtal': 'legend',
       'npc.wilhelm-tell': 'legend', 'npc.hermann-gessler': 'legend', 'npc.beringer-von-landenberg': 'legend',
       'npc.werner-von-attinghausen': 'true', 'npc.leopold-i': 'true', 'npc.abt-johannes': 'true',
-      'npc.konrad-ab-yberg': 'legend', 'npc.heinrich-von-hunenberg': 'legend', 'npc.johannes-von-winterthur': 'true',
+      'npc.konrad-ab-yberg': 'invented', 'npc.heinrich-von-hunenberg': 'legend', 'npc.johannes-von-winterthur': 'true',
     };
     for (const [id, hist] of Object.entries(expected)) {
       const def = c.npcs.get(id);

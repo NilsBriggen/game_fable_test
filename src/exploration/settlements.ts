@@ -116,7 +116,7 @@ export function buildSettlements(content: ContentRegistry, world: WorldService, 
   let gallowsPole: Object3D | null = null;
   const altdorf = content.pois.get('poi.altdorf');
   if (altdorf) {
-    const x = altdorf.x + 12, z = altdorf.z - 6; // "near the lime tree" — a small offset from the well/church
+    const x = altdorf.x + 3, z = altdorf.z - 8; // between the well and the church, in the default north-facing view
     const pole = world.spawnModel('gallows.pole');
     pole.position.set(x, world.heightAt(x, z), z);
     // gallowsPole() (world/models.ts) adds the pole mesh first, the hat Group second — hide that child

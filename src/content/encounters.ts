@@ -16,6 +16,23 @@ const morgarten = PLACES['morgarten'];
 
 export const encounters: EncounterDef[] = [
   {
+    id: 'enc.habsburg-patrol',
+    name: 'A Habsburg road patrol',
+    location: { x: 0, z: 0 },
+    grid: { cols: 18, rows: 18 },
+    deploy: { q: 2, r: 12, cols: 6, rows: 4 },
+    units: [
+      { archetype: 'habsburg-sergeant', side: 'enemy', q: 9, r: 3, group: 'patrol' },
+      { archetype: 'habsburg-footman', side: 'enemy', q: 7, r: 3, group: 'patrol' },
+      { archetype: 'habsburg-footman', side: 'enemy', q: 11, r: 3, group: 'patrol' },
+    ],
+    objectives: [{ type: 'rout' }],
+    heightOverride: 'flat',
+    historical: 'invented',
+    note: 'A roving bailiff\'s patrol on the Küssnacht, Arth or Gotthard road; started by exploration when the party is hostile to the Habsburgs, with the location overridden to the player\'s position.',
+    description: 'Three of the Vogt\'s men block the road and demand to know your business.',
+  },
+  {
     id: 'enc.brunnen-quay', name: 'The Brunnen Quay', location: { x: brunnen.x, z: brunnen.z, yaw: 0.3 },
     grid: { cols: 16, rows: 16, cellM: 1.5 }, heightOverride: 'quay',
     deploy: { q: 2, r: 3, cols: 3, rows: 3 },

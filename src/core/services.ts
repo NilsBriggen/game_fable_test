@@ -376,6 +376,7 @@ export interface QuestService {
   evaluate(cond: QuestCondition | undefined): boolean;
   runEffects(effects: Effect[] | undefined): Promise<void>;
   runDialogue(dialogueId: string, speakerEntity?: EntityId): Promise<DialogueOutcome>;
+  dialogueExists?(dialogueId: string): boolean;
   runCutscene(cutsceneId: string): Promise<void>;
   journal(): JournalEntry[];
   addJournal(text: string, questId?: string): void;

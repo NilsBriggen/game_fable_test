@@ -8,6 +8,7 @@
  */
 import type { PlacedModel, PoiKind } from '@core/schemas';
 import { Rng, hashString } from '@core/rng';
+import { SPACING } from './colliders';
 
 export interface HeightProbe {
   heightAt(x: number, z: number): number;
@@ -24,20 +25,7 @@ export interface LayoutInput {
   population?: Record<string, number>;
 }
 
-const MAX_SLOPE_DY = 3.5; // metres of height change over a ~3 m probe step we tolerate for a building pad
-
-/** Nudge a candidate point off water/steep ground by pulling it back toward the settlement centre in a
- *  few shrinking steps; returns null if no dry, gentle spot is found nearby (caller skips the placement). */
-function findDrySpot(cx: number, cz: number, x: number, z: number, probe: HeightProbe): [number, number] | null {
-  let px = x, pz = z;
-  for (let i = 0; i < 6; i++) {
-    const ok = !probe.isWater(px, pz) && isGentle(px, pz, probe);
-    if (ok) return [px, pz];
-    px = cx + (px - cx) * 0.7;
-    pz = cz + (pz - cz) * 0.7;
-  }
-  return !probe.isWater(cx, cz) && isGentle(cx, cz, probe) ? [cx, cz] : null;
-}
+const MAX_SLOPE_DY = 1.6; // ≈ 28° over a 3 m probe step: buildings must not sit on ground the player cannot walk (40°)
 
 function isGentle(x: number, z: number, probe: HeightProbe): boolean {
   const h0 = probe.heightAt(x, z);
@@ -50,19 +38,49 @@ class Builder {
   readonly out: PlacedModel[] = [];
   constructor(private cx: number, private cz: number, private probe: HeightProbe, private allowWater = false) {}
 
-  /** Place one model at a local offset (metres) from the settlement centre. Skipped (not pushed) if the
-   *  spot is on water/too steep and no nearby dry spot is found — this is what keeps the "never on water"
-   *  invariant, not a promise about the exact requested offset. */
+  private overlaps(modelId: string, x: number, z: number): boolean {
+    const r = SPACING[modelId] ?? 0;
+    if (r === 0) return false;
+    for (const m of this.out) {
+      const o = SPACING[m.modelId] ?? 0;
+      if (o === 0) continue;
+      if (Math.hypot(m.x - x, m.z - z) < r + o) return true;
+    }
+    return false;
+  }
+
+  /** Place one model at a local offset from the settlement centre. The spot is rejected if it is on water,
+   *  too steep, or overlapping an already-placed footprint; then the offset is rotated around the centre
+   *  (±30°, ±60°, ±90°) and shrunk before giving up. Returns false when nothing fits (caller skips). */
   add(modelId: string, dx: number, dz: number, opts: { yaw?: number; scale?: number; variant?: string } = {}): boolean {
-    const x = this.cx + dx, z = this.cz + dz;
     if (this.allowWater) {
-      this.out.push({ modelId, x, z, yaw: opts.yaw, scale: opts.scale, variant: opts.variant });
+      this.out.push({ modelId, x: this.cx + dx, z: this.cz + dz, yaw: opts.yaw, scale: opts.scale, variant: opts.variant });
       return true;
     }
-    const spot = findDrySpot(this.cx, this.cz, x, z, this.probe);
-    if (!spot) return false;
-    this.out.push({ modelId, x: spot[0], z: spot[1], yaw: opts.yaw, scale: opts.scale, variant: opts.variant });
-    return true;
+    const baseAngle = Math.atan2(dx, dz), baseR = Math.hypot(dx, dz);
+    for (let shrink = 1; shrink >= 0.55; shrink -= 0.15) {
+      for (const da of [0, 0.52, -0.52, 1.05, -1.05, 1.57, -1.57]) {
+        const a = baseAngle + da, r = baseR * shrink;
+        const x = this.cx + Math.sin(a) * r, z = this.cz + Math.cos(a) * r;
+        if (this.probe.isWater(x, z) || !isGentle(x, z, this.probe) || this.overlaps(modelId, x, z)) continue;
+        this.out.push({ modelId, x, z, yaw: opts.yaw, scale: opts.scale, variant: opts.variant });
+        return true;
+      }
+      if (baseR === 0) break;
+    }
+    return false;
+  }
+
+  /** Largest radius (≤ max) around the centre that is dry and gentle in all 8 compass directions. */
+  dryRadius(max: number): number {
+    let r = max;
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      let d = 0;
+      while (d < max && !this.probe.isWater(this.cx + Math.sin(a) * (d + 6), this.cz + Math.cos(a) * (d + 6))) d += 6;
+      r = Math.min(r, d);
+    }
+    return r;
   }
 }
 
@@ -77,12 +95,16 @@ function layoutVillage(b: Builder, rng: Rng, yaw: number, pop?: Record<string, n
   b.add('well', 0, 0);
   const big = popTotal(pop) >= 9;
   b.add(big ? 'church' : 'chapel', 0, -16, { yaw: yaw + Math.PI });
+  // ring 0 has five slots (the sixth, behind the church at (0,-16), stays open); the rest go to ring 1
+  const ring0 = Math.min(5, houses);
   for (let i = 0; i < houses; i++) {
-    const ring = i < 6 ? 0 : 1;
-    const idxInRing = ring === 0 ? i : i - 6;
-    const ringCount = ring === 0 ? Math.min(6, houses) : houses - 6;
-    const angle = (idxInRing / Math.max(1, ringCount)) * Math.PI * 2 + rng.next() * 0.3;
-    const radius = 20 + ring * 16 + rng.next() * 4;
+    const ring = i < ring0 ? 0 : 1;
+    const idxInRing = ring === 0 ? i : i - ring0;
+    const ringCount = ring === 0 ? ring0 : houses - ring0;
+    const angle = ring === 0
+      ? Math.PI * 0.2 + (idxInRing / ring0) * Math.PI * 1.6 + rng.next() * 0.2   // 36°..324°, never straight behind the church
+      : (idxInRing / Math.max(1, ringCount)) * Math.PI * 2 + rng.next() * 0.3;
+    const radius = 24 + ring * 16 + rng.next() * 4;
     const dx = Math.sin(angle) * radius, dz = Math.cos(angle) * radius;
     b.add('house.blockbau', dx, dz, { yaw: -angle + Math.PI, variant: i === 0 ? 'inn' : undefined });
     if (rng.next() < 0.6) b.add('fence', dx + Math.cos(angle) * 5, dz - Math.sin(angle) * 5, { yaw: -angle });
@@ -93,21 +115,21 @@ function layoutVillage(b: Builder, rng: Rng, yaw: number, pop?: Record<string, n
 
 /** town (Luzern/Zug): `house.stone` rows, `castle.wall` perimeter with a gate, a church (task spec). */
 function layoutTown(b: Builder, rng: Rng, yaw: number, pop?: Record<string, number>): void {
-  const houses = Math.max(10, Math.min(20, Math.round(6 + popTotal(pop))));
+  const half = Math.max(30, Math.min(55, b.dryRadius(60) - 8));
+  const houses = Math.max(8, Math.min(20, Math.round(6 + popTotal(pop)), Math.floor((half * 2 - 20) / 11) * 3));
   b.add(houses >= 14 ? 'church' : 'chapel', 0, -8);
   b.add('well', 14, 10);
   const rows = 3;
   let placed = 0;
   for (let r = 0; r < rows && placed < houses; r++) {
-    const rowZ = -30 + r * 20;
+    const rowZ = -half * 0.55 + r * (half * 0.36);
     const perRow = Math.ceil((houses - placed) / (rows - r));
     for (let i = 0; i < perRow && placed < houses; i++, placed++) {
       const dx = (i - (perRow - 1) / 2) * 11;
       b.add('house.stone', dx, rowZ + (rng.next() - 0.5) * 2, { yaw: Math.PI });
     }
   }
-  // wall perimeter: a rough square with a gate gap facing yaw
-  const half = 55;
+  // wall perimeter: a rough square sized to the dry land, with a gate gap facing yaw
   const segLen = 8;
   for (const side of ['n', 's', 'e', 'w'] as const) {
     const isGateSide = (side === 'n' && Math.cos(yaw) > 0.5) || (side === 's' && Math.cos(yaw) < -0.5)

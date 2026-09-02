@@ -7,7 +7,7 @@
 import { Group, Object3D } from 'three';
 import type { GameContext } from '@core/context';
 import type { EntityId, World } from '@core/ecs';
-import { Transform, Character, PartyMember, Renderable, MeshRef, Player, Name } from '@core/components';
+import { Transform, Character, PartyMember, Renderable, MeshRef, Player, Name, Poi } from '@core/components';
 import type { NpcDef, PoiDef } from '@core/schemas';
 import type { ExplorationEvents, ExplorationService, WorldService } from '@core/services';
 import { EventBus } from '@core/events';
@@ -18,7 +18,7 @@ import { buildPlayerModel, animateWalkCycle } from './playerModel';
 import { registerExplorationHumanoids } from './humanoid';
 import { NpcSystem } from './npc';
 import { PoiSystem } from './poi';
-import { InteractSystem, spawnContainers } from './interact';
+import { InteractSystem, spawnContainers, spawnBoatTravel } from './interact';
 import { updateHud } from './hud';
 import { buildSettlements, type BuiltSettlements } from './settlements';
 import type { Collider } from './colliders';
@@ -55,12 +55,13 @@ class ExplorationServiceImpl implements ExplorationService {
     this.controller = new PlayerController(ctx.canvas, this.cameraRig);
     this.poiSystem = new PoiSystem(ctx.world, ctx.content, ctx.services, this.bus);
     this.interactSystem = new InteractSystem(ctx.world, ctx.content, ctx.services, this.bus);
-    this.npcSystem = new NpcSystem(ctx.world, ctx.content, ctx.services.get('party'), world, roots.dynamic, (encId) => {
-      // Unlike the (now removed, requests/quest-2.md) Act-1 scripted encounters, a Habsburg patrol catching
-      // a hostile player is exploration's own mechanic — no quest stage owns or independently fires it — so
-      // this always starts combat itself, whether or not a quest service exists.
+    this.npcSystem = new NpcSystem(ctx.world, ctx.content, ctx.services.get('party'), world, roots.dynamic, (encId, at) => {
+      // A patrol catching a hostile party is exploration's own mechanic (no quest stage owns it), so combat is
+      // started here, at the player's position rather than the encounter's authored location.
       this.bus.emit('encounter-trigger', encId, -1);
-      ctx.services.tryGet('combat')?.start(encId).catch((err) => console.error('[exploration] patrol combat.start failed', err));
+      const base = ctx.content.encounters.get(encId);
+      const encounterOverride = base ? { ...base, location: { x: at.x, z: at.z, yaw: 0 } } : undefined;
+      ctx.services.tryGet('combat')?.start(encId, { encounterOverride }).catch((err) => console.error('[exploration] patrol combat.start failed', err));
     });
 
     ctx.events.on('state-changed', (from, to) => {
@@ -73,11 +74,17 @@ class ExplorationServiceImpl implements ExplorationService {
 
   // ---------------- lifecycle ----------------
 
+  private populatedChapter: string | null = null;
+
+  /** Idempotent per chapter: newGame, quest.setChapter and the chapter-changed event all call this. */
   populate(chapter: string): void {
+    if (this.populatedChapter === chapter && this.ctx.world.count(Poi) > 0) return;
+    this.populatedChapter = chapter;
     this.lastChapter = chapter;
     this.npcSystem.populate(chapter);
     this.poiSystem.spawnPoiEntities();
     spawnContainers(this.ctx.world, this.ctx.content);
+    spawnBoatTravel(this.ctx.world, this.ctx.content);
     this.rebuildSettlements();
   }
 
@@ -94,11 +101,13 @@ class ExplorationServiceImpl implements ExplorationService {
   }
 
   private rebuildTransientMeshes(): void {
-    // Player: unconditional (always rendered). NPCs: re-created lazily by the normal proximity system on
-    // its next tick — every Npc entity is freshly `frozen` after `clear()`/deserialize, so nothing is
-    // spawned until the player is actually near it again (task spec: NPCs beyond 300 m aren't rendered).
+    // Player mesh now; NPC meshes lazily by proximity; patrol state and settlement geometry rebuilt from the
+    // restored entities / content.
     const id = this.getPlayer();
     if (id !== null) this.ensurePlayerMesh(id);
+    this.npcSystem.rebindPatrols();
+    this.populatedChapter = null;
+    if (this.settlementsGroup.children.length === 0) this.rebuildSettlements();
   }
 
   // ---------------- player ----------------
@@ -182,6 +191,11 @@ class ExplorationServiceImpl implements ExplorationService {
     const pos = this.poiPosition(poiId);
     const player = this.getPlayer();
     if (!pos || player === null) return;
+    const def = this.poiDef(poiId);
+    if (!this.isDiscovered(poiId) || !def?.fastTravel) {
+      this.ctx.services.tryGet('ui')?.toast('You have not found that place yet.', 'warning');
+      return;
+    }
     const from = this.ctx.world.get(player, Transform);
     const distM = from ? Math.hypot(pos.x - from.x, pos.z - from.z) : 0;
     const ui = this.ctx.services.tryGet('ui');
@@ -252,14 +266,10 @@ class ExplorationServiceImpl implements ExplorationService {
   }
 }
 
+/** Geometry only: materials are shared library instances (world/models.ts) still used by other meshes. */
 function disposeObject3D(obj: Object3D): void {
   obj.parent?.remove(obj);
-  obj.traverse((child) => {
-    const anyChild = child as unknown as { geometry?: { dispose(): void }; material?: { dispose(): void } | { dispose(): void }[] };
-    anyChild.geometry?.dispose();
-    if (Array.isArray(anyChild.material)) anyChild.material.forEach((m) => m.dispose());
-    else anyChild.material?.dispose();
-  });
+  obj.traverse((child) => { (child as unknown as { geometry?: { dispose(): void } }).geometry?.dispose(); });
 }
 
 export async function register(ctx: GameContext): Promise<void> {

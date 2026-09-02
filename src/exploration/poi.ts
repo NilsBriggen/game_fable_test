@@ -41,12 +41,13 @@ export class PoiSystem {
    *  from `populate()`. Existing discovered state is passed back in by the caller via `setDiscovered()`
    *  after this (e.g. on load). */
   spawnPoiEntities(): void {
+    const keep = new Set(this.discoveredIds()); // discoveries survive a repeat populate (chapter change)
     for (const id of this.world.query(Poi)) this.world.destroy(id);
     for (const id of this.world.query(EncounterTrigger)) this.world.destroy(id);
     for (const def of this.content.pois.values()) {
       const id = this.world.create(def.id);
       this.world.add(id, Transform, { x: def.x, y: 0, z: def.z, yaw: 0 });
-      this.world.add(id, Poi, { poiId: def.id, kind: def.kind, radius: def.discoverRadius, discovered: false, fastTravel: def.fastTravel });
+      this.world.add(id, Poi, { poiId: def.id, kind: def.kind, radius: def.discoverRadius, discovered: keep.has(def.id), fastTravel: def.fastTravel });
       this.world.add(id, Name, { id: def.id, display: def.name });
     }
   }

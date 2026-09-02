@@ -54,8 +54,10 @@ export class InteractSystem {
     const name = this.world.get(entity, Name)?.display ?? 'someone';
     const quest = this.services.tryGet('quest');
     const ui = this.services.tryGet('ui');
-    if (it.kind === 'talk') {
-      if (quest && it.dialogueId) {
+    if (it.kind === 'travel') {
+      this.travel(it.data?.destinations as string[] | undefined);
+    } else if (it.kind === 'talk') {
+      if (quest && it.dialogueId && quest.dialogueExists?.(it.dialogueId) !== false) {
         quest.runDialogue(it.dialogueId, entity).catch((err) => console.error('[exploration] runDialogue failed', err));
       } else if (ui) {
         ui.toast(`${name} has nothing to say yet.`, 'info');
@@ -71,6 +73,35 @@ export class InteractSystem {
       ui.toast(it.prompt, 'info');
     }
     this.events.emit('interact', entity);
+  }
+
+  /** Boat travel: offer the discovered ports in order of distance; the first accepted one is the destination. */
+  private travel(destinations: string[] | undefined): void {
+    const ex = this.services.tryGet('exploration');
+    const ui = this.services.tryGet('ui');
+    if (!ex || !destinations?.length) return;
+    const open = destinations.filter((d) => ex.isDiscovered(d));
+    if (open.length === 0) { ui?.toast('You know of no other landing to row to yet.', 'info'); return; }
+    void (async () => {
+      for (const d of open.slice(0, 3)) {
+        const name = ex.poiDef(d)?.name ?? d;
+        const ok = ui ? await ui.confirm(`Take the boat to ${name}?`, 'Row', 'Not there') : true;
+        if (ok) { await ex.fastTravel(d); return; }
+      }
+    })();
+  }
+}
+
+/** One `travel` interactable per port POI (§5.2 "boats at Flüelen/Brunnen/Gersau/Luzern as travel interactables"). */
+export function spawnBoatTravel(world: World, content: ContentRegistry): void {
+  for (const id of world.query(Interactable)) { if (world.get(id, Interactable)!.kind === 'travel') world.destroy(id); }
+  const ports = [...content.pois.values()].filter((p) => p.kind === 'port');
+  for (const poi of ports) {
+    const others = ports.filter((o) => o.id !== poi.id).sort((a, b) => Math.hypot(a.x - poi.x, a.z - poi.z) - Math.hypot(b.x - poi.x, b.z - poi.z)).map((o) => o.id);
+    const id = world.create(`travel.${poi.id}`);
+    world.add(id, Transform, { x: poi.x + 6, y: 0, z: poi.z + 4, yaw: 0 });
+    world.add(id, Name, { id: `travel.${poi.id}`, display: 'Boat' });
+    world.add(id, Interactable, { kind: 'travel', prompt: 'Take the boat', enabled: true, data: { destinations: others } });
   }
 }
 

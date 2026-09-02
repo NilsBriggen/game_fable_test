@@ -224,7 +224,7 @@ const historicalCast: NpcDef[] = [
     chapters: ALL_CHAPTERS,
     schedule: daySchedule(),
     description: "A Schwyz Landsgemeinde voice and hawk on the March dispute — pushes for the Einsiedeln raid.",
-    historical: 'legend', note: 'The Ab Yberg family is H in Schwyz politics; this individual and his Marchenstreit role are I. See LORE.md §5.',
+    historical: 'invented', note: 'The Ab Yberg family is H in Schwyz politics; this individual and his Marchenstreit role are I. See LORE.md §5.',
   },
   {
     id: 'npc.heinrich-von-hunenberg', name: 'Heinrich von Hünenberg', faction: 'habsburg', home: 'poi.zug', role: 'named',
@@ -463,8 +463,8 @@ const minorCast: NpcDef[] = [
   // ---- Einsiedeln ----
   minor('npc.bruder-niklaus', 'Bruder', 'Niklaus', 'poi.einsiedeln', 'einsiedeln', 'monk', { schedule: monkSchedule(), description: "An Einsiedeln brother of the infirmary garden." }),
   minor('npc.bruder-balz', 'Bruder', 'Balz', 'poi.einsiedeln', 'einsiedeln', 'monk', { schedule: monkSchedule(), description: "An Einsiedeln brother of the scriptorium." }),
-  minor('npc.bruder-toni', 'Bruder', 'Toni', 'poi.einsiedeln', 'einsiedeln', 'abbey-man-at-arms', { schedule: guardSchedule(), description: "One of the abbey's own retainers." }),
-  minor('npc.bruder-sepp', 'Bruder', 'Sepp', 'poi.einsiedeln', 'einsiedeln', 'abbey-man-at-arms', { schedule: guardSchedule(), description: "A second abbey man-at-arms, holding the gate." }),
+  minor('npc.toni-kaelin', 'Toni', 'Kälin', 'poi.einsiedeln', 'einsiedeln', 'abbey-man-at-arms', { schedule: guardSchedule(), description: "One of the abbey's own retainers." }),
+  minor('npc.sepp-schuler', 'Sepp', 'Schuler', 'poi.einsiedeln', 'einsiedeln', 'abbey-man-at-arms', { schedule: guardSchedule(), description: "A second abbey man-at-arms, holding the gate." }),
   // ---- Gersau / Vitznau / Weggis (fishing shore) ----
   minor('npc.uli-fischer', 'Uli', 'Fischer', 'poi.gersau', 'none', 'fisher', { description: "A Gersau fisherman, proud of his little free village's independence.", dialogueRoot: 'dlg.fischer-gersau' }),
   minor('npc.verena-huber', 'Verena', 'Huber', 'poi.vitznau', 'luzern', 'fisher', { description: 'A Vitznau fisherwoman.' }),

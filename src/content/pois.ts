@@ -80,18 +80,18 @@ function invented(id: string, name: string, nearGazId: string, dx: number, dz: n
 
 const mandated: PoiDef[] = [
   fromGazetteer('ruetli', {
-    kind: 'meadow', historical: 'legend', fastTravel: true, discoverRadius: 100,
+    kind: 'meadow', historical: true, fastTravel: true, discoverRadius: 100,
     note: 'The Rütli meadow is a real place above the Urnersee; the oath sworn there is L (Weisses Buch von Sarnen). See LORE.md §1/§6.',
     description: 'A quiet lakeside meadow below the Seelisberg, reachable only by boat or steep path — where three men of three valleys are said to have sworn their oath.',
   }),
   fromGazetteer('altdorf', {
-    kind: 'village', historical: 'legend', discoverRadius: 160,
+    kind: 'village', historical: true, discoverRadius: 160,
     population: { peasant: 6, 'woman-peasant': 3, elder: 2, merchant: 1, innkeeper: 1, child: 2, 'militia-spear': 2, 'bailiff-guard': 2 },
     note: 'Altdorf as Uri\'s Landsgemeinde seat is H; the pole, the hat and the apple-shot are L (Weisses Buch/Tschudi). See LORE.md §1/§6.',
     description: 'Uri\'s market village beneath the lime tree, where the Landsgemeinde meets — and where, sixteen years on, a bailiff\'s hat sits on a pole in the square.',
   }),
   fromGazetteer('buerglen', {
-    kind: 'village', historical: 'legend',
+    kind: 'village', historical: true,
     population: { peasant: 5, 'woman-peasant': 2, herder: 2, child: 2, monk: 1 },
     note: 'Bürglen as an Uri village is H; its association with Wilhelm Tell\'s household is L. See LORE.md §5.',
     description: 'A Schächental-mouth village under Uri\'s Landenberg — home, tradition says, to Wilhelm Tell.',
@@ -119,7 +119,7 @@ const mandated: PoiDef[] = [
     description: 'A Habsburg village on the lake\'s Rigi-flank shore, its toll road the fastest way from Arth to Luzern.',
   }),
   fromGazetteer('gesslerburg', {
-    kind: 'castle', historical: 'legend',
+    kind: 'castle', historical: true,
     population: { 'habsburg-footman': 2, 'habsburg-sergeant': 1 },
     note: 'Gesslerburg is a real ruined castle at Küssnacht; the association with a Landvogt named Gessler is L (no such Vogt is attested). See LORE.md §2.',
     description: 'A Habsburg stronghold above Küssnacht, seat — tradition insists — of the Landvogt whose hat sits on the pole at Altdorf.',
@@ -143,7 +143,7 @@ const mandated: PoiDef[] = [
     description: 'The Talschaft\'s seat under the twin peaks of the Mythen — Werner Stauffacher\'s canton, and the most outspoken of the three against the bailiffs.',
   }),
   fromGazetteer('steinen', {
-    kind: 'village', historical: 'legend',
+    kind: 'village', historical: true,
     population: { peasant: 5, 'woman-peasant': 2, herder: 2, child: 1 },
     note: 'Steinen as a Schwyz village is H; the tradition that Werner Stauffacher\'s house stood here is L. See LORE.md §2/§5.',
     description: 'A farming village on the Steiner Aa — home, tradition holds, to Werner Stauffacher and his household.',
@@ -177,7 +177,7 @@ const mandated: PoiDef[] = [
     description: 'Nidwalden\'s market village under the Stanserhorn — Arnold von Melchtal\'s canton.',
   }),
   fromGazetteer('rotzberg', {
-    kind: 'castle', historical: 'legend',
+    kind: 'castle', historical: true,
     population: { 'habsburg-footman': 2 },
     note: 'Rotzberg castle is H; its storming during the Burgenbruch (a servant girl lets down a rope) is L. See LORE.md §1/§4.',
     description: 'A Habsburg garrison keep on a wooded knoll above Stans — held, tradition says, by too small a watch on the wrong night.',
@@ -189,7 +189,7 @@ const mandated: PoiDef[] = [
     description: 'Obwalden\'s village on the Sarnersee — the place whose old people, the journal says, "give no year" for what happened here.',
   }),
   fromGazetteer('landenberg', {
-    kind: 'castle', historical: 'legend',
+    kind: 'castle', historical: true,
     population: { 'habsburg-footman': 2, 'habsburg-sergeant': 1 },
     note: 'The Landenberg hill and its castle are H; the bailiff Beringer von Landenberg is L. See LORE.md §2/§5.',
     description: 'A bailiff\'s castle on the hill above Sarnen, seat of the Landvogt the New Year\'s gift procession is said to have unseated.',
@@ -323,7 +323,7 @@ const extra: PoiDef[] = [
 // ==================================================================================================
 
 const invented_: PoiDef[] = [
-  invented('poi.aegerisee-shore', 'Ägerisee south shore', 'oberaegeri', -240, 480, {
+  invented('poi.aegerisee-shore', 'Ägerisee south shore', 'morgarten', -120, -140, {
     kind: 'landmark', historical: true,
     note: 'The Ägerisee\'s south shore is a real place named in LORE.md §4\'s mandated POI list.',
     description: 'The reedy south shore of the Ägerisee, in view of the road Leopold\'s column will take in 1315.',
@@ -334,7 +334,7 @@ const invented_: PoiDef[] = [
     note: 'Bannalp is a real Nidwalden alp name (LORE.md §4 names it as a candidate); this specific hut and its exact position are the builder\'s invention.',
     description: 'A high grazing alp above Wolfenschiessen, its two herders\' hut roofed in split shingle.',
   }),
-  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', -120, -260, {
+  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', -20, -140, {
     kind: 'cross', historical: 'invented',
     note: 'A wayside cross on a lake-shore footpath — LORE.md §4\'s explicitly invented minor-POI category; no specific attested cross is claimed.',
     description: 'A weathered wooden wayside cross where the shore path narrows above the water.',
@@ -356,13 +356,13 @@ const invented_: PoiDef[] = [
     note: 'A charcoal burners\' camp — LORE.md §4\'s invented minor-POI category.',
     description: 'A second charcoal camp working the Melchtal\'s lower slopes.',
   }),
-  invented('poi.klausnerzelle', 'Hermit\'s cell', 'bauen', 380, 320, {
+  invented('poi.klausnerzelle', 'Hermit\'s cell', 'bauen', -60, 140, {
     kind: 'hut', historical: 'invented',
     population: { monk: 1 },
     note: 'A hermit\'s cell above the lake — LORE.md §4\'s invented minor-POI category; lay hermits (Klausner) attached to no house were an attested medieval phenomenon in general, if not this specific man.',
     description: 'A one-room stone cell cut into the cliff above the shore, home to a solitary Klausner.',
   }),
-  invented('poi.fischerhuetten-gersau', "Fishermen's huts", 'gersau', -420, 260, {
+  invented('poi.fischerhuetten-gersau', "Fishermen's huts", 'gersau', 100, 10, {
     kind: 'hut', historical: 'invented',
     population: { fisher: 2 },
     note: "Fishermen's huts — LORE.md §4's invented minor-POI category; lake-shore fishing is independently attested for Gersau.",

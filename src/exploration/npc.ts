@@ -9,7 +9,7 @@
  */
 import { Object3D } from 'three';
 import type { World, EntityId } from '@core/ecs';
-import { Transform, Renderable, Interactable, Npc, MeshRef, type NpcC } from '@core/components';
+import { Transform, Renderable, Interactable, Npc, MeshRef, PartyMember, type NpcC } from '@core/components';
 import type { ContentRegistry } from '@core/content';
 import type { NpcDef, ScheduleEntry } from '@core/schemas';
 import type { PartyService, WorldService } from '@core/services';
@@ -28,7 +28,14 @@ interface PatrolState {
   forward: boolean;
 }
 
-export type EncounterStarter = (encounterId: string) => void;
+export type EncounterStarter = (encounterId: string, at: { x: number; z: number }) => void;
+
+/** Archetypes without a bespoke generic dialogue map onto the nearest one the quest module defines. */
+const GENERIC_DIALOGUE: Record<string, string> = {
+  'woman-peasant': 'peasant', fisher: 'boatman', 'militia-spear': 'peasant', 'militia-halberd': 'peasant', 'militia-crossbow': 'peasant',
+  'habsburg-footman': 'habsburg-guard', 'habsburg-sergeant': 'habsburg-guard', 'habsburg-crossbowman': 'habsburg-guard', 'habsburg-knight': 'habsburg-guard',
+  'habsburg-squire': 'habsburg-guard', 'bailiff-guard': 'habsburg-guard', 'abbey-man-at-arms': 'habsburg-guard', raubritter: 'habsburg-guard',
+};
 
 export class NpcSystem {
   /** `EntityId -> content npc id`, so interaction can find the dialogueRoot / display name again without
@@ -36,7 +43,7 @@ export class NpcSystem {
   readonly defIdOf = new Map<EntityId, string>();
   private readonly patrols = new Map<EntityId, PatrolState>();
   private readonly patrolLead = new Set<EntityId>();
-  private lastTrigger = 0;
+  private lastTrigger = -Infinity;
   private isHostileHabsburg = false;
   /** Draw-call budget safety valve (coordinator alert: 5 295 draw calls at Altdorf; target <= 1 200):
    *  even with the 300 m freeze radius, a single dense village can have more generic crowd than is
@@ -62,10 +69,14 @@ export class NpcSystem {
   clear(): void {
     for (const id of this.world.query(Npc)) {
       const mesh = this.world.get(id, MeshRef);
-      if (mesh?.object) disposeObject3D(mesh.object as Object3D, this.dynamicRoot);
+      if (mesh?.object) { disposeObject3D(mesh.object as Object3D, this.dynamicRoot); this.world.remove(id, MeshRef); }
+      if (this.world.has(id, PartyMember)) continue; // recruited companions travel with the party across time-skips
       this.world.destroy(id);
     }
+    const kept = new Map<EntityId, string>();
+    for (const [id, defId] of this.defIdOf) if (this.world.isAlive(id)) kept.set(id, defId);
     this.defIdOf.clear();
+    for (const [id, defId] of kept) this.defIdOf.set(id, defId);
     this.patrols.clear();
     this.patrolLead.clear();
     this.meshedCount = 0;
@@ -73,8 +84,10 @@ export class NpcSystem {
 
   populate(chapter: string): void {
     this.clear();
+    const inParty = new Set(this.defIdOf.values());
     for (const def of this.content.npcs.values()) {
       if (def.chapters && !def.chapters.includes(chapter)) continue;
+      if (inParty.has(def.id)) continue;
       this.spawnNamed(def);
     }
     for (const poi of this.content.pois.values()) {
@@ -95,7 +108,7 @@ export class NpcSystem {
     t.x = x; t.y = this.worldService.heightAt(x, z); t.z = z; t.yaw = 0;
     // Falls back to the quest builder's `dlg.generic.<archetype>` (requests/quest-1.md) for the vast
     // majority of named NPCs that carry no bespoke `dialogueRoot` of their own.
-    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${def.name}`, dialogueId: def.dialogueRoot ?? `dlg.generic.${def.archetype}`, enabled: true });
+    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${def.name}`, dialogueId: def.dialogueRoot ?? this.genericDialogue(def.archetype), enabled: true });
     // frozen=true initially — the lifecycle system unfreezes + snaps position + spawns a mesh on first
     // proximity check, so we don't pay a spawn cost for NPCs the player never gets near this session.
     const npc = this.world.get(id, Npc)!;
@@ -118,14 +131,22 @@ export class NpcSystem {
     let jx = x + jitter.x, jz = z + jitter.z;
     if (this.worldService.isWater(jx, jz)) { jx = x; jz = z; } // fall back to POI centre rather than the lake
     const offset: [number, number] = [jx - x, jz - z]; // the *actual* jitter used, post water-fallback
+    const rng = new Rng(hashString(`${homePoi}:${archId}:${salt}:life`));
+    const market: [number, number] = [Math.cos(rng.next() * 6.283) * (4 + rng.next() * 6), Math.sin(rng.next() * 6.283) * (4 + rng.next() * 6)];
+    const house: [number, number] = [offset[0] * 1.6, offset[1] * 1.6]; // out toward the ring of houses
     const genericDef: NpcDef = {
       ...arch, id: `${homePoi}.${archId}.${salt}`, home: homePoi, role: 'generic',
-      schedule: [{ hour: 6, poi: 'home', activity: 'work', offset }, { hour: 20, poi: 'home', activity: 'sleep', offset }],
+      schedule: [
+        { hour: 6, poi: 'home', activity: 'work', offset },
+        { hour: 11 + Math.floor(rng.next() * 3), poi: 'home', activity: 'market', offset: market },
+        { hour: 17 + Math.floor(rng.next() * 2), poi: 'home', activity: 'tavern', offset: [market[0] * 0.5, market[1] * 0.5] },
+        { hour: 21 + Math.floor(rng.next() * 2), poi: 'home', activity: 'sleep', offset: house },
+      ],
     };
     const id = this.party.createCharacter(genericDef);
     const t = this.world.get(id, Transform)!;
     t.x = jx; t.y = this.worldService.heightAt(jx, jz); t.z = jz;
-    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${arch.name}`, dialogueId: `dlg.generic.${archId}`, enabled: true });
+    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${arch.name}`, dialogueId: this.genericDialogue(archId), enabled: true });
     const npc = this.world.get(id, Npc)!;
     npc.frozen = true;
     npc.generic = true;
@@ -162,11 +183,32 @@ export class NpcSystem {
         const npc = this.world.get(id, Npc)!;
         npc.frozen = true;
         npc.activity = 'patrol';
+        npc.defId = def.id;
         this.patrols.set(id, { waypoints, index: 1, forward: true });
         if (leadId === null) leadId = id;
       }
       if (leadId !== null) this.patrolLead.add(leadId);
     }
+  }
+
+  private genericDialogue(archetype: string): string {
+    const direct = `dlg.generic.${archetype}`;
+    if (this.content.dialogues.has(direct)) return direct;
+    const mapped = `dlg.generic.${GENERIC_DIALOGUE[archetype] ?? 'peasant'}`;
+    return this.content.dialogues.has(mapped) ? mapped : 'dlg.generic.peasant';
+  }
+
+  /** Rebuild patrol state for patrol entities restored from a save (they carry `activity: 'patrol'`). */
+  rebindPatrols(): void {
+    if (this.patrols.size > 0) return;
+    this.world.each(Npc, (id, npc) => {
+      if (npc.activity !== 'patrol') return;
+      const road = ROADS.find((rd) => npc.defId.startsWith(`patrol.${rd.id}.`));
+      if (!road) return;
+      const waypoints = road.via.map((pid) => PLACES[pid]).filter(Boolean).map((p) => ({ x: p.x, z: p.z }));
+      this.patrols.set(id, { waypoints, index: 1, forward: true });
+      if (npc.defId.endsWith('.0')) this.patrolLead.add(id);
+    });
   }
 
   private poiPos(poiId: string): { x: number; z: number } | null {
@@ -272,7 +314,12 @@ export class NpcSystem {
     const dest = { x: base.x + ox, z: base.z + oz };
     npc.targetPoi = active.poiId;
     npc.activity = active.activity;
-    walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService);
+    const arrived = walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService);
+    const asleep = active.activity === 'sleep' && arrived;
+    const it = this.world.get(id, Interactable);
+    if (it) it.enabled = !asleep;
+    const mesh = this.world.get(id, MeshRef);
+    if (mesh?.object) (mesh.object as Object3D).visible = !asleep; // indoors
   }
 
   private stepPatrol(id: EntityId, t: { x: number; y: number; z: number; yaw: number }, dt: number): void {
@@ -297,8 +344,7 @@ export class NpcSystem {
     if (now - this.lastTrigger < 15000) return; // cooldown so one patrol can't refire every frame
     if (dist2(t.x, t.z, playerPos.x, playerPos.z) > 8) return;
     this.lastTrigger = now;
-    // Task spec: patrols reuse `enc.altdorf-square` (encounters.ts is combat's file; not adding a new id here).
-    this.startEncounter('enc.altdorf-square');
+    this.startEncounter('enc.habsburg-patrol', { x: playerPos.x, z: playerPos.z });
   }
 }
 
@@ -351,12 +397,8 @@ function walkToward(
   return false;
 }
 
+/** Geometry only: materials are shared library instances still used by other meshes. */
 function disposeObject3D(obj: Object3D, parent: Object3D): void {
   parent.remove(obj);
-  obj.traverse((child) => {
-    const anyChild = child as unknown as { geometry?: { dispose(): void }; material?: { dispose(): void } | { dispose(): void }[] };
-    anyChild.geometry?.dispose();
-    if (Array.isArray(anyChild.material)) anyChild.material.forEach((m) => m.dispose());
-    else anyChild.material?.dispose();
-  });
+  obj.traverse((child) => { (child as unknown as { geometry?: { dispose(): void } }).geometry?.dispose(); });
 }
