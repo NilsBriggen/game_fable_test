@@ -256,6 +256,7 @@ export interface DerivedStats {
   weapon: { defId: string; instanceId: string } | null;
   ranged: { defId: string; instanceId: string } | null;
   shield: { defId: string; instanceId: string } | null;
+  ammo: { defId: string; instanceId: string; qty: number } | null;
   perkMods: Record<string, number>;
 }
 
@@ -276,6 +277,7 @@ export interface PartyEvents extends Record<string, unknown[]> {
   equipped: [entity: EntityId, slot: string, instanceId: string | null];
   'hp-changed': [entity: EntityId, hp: number, hpMax: number];
   'party-changed': [members: EntityId[]];
+  'character-level-up': [entity: EntityId, level: number, attributePointsGained: number];
 }
 
 export interface PartyService {
@@ -283,10 +285,13 @@ export interface PartyService {
   createCharacter(def: NpcDef, opts?: { chapter?: string }): EntityId;
   getPlayer(): EntityId | null;
   getParty(): EntityId[];
-  addMember(id: EntityId, control?: 'companion' | 'ally'): void;
+  /** false when the party is full (4) or the entity is not a character */
+  addMember(id: EntityId, control?: 'companion' | 'ally'): boolean;
   removeMember(id: EntityId): void;
   isMember(id: EntityId): boolean;
   derived(id: EntityId): DerivedStats;
+  /** other modules call this after editing Character/Equipment/Inventory components directly */
+  invalidate(id?: EntityId): void;
   skillLevel(id: EntityId, skill: SkillId): number;
   skillMod(id: EntityId, skill: SkillId): number;
   attrMod(id: EntityId, attr: keyof Attributes): number;

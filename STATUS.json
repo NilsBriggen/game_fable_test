@@ -70,10 +70,26 @@
     },
     "party": {
       "owner": "builder:party",
-      "status": "built",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
+      "status": "fix-round",
+      "score": 5,
+      "fixRounds": 1,
+      "openIssues": [
+        "XP curve ~60x too slow",
+        "item instance ids collide after load",
+        "derived() cache not invalidatable",
+        "removeItem partial removal",
+        "ammo/ranged slot rules",
+        "rest heals 0 at low endurance",
+        "no party cap",
+        "eraFrom not enforced",
+        "anachronistic perk names",
+        "LORE \u00a710 rows missing",
+        "non-stackable qty bug",
+        "backgrounds lack skill emphasis",
+        "transfer throws",
+        "stale/missing events",
+        "thin tests"
+      ],
       "notes": "25 unit tests; 49 items, 52 perks, 19 skills, 23 archetypes; awaiting critic"
     },
     "exploration": {
@@ -121,6 +137,11 @@
     {
       "from": "builder:party (requests/party-1.md)",
       "change": "Character.unspentAttributePoints + PartyService.spendAttributePoint",
+      "status": "applied"
+    },
+    {
+      "from": "critic:party",
+      "change": "DerivedStats.ammo, PartyEvents['character-level-up'], addMember\u2192boolean, PartyService.invalidate(id?)",
       "status": "applied"
     }
   ],
