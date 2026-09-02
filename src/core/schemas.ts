@@ -397,8 +397,10 @@ export interface SerializedCombat {
 }
 
 export interface SaveMeta {
+  /** 0 = autosave, 1..5 manual, 6 = quicksave */
   slot: number;
   label: string;
+  createdAt: string;
   updatedAt: string;
   chapter: string;
   calendar: string;
@@ -411,6 +413,7 @@ export interface SaveMeta {
 
 export interface SaveFile {
   schemaVersion: number;
+  /** 0 = autosave, 1..5 manual, 6 = quicksave */
   slot: number;
   label: string;
   createdAt: string;
@@ -431,8 +434,13 @@ export interface SaveFile {
   playtimeSec: number;
   playerOrigin: Canton;
   location: string;
+  weather?: string;
+  season?: string;
   thumbnailDataUrl?: string;
 }
 
 export const SAVE_SCHEMA_VERSION = 1;
 export const SAVE_MAX_BYTES = 2 * 1024 * 1024;
+export const AUTOSAVE_SLOT = 0;
+export const QUICKSAVE_SLOT = 6;
+export const MANUAL_SLOTS = [1, 2, 3, 4, 5] as const;

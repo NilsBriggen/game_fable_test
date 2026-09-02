@@ -164,7 +164,7 @@ fails if any def lacks it (Rule: never blur the historical/invented line).
 ```ts
 interface SaveFile {
   schemaVersion: number;          // bump on any breaking change; migrations in save/migrations.ts
-  slot: number;                   // 0 = autosave, 1..5 manual
+  slot: number;                   // 0 = autosave, 1..5 manual, 6 = quicksave
   createdAt: string; updatedAt: string;   // ISO real-time
   seed: number;                   // world RNG seed
   gameTime: number;               // seconds since 1 Aug 1291 00:00
@@ -437,7 +437,7 @@ type CombatEffect =  // used by AbilityDef
 ### 5.7 Save (`src/save`)
 
 IndexedDB database `eidgenossen`, store `saves` keyed by slot; `SaveFile` (§3.4). Serialise → JSON → `CompressionStream('gzip')` when available
-(else raw). Migrations are an ordered list `[{from, to, migrate(save) }]`. Autosave on: new chapter, quest complete,
+(else raw). **Load convention:** modules tear down transient scene objects on `state-changed → loading` and rebuild them on the `loaded` event (emitted after the world is populated). Migrations are an ordered list `[{from, to, migrate(save) }]`. Autosave on: new chapter, quest complete,
 encounter start (with `combat` block), fast travel, every 10 min of play. Load performs `world.streamAround` before
 fade-in. Unit tests round-trip a synthetic full-size world and assert ≤ 2 MB.
 

@@ -66,6 +66,7 @@ export interface ExplorationEvents extends Record<string, unknown[]> {
   'encounter-trigger': [encounterId: string, entity: EntityId, ambush?: 'player' | 'enemy'];
   'region-entered': [regionId: string];
   'player-moved': [x: number, y: number, z: number];
+  'fast-travel': [poiId: string];
 }
 
 export interface ExplorationService {
