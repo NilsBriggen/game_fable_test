@@ -75,10 +75,27 @@
     },
     "combat": {
       "owner": "builder:combat",
-      "status": "built",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
+      "status": "fix-round",
+      "score": 5,
+      "fixRounds": 1,
+      "openIssues": [
+        "abilities ignore range",
+        "charge without run-up; Morgarten unwinnable 0/24",
+        "Morgarten not the LORE set piece (no Haufen, letzi, drowning, Leopold; lake wrong side)",
+        "flanking without adjacency",
+        "6 inert statuses, trunk-cache & shield-wall dead",
+        "shove geometry",
+        "preview omits cover",
+        "morale triggers/Shaken incomplete",
+        "commands unauthorised",
+        "loop guard console.error",
+        "restore degrades log",
+        "renderer terrain \u2260 rules terrain",
+        "overlay lacks hit%/sources",
+        "initiative double-counts agility",
+        "AI doctrines incomplete",
+        "DSL not interpreted"
+      ],
       "notes": "55 tests; harness morgarten 369 calls/1.87M tris, quay 121 calls; gaps: directional cover, deploy phase auto, riposte/wall-of-iron/disarm/cover-fire not consumed; awaiting critic"
     },
     "quest": {
@@ -117,6 +134,11 @@
     {
       "from": "critic:party",
       "change": "DerivedStats.ammo, PartyEvents['character-level-up'], addMember\u2192boolean, PartyService.invalidate(id?)",
+      "status": "applied"
+    },
+    {
+      "from": "critic:combat",
+      "change": "AbilityRequires.terrainFeature string|string[], shield, mounted, minChargeCells; SerializedCombat.log unknown[]",
       "status": "applied"
     }
   ],

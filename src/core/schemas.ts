@@ -177,7 +177,12 @@ export interface AbilityRequires {
   formation?: 'haufen';
   status?: StatusId;
   notStatus?: StatusId;
-  terrainFeature?: string;
+  terrainFeature?: string | string[];
+  /** unit must have a shield equipped (armor slot, not a weapon property) */
+  shield?: boolean;
+  mounted?: boolean;
+  /** charge: unit must have moved at least this many cells in a straight line this turn */
+  minChargeCells?: number;
 }
 
 export type AbilityTarget = 'self' | 'ally' | 'enemy' | 'cell' | 'line' | 'cone' | 'any';
@@ -393,7 +398,8 @@ export interface SerializedCombat {
   units: unknown[];
   features: unknown[];
   objectivesState: unknown;
-  log: string[];
+  /** CombatEventRecord[] (typed loosely so core does not depend on the view types) */
+  log: unknown[];
 }
 
 export interface SaveMeta {
