@@ -25,6 +25,24 @@ const BUDGET = { drawCalls: 2000, triangles: 3_000_000, frameP95: 16.6, heapMB: 
 const scenarios = JSON.parse(await readFile(path.join(__dirname, 'scenarios.json'), 'utf8')).filter((s) => !ONLY || ONLY.includes(s.id));
 await mkdir(OUT, { recursive: true });
 
+// Serialise harness runs across concurrent builders: one run at a time (CPU is shared, SwiftShader is slow,
+// and the out dir must not be clobbered). Lock = atomic mkdir; stale locks (> 45 min) are broken.
+const LOCK = path.join(root, 'tools/harness/.lock');
+const fs = await import('node:fs');
+async function acquireLock() {
+  const t0 = Date.now();
+  while (true) {
+    try { fs.mkdirSync(LOCK); fs.writeFileSync(path.join(LOCK, 'pid'), String(process.pid)); return; } catch {}
+    try { const age = Date.now() - fs.statSync(LOCK).mtimeMs; if (age > 45 * 60 * 1000) { fs.rmSync(LOCK, { recursive: true, force: true }); continue; } } catch { continue; }
+    if (Date.now() - t0 > 60 * 60 * 1000) { console.error('harness: could not acquire lock after 60 min'); process.exit(3); }
+    if ((Date.now() - t0) % 60000 < 2500) console.log('harness: waiting for another run to finish…');
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+function releaseLock() { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} }
+await acquireLock();
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { releaseLock(); if (sig !== 'exit') process.exit(130); });
+
 async function waitHttp(url, ms) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
@@ -49,6 +67,7 @@ const browserArgs = flag('--gpu')
 const executablePath = process.env.HARNESS_CHROMIUM || (await import('node:fs')).existsSync('/opt/pw-browsers/chromium') ? (process.env.HARNESS_CHROMIUM || '/opt/pw-browsers/chromium') : undefined;
 const browser = await chromium.launch({ headless: true, args: browserArgs, ...(executablePath ? { executablePath } : {}) });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+page.setDefaultTimeout(180000);
 const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(String(e.message || e)));
 const consoleErrors = [];
@@ -92,7 +111,7 @@ for (const sc of scenarios) {
     entry.errors.push(...res.errors);
     entry.warnings.push(...res.warnings);
     const file = path.join(OUT, `${sc.id}.png`);
-    await page.screenshot({ path: file, fullPage: false });
+    await page.screenshot({ path: file, fullPage: false, timeout: 180000 });
     entry.screenshot = path.relative(root, file);
   } catch (e) {
     entry.ok = false;

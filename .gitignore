@@ -3,3 +3,4 @@ dist/
 tools/harness/out/
 .vite/
 *.log
+tools/harness/.lock/
