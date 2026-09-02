@@ -100,20 +100,15 @@
     },
     "quest": {
       "owner": "builder:quest",
-      "status": "critic-round-2",
-      "score": 5,
-      "fixRounds": 1,
+      "status": "fix-round",
+      "score": 7,
+      "fixRounds": 2,
       "openIssues": [
-        "stale lastCombat advances stage mid-combat",
-        "no arrival gates; Act 1 runs as one nested chain",
-        "abbot say-nothing soft-lock",
-        "unhandled rejections when combat absent",
-        "8 compliance violations (son-in-law, plate, Otmar date, \"give no year\", bought-office clause, seals, Gertrud, journal dates)",
-        "choice flags never read (H\u00fcnenberg, Anselm, Tell)",
-        "check cache key per choice",
-        "post-order quest-advanced; setChapter idempotence; root fallback",
-        "stage ids disagree with exploration/poi.ts",
-        "no lose branches on spine fights"
+        "arrival gates use discovered not presence",
+        "node effects run before node shown; dialogue nesting unguarded",
+        "Morgarten retry replays frozen hub; battle journal date",
+        "chapterSet not persisted",
+        "letzi/recruits/scouted cosmetic"
       ],
       "notes": "60 tests; fix round 1 applied; first- and last-choice walkthroughs reach Brunnen"
     },
@@ -126,9 +121,9 @@
     },
     "act1-content": {
       "owner": "builder:quest",
-      "status": "critic-round-2",
-      "score": 5,
-      "fixRounds": 1,
+      "status": "fix-round",
+      "score": 7,
+      "fixRounds": 2,
       "openIssues": [],
       "notes": "scored with quest module (same builder)"
     }
@@ -158,6 +153,11 @@
       "from": "builder:quest (requests/quest-2.md)",
       "change": "canonical encounter\u2192quest/stage map relayed to exploration; hunenberg-warning flag relayed to combat",
       "status": "relayed"
+    },
+    {
+      "from": "critic:quest",
+      "change": "QuestCondition nearPoi/inRegion/talkedTo",
+      "status": "applied"
     }
   ],
   "escalations": [

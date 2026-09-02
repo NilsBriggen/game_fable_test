@@ -29,7 +29,13 @@ export type QuestCondition =
   | { var: [QuestId, string, unknown] }
   | { origin: 'uri' | 'schwyz' | 'unterwalden' }
   | { discovered: PoiId }
-  | { pfennig: ['>=', number] };
+  | { pfennig: ['>=', number] }
+  /** player is within radiusM of the POI centre (presence, not discovery) */
+  | { nearPoi: [PoiId, number] }
+  /** player is inside the region polygon */
+  | { inRegion: string }
+  /** player has talked to the NPC at least once (quest sets/reads flag talked:<npcId>) */
+  | { talkedTo: NpcId };
 
 export type Effect =
   | { setFlag: [string, unknown] }
