@@ -80,12 +80,11 @@
     },
     "exploration": {
       "owner": "builder:exploration",
-      "status": "in-progress",
+      "status": "built",
       "score": null,
       "fixRounds": 0,
-      "openIssues": [
-        "draw calls 5295 at Altdorf with NPCs/props populated (budget 2000; target 1200) \u2014 flagged to builder"
-      ]
+      "openIssues": [],
+      "notes": "52 tests; 94 POIs, 98 NPCs; Altdorf 638 calls, R\u00fctli 265; 6 scenarios not re-verified post-fix; awaiting critic"
     },
     "combat": {
       "owner": "builder:combat",
