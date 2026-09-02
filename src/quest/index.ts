@@ -50,6 +50,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   private sceneDepth = 0;
   /** Effects queued by `runEffects` while `sceneDepth > 0`; drained once the outermost scene ends. */
   private deferredEffects: Array<() => Promise<void>> = [];
+  /** quest ids whose *next* `start()` (however it's triggered — including a plain `{quest:['start',id]}}`
+   *  content effect, which cannot itself carry options) should be silent-journalled. Round 3 #3: the
+   *  Morgarten retry needs this for `quest.morgarten` itself, not just the muster hub that restarts it. */
+  private pendingSilentStart = new Set<string>();
 
   constructor(private readonly ctx: GameContext) {
     const deps: QuestMachineDeps = {
@@ -68,6 +72,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
       // muster hub's own `{quest:['start','quest.morgarten']}` effect silently no-ops.
       this.machine.reset('quest.morgarten');
       this.machine.reset('quest.muster-1315');
+      // Round 3 #3: quest.morgarten's own restart (triggered later, from the retried muster hub's
+      // 'ready' stage via a plain content effect) must be silent too, or its travel-morgarten/battle
+      // stages journal a second time verbatim.
+      this.pendingSilentStart.add('quest.morgarten');
       // Round 2 #3: un-cache the muster hub's own rolled dialogue checks so "better prepared this
       // time" can actually change the letzi/recruit/scout outcome, not just replay the first attempt.
       this.machine.clearVarPrefix('_dialogue', 'dlg.muster-');
@@ -153,8 +161,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     this.machine.checkAdvance(this);
   }
   async questOp(op: 'start' | 'advance' | 'complete' | 'fail', questId: string, stage?: string): Promise<void> {
-    if (op === 'start') await this.machine.start(questId);
-    else if (op === 'advance') await this.machine.advance(questId, stage ?? '');
+    if (op === 'start') {
+      const silentJournal = this.pendingSilentStart.delete(questId);
+      await this.machine.start(questId, { silentJournal });
+    } else if (op === 'advance') await this.machine.advance(questId, stage ?? '');
     else if (op === 'complete') await this.machine.complete(questId);
     else await this.machine.fail(questId);
     // Any quest transition can unblock another quest's advanceWhen (e.g. {questDone: '...'}) — recheck.

@@ -25,7 +25,7 @@ async function drain(quest: QuestServiceImpl, rounds = 40): Promise<void> {
   for (let i = 0; i < rounds; i++) { quest.tick(1); await flush(); }
 }
 
-const TRAVEL_POIS = ['poi.altdorf', 'poi.ruetli', 'poi.tellsplatte', 'poi.hohle-gasse', 'poi.einsiedeln', 'poi.sattel-letzi', 'poi.zug', 'poi.morgarten', 'poi.brunnen'];
+const TRAVEL_POIS = ['poi.altdorf', 'poi.ruetli', 'poi.tellsplatte', 'poi.hohle-gasse', 'poi.zwing-uri', 'poi.sattel-letzi', 'poi.morgarten', 'poi.brunnen'];
 
 function pickFirstEnabled(n: DialogueNodeView): number {
   return Math.max(0, n.choices.findIndex((c) => c.enabled));
@@ -90,13 +90,43 @@ async function runWalkthrough(policy: 'first' | 'last') {
   await drain(quest);
   expect(quest.stage('quest.der-hut')).not.toBe('travel-altdorf'); // unparked now that the player arrived
 
-  // Every other travel/arrival gate in the spine (der-hut's Tellsplatte/Hohle Gasse, marchenstreit's
-  // Einsiedeln, muster-1315's Sattel/Zug, morgarten's slope, brunnen-1315's quay) — walked to in turn;
-  // each is independent of the others (only the *current* one needs the player actually present).
+  // Every other travel/arrival gate up to (not including) marchenstreit's Einsiedeln park — der-hut's
+  // Tellsplatte/Hohle Gasse, Burgenbruch's chosen castle (Zwing Uri, per the "storm it yourself" choice
+  // both policies reach — see dlg.burgenbruch-council), muster-1315's Sattel letzi.
   for (const poi of TRAVEL_POIS) {
     movePlayerToPoi(ctx, playerId, poi);
     await drain(quest, 30);
   }
+
+  // Chapter 2's first arrival gate (critic wave3-quest.md round 3 #1): after the Schwyz Landsgemeinde
+  // argument, marchenstreit must park at travel-einsiedeln — not resolve the raid/speech choice before
+  // the player has actually walked to the abbey.
+  expect(quest.isStarted('quest.marchenstreit')).toBe(true);
+  expect(quest.stage('quest.marchenstreit')).toBe('travel-einsiedeln');
+
+  movePlayerToPoi(ctx, playerId, 'poi.einsiedeln');
+  await drain(quest, 60);
+  expect(quest.stage('quest.marchenstreit')).not.toBe('travel-einsiedeln');
+  expect(quest.isDone('quest.marchenstreit')).toBe(true);
+
+  // muster-1315 has just started and parks at travel-sattel first — the player needs to be physically
+  // back at the letzi (not still at Einsiedeln) before it can proceed through letzi-craft/recruit.
+  expect(quest.isStarted('quest.muster-1315')).toBe(true);
+  movePlayerToPoi(ctx, playerId, 'poi.sattel-letzi');
+  await drain(quest, 60);
+
+  // muster-1315 must likewise park at travel-zug after recruiting, before scouting Leopold's camp.
+  expect(quest.stage('quest.muster-1315')).toBe('travel-zug');
+
+  movePlayerToPoi(ctx, playerId, 'poi.zug');
+  await drain(quest, 60);
+  expect(quest.isDone('quest.muster-1315')).toBe(true);
+
+  // morgarten and brunnen-1315's own travel-* gates: poi.morgarten/poi.brunnen were visited earlier in
+  // the bulk loop, long before these quests existed — presence gates need the player there *now*.
+  movePlayerToPoi(ctx, playerId, 'poi.morgarten');
+  await drain(quest, 60);
+  movePlayerToPoi(ctx, playerId, 'poi.brunnen');
   await drain(quest, 100);
 
   return { quest, ctx, party, exploration, combat, trace };
