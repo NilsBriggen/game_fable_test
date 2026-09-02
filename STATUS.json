@@ -19,7 +19,7 @@
       ]
     },
     "3": {
-      "status": "pending",
+      "status": "in-progress (quest started early; ui + act1 content after exploration)",
       "modules": [
         "quest",
         "ui",
@@ -98,7 +98,7 @@
     },
     "quest": {
       "owner": "builder:quest",
-      "status": "pending",
+      "status": "in-progress",
       "score": null,
       "fixRounds": 0,
       "openIssues": []
