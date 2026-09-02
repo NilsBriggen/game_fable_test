@@ -176,10 +176,10 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     fog.density = w.fogDensity * (night ? 1.15 : 1);
     fog.color.copy(w.skyTint).lerp(new Color(0x0c1220), night ? 0.75 : 0);
 
-    const { uniforms } = getTerrainMaterial();
-    (uniforms.uFogColor.value as Color).copy(fog.color);
-    uniforms.uFogDensity.value = fog.density;
-    (uniforms.uGrassTint.value as Color).copy(seasonTint(season));
+    const terrainMat = getTerrainMaterial();
+    (terrainMat.uniforms.uFogColor.value as Color).copy(fog.color);
+    terrainMat.uniforms.uFogDensity.value = fog.density;
+    (terrainMat.uniforms.uGrassTint.value as Color).copy(seasonTint(season));
   }
 
   function seasonTint(s: Season): Color {
@@ -219,6 +219,8 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     },
     update(dt: number, glRenderer: WebGLRenderer) {
       clock += dt;
+      camera.updateMatrixWorld(true);
+      csm.updateFrustums();
       csm.update();
       if (particles) {
         const pos = particles.geometry.getAttribute('position') as BufferAttribute;
