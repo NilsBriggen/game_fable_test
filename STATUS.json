@@ -52,21 +52,15 @@
     },
     "save": {
       "owner": "builder:save",
-      "status": "fix-round",
-      "score": 7,
+      "status": "passed",
+      "score": 9,
       "fixRounds": 1,
       "openIssues": [
-        "quicksave clobbers manual slot 1",
-        "new-game autosave not state-gated",
-        "missing chapter/encounter/fast-travel autosave triggers",
-        "thumbnail blank without render-before-grab",
-        "load() success path untested",
-        "combat serialize() null yields misleading save",
-        "failed load before world touched dumps to title",
-        "importJson uses live calendar; no shape validation",
-        "no in-flight guard save/load"
+        "season written but not restored (polish)",
+        "pendingAutosave should clear on load (polish)",
+        "load() from illegal state (polish)"
       ],
-      "notes": "8 unit tests; 5000-entity save = 212 KB gzip; awaiting critic"
+      "notes": "27 unit tests; critic 7\u21929; combat contract: isActive()/serialize() valid before request-state combat"
     },
     "party": {
       "owner": "builder:party",
