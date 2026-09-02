@@ -139,8 +139,7 @@ function gameTimeForStart(): number {
 interface PlaythroughBeat { name: string; poi?: string; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number }
 const ACT1_BEATS: PlaythroughBeat[] = [
   { name: '01-fluelen-news', poi: 'poi.fluelen', untilStage: ['quest.der-eid', 'altdorf-message'] },
-  { name: '02-altdorf-attinghausen', poi: 'poi.altdorf', untilStage: ['quest.der-eid', 'travel-steinen'] },
-  { name: '03-steinen', poi: 'poi.steinen', untilStage: ['quest.der-eid', 'escort'] },
+  { name: '02-altdorf-attinghausen', poi: 'poi.altdorf', untilStage: ['quest.der-eid', 'escort'] },
   { name: '04-brunnen-quay-fight', poi: 'poi.brunnen', combatRounds: 40, untilStage: ['quest.der-eid', 'travel-ruetli'] },
   { name: '05-ruetli-oath', poi: 'poi.ruetli', hour: 22, untilDone: 'quest.der-eid' },
   { name: '06-altdorf-1307-hat', poi: 'poi.altdorf', untilStage: ['quest.der-hut', 'travel-tellsplatte'] },
@@ -150,7 +149,8 @@ const ACT1_BEATS: PlaythroughBeat[] = [
   { name: '10-marchenstreit-schwyz', poi: 'poi.schwyz', untilStage: ['quest.marchenstreit', 'travel-einsiedeln'] },
   { name: '11-einsiedeln-raid', poi: 'poi.einsiedeln', combatRounds: 40, untilDone: 'quest.marchenstreit' },
   { name: '12-muster-sattel', poi: 'poi.sattel-letzi', untilStage: ['quest.muster-1315', 'travel-zug'] },
-  { name: '13-scout-zug', poi: 'poi.zug', untilStage: ['quest.morgarten', 'travel-morgarten'] },
+  { name: '13-scout-zug', poi: 'poi.zug', untilStage: ['quest.muster-1315', 'hunenberg'] },
+  { name: '13b-hunenberg-schwyz', poi: 'poi.schwyz', untilStage: ['quest.morgarten', 'travel-morgarten'] },
   { name: '14-morgarten-battle', poi: 'poi.morgarten', hour: 8, combatRounds: 60, untilDone: 'quest.morgarten' },
   { name: '15-brunnen-pact', poi: 'poi.brunnen', untilDone: 'quest.brunnen-1315' },
 ];
