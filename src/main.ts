@@ -134,6 +134,86 @@ function gameTimeForStart(): number {
   return 6 * 3600; // 1 Aug 1291 06:00
 }
 
+
+// ---------- harness: Act 1 playthrough driver (final gate) ----------
+interface PlaythroughBeat { name: string; poi?: string; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number }
+const ACT1_BEATS: PlaythroughBeat[] = [
+  { name: '01-fluelen-news', poi: 'poi.fluelen', untilStage: ['quest.der-eid', 'altdorf-message'] },
+  { name: '02-altdorf-attinghausen', poi: 'poi.altdorf', untilStage: ['quest.der-eid', 'travel-steinen'] },
+  { name: '03-steinen', poi: 'poi.steinen', untilStage: ['quest.der-eid', 'escort'] },
+  { name: '04-brunnen-quay-fight', poi: 'poi.brunnen', combatRounds: 40, untilStage: ['quest.der-eid', 'travel-ruetli'] },
+  { name: '05-ruetli-oath', poi: 'poi.ruetli', hour: 22, untilDone: 'quest.der-eid' },
+  { name: '06-altdorf-1307-hat', poi: 'poi.altdorf', untilStage: ['quest.der-hut', 'travel-tellsplatte'] },
+  { name: '07-tellsplatte', poi: 'poi.tellsplatte', untilStage: ['quest.der-hut', 'travel-hohle-gasse'] },
+  { name: '08-hohle-gasse-fight', poi: 'poi.hohle-gasse', combatRounds: 40, untilStage: ['quest.der-hut', 'burgenbruch'] },
+  { name: '09-burgenbruch', poi: 'poi.sarnen', untilDone: 'quest.der-hut' },
+  { name: '10-marchenstreit-schwyz', poi: 'poi.schwyz', untilStage: ['quest.marchenstreit', 'travel-einsiedeln'] },
+  { name: '11-einsiedeln-raid', poi: 'poi.einsiedeln', combatRounds: 40, untilDone: 'quest.marchenstreit' },
+  { name: '12-muster-sattel', poi: 'poi.sattel-letzi', untilStage: ['quest.muster-1315', 'travel-zug'] },
+  { name: '13-scout-zug', poi: 'poi.zug', untilStage: ['quest.morgarten', 'travel-morgarten'] },
+  { name: '14-morgarten-battle', poi: 'poi.morgarten', hour: 8, combatRounds: 60, untilDone: 'quest.morgarten' },
+  { name: '15-brunnen-pact', poi: 'poi.brunnen', untilDone: 'quest.brunnen-1315' },
+];
+
+/** Drives Act 1 headlessly: auto-picks dialogue choices, auto-plays fights, teleports between beats. Returns a log per beat. */
+async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; screenshot?: (name: string) => Promise<void>; maxSecondsPerBeat?: number } = {}) {
+  const svc = ctx.services;
+  const quest = svc.get('quest'), ex = svc.get('exploration'), combat = svc.get('combat'), world = svc.get('world');
+  const ui = svc.tryGet('ui');
+  const pickMode = opts.pick ?? 'first';
+  const rng = ctx.rng.ambient;
+  const log: { beat: string; ok: boolean; seconds: number; stage: string | null; note?: string; dialogues: number; fights: number }[] = [];
+  let dialogues = 0, fights = 0;
+  // Auto-answer dialogues by wrapping the UI service (rendering still happens so screenshots show the panel).
+  if (ui) {
+    const orig = ui.dialogue.show.bind(ui.dialogue);
+    ui.dialogue.show = async (node) => {
+      dialogues++;
+      void orig(node); // render, but do not wait for a click
+      await nextFrame(); await nextFrame();
+      if (opts.screenshot && dialogues <= 40) await opts.screenshot(`dlg-${String(dialogues).padStart(2, '0')}`);
+      const enabled = node.choices.map((c, i) => (c.enabled ? i : -1)).filter((i) => i >= 0);
+      if (enabled.length === 0) return 0;
+      const idx = pickMode === 'first' ? enabled[0] : pickMode === 'last' ? enabled[enabled.length - 1] : enabled[rng.int(0, enabled.length - 1)];
+      ui.dialogue.hide();
+      return idx;
+    };
+    const origConfirm = ui.confirm.bind(ui);
+    ui.confirm = async () => true;
+    void origConfirm;
+  }
+  await newGame(undefined, { skipIntro: false });
+  for (const beat of ACT1_BEATS) {
+    const t0 = performance.now();
+    const player = ex.getPlayer();
+    if (beat.poi && player !== null) {
+      const at = ex.poiPosition(beat.poi);
+      if (at) { ex.teleport(player, at.x, at.z); await world.streamAround(at.x, at.z, 600); ex.discover(beat.poi); }
+    }
+    if (typeof beat.hour === 'number') { ctx.clock.setHour(beat.hour); world.setTimeOfDay(beat.hour); }
+    const limit = (beat.maxSeconds ?? opts.maxSecondsPerBeat ?? 90) * 1000;
+    let ok = false, note: string | undefined;
+    while (performance.now() - t0 < limit) {
+      if (combat.isActive()) {
+        fights++;
+        if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-start`);
+        await combat.runScript([{ type: 'auto', rounds: beat.combatRounds ?? 40 }]);
+        if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-end`);
+        // a lost fight: let the quest's lose branch run
+      }
+      if (beat.untilDone && quest.isDone(beat.untilDone)) { ok = true; break; }
+      if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
+      // keep the player at the beat's POI (dialogues/cutscenes may move the camera, not the player)
+      await nextFrame();
+    }
+    if (!ok) note = `timeout; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
+    if (opts.screenshot) await opts.screenshot(beat.name);
+    log.push({ beat: beat.name, ok, seconds: Math.round((performance.now() - t0) / 100) / 10, stage: beat.untilStage ? quest.stage(beat.untilStage[0]) : null, note, dialogues, fights });
+    if (!ok) break;
+  }
+  return { log, chapter: quest.chapter(), reputation: ['uri', 'schwyz', 'unterwalden', 'habsburg', 'einsiedeln'].map((f) => [f, quest.reputation(f)]), party: svc.get('party').getParty().length, journal: quest.journal().length };
+}
+
 // ---------- harness API ----------
 interface Scenario {
   id: string; description: string; state: 'title' | 'explore';
@@ -304,6 +384,7 @@ const api = {
   state: () => ctx.state.state,
   scenarios: (scenarios as unknown as Scenario[]).map((s) => s.id),
   runCombatScript: async (cmds: CombatCommand[]) => ctx.services.get('combat').runScript(cmds),
+  runAct1Playthrough,
 };
 (window as any).__game = api;
 if (HARNESS) (window as any).__harness = api;
