@@ -100,7 +100,7 @@
     },
     "quest": {
       "owner": "builder:quest",
-      "status": "fix-round",
+      "status": "critic-round-3",
       "score": 7,
       "fixRounds": 2,
       "openIssues": [
@@ -110,7 +110,7 @@
         "chapterSet not persisted",
         "letzi/recruits/scouted cosmetic"
       ],
-      "notes": "60 tests; fix round 1 applied; first- and last-choice walkthroughs reach Brunnen"
+      "notes": "66 tests; fix round 2 applied; presence-gated seams; awaiting final critic"
     },
     "ui": {
       "owner": "builder:ui",
@@ -121,7 +121,7 @@
     },
     "act1-content": {
       "owner": "builder:quest",
-      "status": "fix-round",
+      "status": "critic-round-3",
       "score": 7,
       "fixRounds": 2,
       "openIssues": [],
@@ -158,6 +158,11 @@
       "from": "critic:quest",
       "change": "QuestCondition nearPoi/inRegion/talkedTo",
       "status": "applied"
+    },
+    {
+      "from": "builder:quest (requests/quest-3.md)",
+      "change": "morgarten.letzi-improved / recruits-strong flags relayed to combat",
+      "status": "relayed"
     }
   ],
   "escalations": [
