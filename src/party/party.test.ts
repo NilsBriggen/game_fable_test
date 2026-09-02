@@ -6,10 +6,10 @@ import { register as registerSkills } from '@content/skills';
 import { register as registerPerks } from '@content/perks';
 import { register as registerItems } from '@content/items';
 import { register as registerArchetypes } from '@content/archetypes';
-import { PartyServiceImpl, type PartyHost } from './index';
+import { PartyServiceImpl, STARTING_KITS, type PartyHost } from './index';
 import { applySkillXp, xpToNext, hpMax, carryCapacityKg, characterLevel, attributePointsEarned } from './rules';
 import type { PlayerCreation } from '@core/services';
-import type { Canton } from '@core/schemas';
+import type { Canton, EquipSlot } from '@core/schemas';
 
 function makeContent(): ContentRegistry {
   const c = new ContentRegistry();
@@ -223,12 +223,30 @@ describe('PartyServiceImpl', () => {
     expect(advanced).toBe(4);
   });
 
-  it.each(['saeumer', 'herder', 'fisher', 'hunter', 'smith', 'novice'] as const)('createPlayer(%s) grants the background kit', (background) => {
+  it.each(['saeumer', 'herder', 'fisher', 'hunter', 'smith', 'novice'] as const)('createPlayer(%s) grants the background kit, with every named equip slot actually populated', (background) => {
+    // Fix round 2, issue 1: the old assertion (`eq.mainHand || eq.ranged`) missed that the herder's sling
+    // had no declared ammo, so it silently never made it into the 'ammo' slot. Iterate every slot the kit
+    // itself names, so any future content/rule mismatch (a kit item that equip() quietly refuses) fails here.
     const id = svc.createPlayer(playerCreation({ background }));
     const inv = world.require(id, Inventory);
     expect(inv.items.length).toBeGreaterThan(0);
     const eq = world.require(id, Equipment);
-    expect(eq.mainHand || eq.ranged).toBeTruthy();
+    const kit = STARTING_KITS[background];
+    for (const slot of Object.keys(kit.equip) as EquipSlot[]) {
+      expect(eq[slot], `${background} kit slot "${slot}"`).toBeTruthy();
+    }
+  });
+
+  it('every archetype with an equipment loadout actually equips every named slot', () => {
+    // Same fix round 2, issue 1 tightening, generalised to every archetype (not just the six backgrounds).
+    for (const def of content.archetypes.values()) {
+      if (!def.equipment || Object.keys(def.equipment).length === 0) continue;
+      const id = svc.createCharacter(def);
+      const eq = world.require(id, Equipment);
+      for (const slot of Object.keys(def.equipment) as EquipSlot[]) {
+        expect(eq[slot], `${def.id} equipment slot "${slot}"`).toBeTruthy();
+      }
+    }
   });
 
   it.each([

@@ -57,7 +57,7 @@ interface StartingKit {
   pfennig: number;
 }
 
-const STARTING_KITS: Record<PlayerCreation['background'], StartingKit> = {
+export const STARTING_KITS: Record<PlayerCreation['background'], StartingKit> = {
   saeumer: {
     equip: { mainHand: { defId: 'item.spiess' }, body: { defId: 'item.gambeson' } },
     items: [{ defId: 'item.messer' }, { defId: 'item.rope' }, { defId: 'item.salt-sack' }],
@@ -340,22 +340,26 @@ export class PartyServiceImpl implements PartyService {
     return { leveled: result.levelsGained > 0, newLevel: result.levelsGained > 0 ? result.level : undefined };
   }
 
-  private bumpSkillLevel(id: EntityId, skill: SkillId, delta: number): void {
+  /** Bumps a skill level without emitting yet — the caller (`applyChapter`) recomputes the character
+   *  level from ALL the bumps first, then emits, so a 'level-up'/'perk-available' listener never sees a
+   *  stale `Character.level` (fix round 2, issue 2 — mirrors `grantSkillXp`'s ordering from round 1, issue 14). */
+  private bumpSkillLevel(id: EntityId, skill: SkillId, delta: number): { skill: SkillId; newLevel: number; perkIds: string[] } | null {
     const skillsC = this.world.get(id, Skills);
-    if (!skillsC) return;
+    if (!skillsC) return null;
     const prog = skillsC.levels[skill] ?? { level: 0, xp: 0 };
     const oldLevel = prog.level;
     const newLevel = Math.min(100, oldLevel + delta);
     skillsC.levels[skill] = { level: newLevel, xp: prog.xp };
-    if (newLevel <= oldLevel) return;
-    this.bus.emit('level-up', id, skill, newLevel);
+    if (newLevel <= oldLevel) return null;
+    const perkIds: string[] = [];
     for (const lvl of PERK_LEVELS) {
       if (oldLevel < lvl && newLevel >= lvl) {
         for (const p of this.content.perks.values()) {
-          if (p.skill === skill && p.level === lvl) this.bus.emit('perk-available', id, p.id);
+          if (p.skill === skill && p.level === lvl) perkIds.push(p.id);
         }
       }
     }
+    return { skill, newLevel, perkIds };
   }
 
   private recomputeCharacterLevel(id: EntityId, force = false): void {
@@ -512,15 +516,22 @@ export class PartyServiceImpl implements PartyService {
 
   addItem(id: EntityId, defId: string, qty = 1): ItemInstance {
     if (qty <= 0) qty = 1; // fix round 1, issue 11: reject/clamp a nonsensical qty rather than corrupt state
-    const inv = this.world.get(id, Inventory) ?? this.world.add(id, Inventory, {});
     const def = this.content.items.get(defId);
-    if (!def) console.warn(`[party] addItem: unknown item def "${defId}"`); // fix round 1, issue 11
-    // Fix round 1, issue 8: granting era-gated loot is allowed (it might be a quest reward for later), but
-    // it will refuse to *equip* until the chapter catches up — see equip().
-    if (def?.eraFrom && chapterIndex(def.eraFrom) > chapterIndex(this.state().chapter)) {
-      console.warn(`[party] addItem: "${defId}" is era-gated (${def.eraFrom}); granted, but equip() will refuse it until then`);
+    if (!def) {
+      // Fix round 2, issue 4: a misspelt/unknown defId used to still mint a nameless, weightless "phantom"
+      // instance after warning. Refuse outright — nothing is added to the inventory.
+      console.warn(`[party] addItem: unknown item def "${defId}"; nothing granted`);
+      return { instanceId: '', defId, qty: 0 };
     }
-    const stackable = !def || STACKABLE_KINDS.has(def.kind);
+    const inv = this.world.get(id, Inventory) ?? this.world.add(id, Inventory, {});
+    // Fix round 1, issue 8: granting era-gated loot is allowed (it might be a quest reward for later), but
+    // it will refuse to *equip* until the chapter catches up — see equip(). Fix round 2, issue 5: this is
+    // expected/routine (e.g. a Chapter-2 Langspiess handed out early), not a real problem — console.debug,
+    // not console.warn, so it doesn't turn a legitimate harness scenario yellow.
+    if (def.eraFrom && chapterIndex(def.eraFrom) > chapterIndex(this.state().chapter)) {
+      console.debug(`[party] addItem: "${defId}" is era-gated (${def.eraFrom}); granted, but equip() will refuse it until then`);
+    }
+    const stackable = STACKABLE_KINDS.has(def.kind);
     if (stackable) {
       const existing = inv.items.find((i) => i.defId === defId);
       if (existing) {
@@ -693,8 +704,15 @@ export class PartyServiceImpl implements PartyService {
         .sort((a, b) => b[1].level - a[1].level)
         .slice(0, 3)
         .map(([k]) => k);
-      for (const skill of top3) this.bumpSkillLevel(id, skill, 5);
+      const pending = top3
+        .map((skill) => this.bumpSkillLevel(id, skill, 5))
+        .filter((r): r is { skill: SkillId; newLevel: number; perkIds: string[] } => r !== null);
+      // Fix round 2, issue 2: recompute BEFORE emitting (see bumpSkillLevel's doc comment above).
       this.recomputeCharacterLevel(id);
+      for (const r of pending) {
+        this.bus.emit('level-up', id, r.skill, r.newLevel);
+        for (const perkId of r.perkIds) this.bus.emit('perk-available', id, perkId);
+      }
       this.invalidate(id);
     }
   }

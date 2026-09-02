@@ -84,7 +84,7 @@ export const items: ItemDef[] = [
   },
   {
     id: 'item.sling', name: 'Sling', kind: 'weapon', weightKg: 0.2, value: 5,
-    weapon: { skill: 'throwing', hands: 1, reach: 1, damage: '1d4', damageType: 'blunt', properties: ['thrown'], range: { short: 6, long: 12 } },
+    weapon: { skill: 'throwing', hands: 1, reach: 1, damage: '1d4', damageType: 'blunt', properties: ['thrown'], range: { short: 6, long: 12 }, ammo: 'item.sling-stones' },
     description: 'A braided leather sling, loaded with river stones — a shepherd boy\'s hunting tool.',
     historical: true, note: 'Universal, ancient, and still a real peasant weapon in the 14th century.',
   },

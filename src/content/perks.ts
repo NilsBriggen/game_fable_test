@@ -46,7 +46,7 @@ export const perks: PerkDef[] = [
     id: 'perk.spear-75', name: 'Spiessstoss', skill: 'spear', level: 75,
     description: 'A shove behind the point can stagger an entire file: a braced hit may push the target 1 cell and check its charge.',
     grantsAbility: 'ability.push-of-pike',
-    historical: true, note: 'Massed spear formations of the period are described as physically shoving an opposing line, not only stabbing at it. Renamed from the anachronistic English "Push of Pike" (critic fix round 1, issue 9) — Spiessstoss ("spear-thrust") names the same mechanic in period German.',
+    historical: true, note: 'Massed spear formations of the period are described as physically shoving an opposing line, not only stabbing at it.',
   },
 
   // ================= SWORD =================
@@ -140,19 +140,19 @@ export const perks: PerkDef[] = [
     id: 'perk.crossbow-50', name: 'Schnellschuss', skill: 'crossbow', level: 50,
     description: 'A crossbowman who never fully lowers the weapon can loose the instant a target appears.',
     grantsAbility: 'ability.crossbow-snapshot',
-    historical: true, note: 'Tell\'s crossbow, like the hunting Armbrust of the period, was light enough to bring to bear quickly. Renamed from the modern English "Snapshot" (critic fix round 1, issue 9) — Schnellschuss ("quick shot") is the plain German equivalent.',
+    historical: true, note: 'Tell\'s crossbow, like the hunting Armbrust of the period, was light enough to bring to bear quickly.',
   },
   {
     id: 'perk.crossbow-75', name: 'Gürtelhaken-Drill', skill: 'crossbow', level: 75,
-    description: 'Drilled spanning with the belt hook and stirrup turns reloading into a single practised motion (a bonus action instead of a full one).',
+    description: 'Drilled spanning with the belt hook and stirrup steps a reload down one rung of the ladder: a full-action reload becomes a bonus action, and a bonus-action reload — the belt-hook Armbrust already in Act 1 — becomes free once per turn.',
     modifiers: { reloadStep: -1 },
-    historical: true, note: 'Fix round 1, issue 9: replaces the earlier "Windlass Drill" (a 15th-c. windlass span, banned player-facing gear per LORE §7). The Armbrust of Act 1 already spans by stirrup and belt hook (§7); this perk drills that real period method faster, so it is usable — and historically correct — from Chapter 1 on, not dormant.',
+    historical: true, note: 'The Armbrust of Act 1 spans by stirrup and belt hook (LORE §7, no windlass); this perk drills that real period method to a speed a practised hand could plausibly reach.',
   },
   {
-    id: 'perk.crossbow-100', name: 'Aimed Shot', skill: 'crossbow', level: 100,
-    description: 'Taking the turn to aim, without moving, all but guarantees the bolt goes where it is meant to.',
-    grantsAbility: 'ability.aimed-shot',
-    historical: true, note: 'Hunting and target crossbows of the era were prized for accuracy at the cost of a slow reload — the trade this ability models. Moved from 75 to the crossbow capstone (critic fix round 1, issue 9) to make room for Gürtelhaken-Drill at 75.',
+    id: 'perk.crossbow-100', name: 'Tells Auge', skill: 'crossbow', level: 100,
+    description: 'A marksman\'s eye: the aimed shot that would normally cost your whole turn\'s movement no longer does — step to your mark, brace, and still loose true.',
+    modifiers: { aimedShotNoMoveForfeit: 1 },
+    historical: 'legend', note: 'Named for Wilhelm Tell\'s legendary marksmanship (the apple shot at Altdorf, LORE §6) rather than an attested drill — a fitting capstone name for the skill his tradition represents, not a claim of period technique.',
   },
 
   // ================= THROWING =================
@@ -192,7 +192,7 @@ export const perks: PerkDef[] = [
     id: 'perk.unarmed-75', name: 'Schwingerwurf', skill: 'unarmed', level: 75,
     description: 'A grappling throw puts an armed opponent flat on their back.',
     modifiers: { 'attack.unarmed': 2, proneOnCrit: 1 },
-    historical: true, note: 'Village wrestling technique translated directly to unarming and downing an armed man at close range. Renamed from the modern English/MMA "Takedown" (critic fix round 1, issue 9) — Schwingerwurf ("wrestler\'s throw") names it via Schwingen, the Alpine wrestling tradition.',
+    historical: true, note: 'Village wrestling technique translated directly to unarming and downing an armed man at close range.',
   },
 
   // ================= LIGHT ARMOUR =================
@@ -226,7 +226,7 @@ export const perks: PerkDef[] = [
     id: 'perk.armor-heavy-50', name: 'Plattenrock', skill: 'armor-heavy', level: 50,
     description: 'Knowing how to angle a coat-of-plates turns aside even a heavy blow.',
     modifiers: { 'soak.blunt': 1 },
-    historical: true, note: 'The coat-of-plates (worn over mail by wealthier Habsburg knights) was specifically developed to spread blunt impact. Renamed from "Plate Sense" (critic fix round 1, issue 9) — "plate" alone reads as the banned plate-harness anachronism; Plattenrock is the coat-of-plates\' own German name.',
+    historical: true, note: 'The coat-of-plates (worn over mail by wealthier Habsburg knights) was specifically developed to spread blunt impact.',
   },
   {
     id: 'perk.armor-heavy-75', name: 'Iron Constitution', skill: 'armor-heavy', level: 75,
