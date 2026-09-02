@@ -15,9 +15,13 @@ const MAX_RANGE = 2.5;
 const MAX_ANGLE = (60 * Math.PI) / 180;
 
 export class InteractSystem {
+  // `content` isn't read directly (every field this system needs — dialogueId, containerId, item
+  // instances — already lives on the ECS components themselves), but kept as a constructor parameter to
+  // match the other exploration systems' shape and because a Wave-3 addition (e.g. a container's `owner`
+  // reputation gate) will likely need it.
   constructor(
     private world: World,
-    private content: ContentRegistry,
+    _content: ContentRegistry,
     private services: ServiceRegistry,
     private events: EventBus<ExplorationEvents>,
   ) {}

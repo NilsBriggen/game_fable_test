@@ -7,13 +7,13 @@
 import { Group, Object3D } from 'three';
 import type { GameContext } from '@core/context';
 import type { EntityId, World } from '@core/ecs';
-import { Transform, Character, PartyMember, Renderable, MeshRef, Player, Name, Npc } from '@core/components';
+import { Transform, Character, PartyMember, Renderable, MeshRef, Player, Name } from '@core/components';
 import type { NpcDef, PoiDef } from '@core/schemas';
 import type { ExplorationEvents, ExplorationService, WorldService } from '@core/services';
 import { EventBus } from '@core/events';
 
 import { CameraRigImpl } from './camera';
-import { PlayerController, PLAYER_RADIUS } from './player';
+import { PlayerController } from './player';
 import { buildPlayerModel, animateWalkCycle } from './playerModel';
 import { NpcSystem } from './npc';
 import { PoiSystem } from './poi';

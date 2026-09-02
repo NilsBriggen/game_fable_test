@@ -9,7 +9,7 @@
  */
 import { Object3D } from 'three';
 import type { World, EntityId } from '@core/ecs';
-import { Transform, Renderable, Interactable, Npc, Faction, MeshRef, type NpcC } from '@core/components';
+import { Transform, Renderable, Interactable, Npc, MeshRef, type NpcC } from '@core/components';
 import type { ContentRegistry } from '@core/content';
 import type { NpcDef } from '@core/schemas';
 import type { PartyService, WorldService } from '@core/services';

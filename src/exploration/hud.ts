@@ -30,7 +30,7 @@ export function updateHud(
   let nearestUndiscovered: { def: { name: string; x: number; z: number }; d: number } | null = null;
   for (const def of content.pois.values()) {
     const discovered = poiSystem.isDiscovered(def.id);
-    const d = Math.sqrt(dist2(t.x, t.z, def.x, def.z));
+    const d = dist2(t.x, t.z, def.x, def.z); // dist2, despite the name, is already the real (not squared) distance
     if (discovered) {
       const bearing = Math.atan2(def.x - t.x, -(def.z - t.z));
       markers.push({ bearing, kind: def.kind, label: def.name, distance: d, discovered: true });
