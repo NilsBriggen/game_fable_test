@@ -45,7 +45,7 @@
     },
     "world": {
       "owner": "builder:world",
-      "status": "fix-round",
+      "status": "critic-round-2",
       "score": 3,
       "fixRounds": 1,
       "openIssues": [
@@ -60,7 +60,7 @@
         "events not emitted",
         "no streaming-hitch evidence"
       ],
-      "notes": "builder stopped by integrator after 4h without report (ignored converge request); tree green (3559 lines, 24 tests); critic running on tree state; fresh builder will take fix rounds"
+      "notes": "fresh builder fix round 1: geometry tests 107/111 (4 red: urnersee 6.6m, zugersee 24.4m, lauerzersee 14m shore steps; sattel-road 29\u00b0); free-altdorf 430 calls, free-schoellenen 148 calls; seelisberg scenario not completed under contention"
     },
     "save": {
       "owner": "builder:save",
