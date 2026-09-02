@@ -28,13 +28,14 @@ describe('currency edge cases', () => {
     expect(formatPfennig(7.9).label).toBe('7 d');
     expect(formatPfennig(239.999).label).toBe('239 d'.replace('239 d', '19 s 11 d'));
   });
-  it('DEFECT: a negative fraction below one Pfennig renders as "-0 d" with a -0 pfund', () => {
+  it('FIXED r2: a negative fraction below one Pfennig renders as "0 d" with a +0 pfund', () => {
     const c = formatPfennig(-0.5);
-    expect(c.label).toBe('-0 d');
-    expect(Object.is(c.pfund, -0)).toBe(true);
+    expect(c.label).toBe('0 d');
+    expect(Object.is(c.pfund, 0)).toBe(true);
   });
-  it('DEFECT: NaN is not guarded and leaks into the label', () => {
-    expect(formatPfennig(Number.NaN).label).toBe('NaN d');
+  it('FIXED r2: non-finite input is guarded to 0 d', () => {
+    expect(formatPfennig(Number.NaN).label).toBe('0 d');
+    expect(formatPfennig(Number.POSITIVE_INFINITY).label).toBe('0 d');
   });
   it('large purses carry over correctly (100 000 d = 416 ℔ 13 s 4 d)', () => {
     expect(formatPfennig(100_000).label).toBe('416 ℔ 13 s 4 d');
@@ -83,11 +84,11 @@ describe('compass wrap-around', () => {
     expect(normalizeAngle(3 * Math.PI)).toBeCloseTo(Math.PI);
     expect(compassX(Math.PI, 3 * Math.PI, 180)).toBeCloseTo(0.5);
   });
-  it('DEFECT: facing due south renders the S chip twice at the same x (COMPASS_LETTERS lists S at +180 and -180)', () => {
+  it('FIXED r2: facing due south renders exactly one S chip, centred', () => {
     const chips = compassCardinals(Math.PI, 180);
     const s = chips.filter((c) => c.letter === 'S');
-    expect(s.length).toBe(2);
-    expect(s[0].x).toBeCloseTo(s[1].x);
+    expect(s.length).toBe(1);
+    expect(s[0].x).toBeCloseTo(0.5);
   });
   it('a 180° window shows exactly three cardinals when facing a cardinal direction (N: W N E)', () => {
     const chips = compassCardinals(0, 180).map((c) => c.letter).sort();

@@ -60,6 +60,10 @@ export function propMaterial(id: PropTexId, opts: PropMatOpts = {}): MeshStandar
     vertexColors: true,
   });
   m.normalScale = new Vector2(opts.normalScale ?? 1, opts.normalScale ?? 1);
+  // Shared, cached and long-lived: exploration disposes an NPC's materials when it freezes the NPC
+  // (src/exploration/npc.ts), which would otherwise drop the GPU program for every merged building
+  // using the same instance. Only disposeAssetCaches() really frees these.
+  m.dispose = () => {};
   registerCsmMaterial(m);
   matCache.set(key, m);
   return m;
@@ -101,7 +105,9 @@ export function loadRigAnims(): Promise<RigAnims | null> {
       bones: string[]; bind: Record<string, [number, number, number]>; skeleton: RigBone[];
       clips: { name: string; duration: number; tracks: { bone: string; path: 'quaternion' | 'position'; times: { off: number; len: number }; values: { off: number; len: number } }[] }[];
     };
-    const data = new Float32Array(buf, 8 + headerLen);
+    // `new Float32Array(buf, off)` requires a 4-aligned offset and the JSON header is arbitrary length,
+    // so copy the payload out instead of viewing it in place (one 0.5 MB copy, once).
+    const data = new Float32Array(buf.slice(8 + headerLen));
     const clips = new Map<string, RigClip>();
     for (const c of header.clips) {
       clips.set(c.name, {
@@ -123,7 +129,7 @@ export function loadRigAnims(): Promise<RigAnims | null> {
 export function disposeAssetCaches(): void {
   for (const t of texCache.values()) t.dispose();
   texCache.clear();
-  for (const m of matCache.values()) m.dispose();
+  for (const m of matCache.values()) MeshStandardMaterial.prototype.dispose.call(m);
   matCache.clear();
   rigPromise = null;
 }

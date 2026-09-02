@@ -17,6 +17,7 @@ import { VegetationManager } from './vegetation';
 import { buildWater, type WaterHandle } from './water';
 import { buildSky, type SkyHandle } from './sky';
 import { ModelLibrary } from './models';
+import { spawnCharacter, updateCharacters } from './characters';
 import { renderMapImage, worldToMapUv } from './map';
 import { getTerrainMaterial } from './terrainMaterial';
 import { snowLineFor } from './heightmodel';
@@ -75,6 +76,7 @@ export async function register(ctx: GameContext): Promise<void> {
       vegetation.update();
       water.update(ctx.elapsed);
       sky.update(dt, renderer);
+      updateCharacters(dt);
     },
   });
 
@@ -197,6 +199,7 @@ export async function register(ctx: GameContext): Promise<void> {
     isSettled: () => terrain.isSettledAround(camera.position.x, camera.position.z, STREAM_CORE_RADIUS),
     placeInstances,
     spawnModel: (modelId: string, opts?: { variant?: string; scale?: number }) => models.spawn(modelId, opts),
+    spawnCharacter: (archetype: string, opts?: { variant?: string; mounted?: boolean; seed?: number }) => spawnCharacter(archetype, opts),
     registerModel: (modelId: string, factory: (o: { variant?: string; scale?: number; rng: Rng }) => Object3D) => models.register(modelId, factory),
     hasModel: (modelId: string) => models.has(modelId),
     listModels: () => models.list(),

@@ -26,6 +26,19 @@ export const FOG_UNIFORMS = {
   uFogMax: { value: 0.96 },
 };
 
+/**
+ * Shared sky-appearance uniforms. sky.ts is the only writer; water.ts (and anything else that wants
+ * to reflect or tint against the current sky) reads them. Kept here rather than in sky.ts so no
+ * module has to import the sky just to know what colour the air is.
+ */
+export const ATMOSPHERE = {
+  uSkyZenith: { value: new Color(0x3f78b4) },
+  uSkyHorizon: { value: new Color(0xb9d2e4) },
+  uSunTint: { value: new Color(0xfff0d2) },
+  uGlitter: { value: 1 },
+  uChop: { value: 1 },
+};
+
 /** GLSL for the shared aerial perspective. Call applyAerialFog(shader) to inject it. */
 const FOG_DECL = /* glsl */ `
 uniform vec3 uFogColor, uFogSunColor, uSunDir;

@@ -241,7 +241,9 @@ function packAnims(entry, dir) {
       clips.push({ name, duration, tracks });
     }
   }
-  const header = Buffer.from(JSON.stringify({ bones, bind, skeleton, clips }), 'utf8');
+  const json = JSON.stringify({ bones, bind, skeleton, clips });
+  // pad the header so the float payload starts 4-byte aligned (a Float32Array view needs that)
+  const header = Buffer.from(json + ' '.repeat((4 - ((8 + Buffer.byteLength(json)) % 4)) % 4), 'utf8');
   const data = Buffer.from(new Float32Array(floats).buffer);
   const out = Buffer.alloc(8 + header.length + data.length);
   out.write('EANM', 0, 'ascii');
@@ -298,9 +300,11 @@ ${rows.join('\n')}
   cannot be part of that bake; procedural geometry also keeps the metre footprints \`src/exploration/layout.ts\`
   assumes. KayKit's Medieval Builder Pack (CC0, downloaded and inspected) is hex-tile stylised and does not
   match the PBR/painterly target.
-* **Character meshes are procedural too**, skinned to a period-proportioned skeleton; only the *animation*
-  is third-party (KayKit, CC0). Rigged CC0 humans that exist (KayKit Adventurers, Quaternius) are toon-
-  proportioned fantasy archetypes — wrong silhouettes for 1291–1315 Alemannic dress.
+* **Character meshes are procedural too** (\`src/world/characters.ts\`), skinned to a skeleton retargeted to
+  adult human proportions; only the *animation* is third-party (KayKit Rig_Medium, CC0), re-packed to the
+  31 clips the game maps onto \`CharacterAnim\`. Rigged CC0 humans that exist (KayKit Adventurers,
+  Quaternius) are toon-proportioned fantasy archetypes — wrong silhouettes for 1291–1315 Alemannic dress,
+  and none of them ship kettle hats, gambesons, monks' habits or a red-white-red surcoat.
 `;
   fs.writeFileSync(path.join(root, 'public/assets/CREDITS-models.md'), md);
   log('credits →', 'public/assets/CREDITS-models.md', kb(total));

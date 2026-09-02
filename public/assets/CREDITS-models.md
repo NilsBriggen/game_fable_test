@@ -55,6 +55,8 @@ Total committed asset bytes: **4.25 MB** in 38 files.
   cannot be part of that bake; procedural geometry also keeps the metre footprints `src/exploration/layout.ts`
   assumes. KayKit's Medieval Builder Pack (CC0, downloaded and inspected) is hex-tile stylised and does not
   match the PBR/painterly target.
-* **Character meshes are procedural too**, skinned to a period-proportioned skeleton; only the *animation*
-  is third-party (KayKit, CC0). Rigged CC0 humans that exist (KayKit Adventurers, Quaternius) are toon-
-  proportioned fantasy archetypes — wrong silhouettes for 1291–1315 Alemannic dress.
+* **Character meshes are procedural too** (`src/world/characters.ts`), skinned to a skeleton retargeted to
+  adult human proportions; only the *animation* is third-party (KayKit Rig_Medium, CC0), re-packed to the
+  31 clips the game maps onto `CharacterAnim`. Rigged CC0 humans that exist (KayKit Adventurers,
+  Quaternius) are toon-proportioned fantasy archetypes — wrong silhouettes for 1291–1315 Alemannic dress,
+  and none of them ship kettle hats, gambesons, monks' habits or a red-white-red surcoat.
