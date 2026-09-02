@@ -60,27 +60,17 @@
     },
     "party": {
       "owner": "builder:party",
-      "status": "fix-round",
-      "score": 5,
+      "status": "passed",
+      "score": 8,
       "fixRounds": 1,
       "openIssues": [
-        "XP curve ~60x too slow",
-        "item instance ids collide after load",
-        "derived() cache not invalidatable",
-        "removeItem partial removal",
-        "ammo/ranged slot rules",
-        "rest heals 0 at low endurance",
-        "no party cap",
-        "eraFrom not enforced",
-        "anachronistic perk names",
-        "LORE \u00a710 rows missing",
-        "non-stackable qty bug",
-        "backgrounds lack skill emphasis",
-        "transfer throws",
-        "stale/missing events",
-        "thin tests"
+        "sling lacks weapon.ammo (herder starts unloaded)",
+        "bumpSkillLevel emits before level recompute",
+        "crossbow 75/100 perks hollow in Act 1",
+        "addItem unknown def creates phantom",
+        "era-gate warn should not be console.warn"
       ],
-      "notes": "25 unit tests; 49 items, 52 perks, 19 skills, 23 archetypes; awaiting critic"
+      "notes": "49 unit tests; critic 5\u21928; first perk \u224878 hits; chapter ids prologue-1291/ch1-1307/ch2-1314 must be adopted by quest builder"
     },
     "exploration": {
       "owner": "builder:exploration",
