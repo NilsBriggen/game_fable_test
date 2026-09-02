@@ -103,11 +103,8 @@
       "status": "passed",
       "score": 8,
       "fixRounds": 2,
-      "openIssues": [
-        "two travel gates bypassed by dialogue advances (einsiedeln, zug) \u2014 polish",
-        "burgenbruch castle stages not presence-gated (optional)"
-      ],
-      "notes": "66 tests; critic 5\u21927\u21928; both walkthroughs reach Brunnen by walking"
+      "openIssues": [],
+      "notes": "66 tests; critic 5\u21927\u21928; polish applied"
     },
     "ui": {
       "owner": "builder:ui",
