@@ -83,7 +83,9 @@
       "status": "in-progress",
       "score": null,
       "fixRounds": 0,
-      "openIssues": []
+      "openIssues": [
+        "draw calls 5295 at Altdorf with NPCs/props populated (budget 2000; target 1200) \u2014 flagged to builder"
+      ]
     },
     "combat": {
       "owner": "builder:combat",
@@ -149,9 +151,10 @@
     }
   ],
   "harness": {
-    "lastRun": null,
+    "lastRun": "2026-09-02T18:30Z",
     "passed": null,
     "total": null,
-    "renderer": null
+    "renderer": null,
+    "note": "dialogue-gessler-hat: err=0 warn=0 but 5295 draw calls (exploration WIP)"
   }
 }
