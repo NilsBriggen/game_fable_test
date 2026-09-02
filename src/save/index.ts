@@ -6,6 +6,7 @@ import type { GameContext } from '@core/context';
 import type { SaveFile, SaveMeta } from '@core/schemas';
 import { AUTOSAVE_SLOT, QUICKSAVE_SLOT } from '@core/schemas';
 import type { SaveService, Weather } from '@core/services';
+import type { Season } from '@core/clock';
 import { Transform } from '@core/components';
 import type { SaveHost } from './host';
 import type { SaveStore } from './db';
@@ -59,6 +60,14 @@ export class SaveServiceImpl implements SaveService {
       // Emitting 'loading' first (rather than after decode/migrate) is what makes `ctx.state.prev`
       // meaningful on failure below: it pins "the state we were in right before this load attempt".
       host.events.emit('request-state', 'loading');
+      if (host.state.state !== 'loading') {
+        // The transition was illegal from wherever load() was called (e.g. mid-dialogue/combat, per
+        // state.ts's allowed table) — the machine stayed put. Bail out now, before touching storage,
+        // rather than reading `host.state.prev` further down (which would be stale here) or clobbering
+        // whatever's currently active.
+        ui?.toast('Cannot load right now', 'warning');
+        return;
+      }
       ui?.loading(true, 'Loading…');
 
       const bytes = await this.store.get(slot);
@@ -83,6 +92,7 @@ export class SaveServiceImpl implements SaveService {
       }
       if (exploration) exploration.setDiscovered(save.discovered);
       if (save.weather && world) world.setWeather(save.weather as Weather);
+      if (save.season && world) world.setSeason(save.season as Season);
 
       // Let modules re-create transient components (meshes, etc.) from the restored persistent ones.
       host.events.emit('loaded');
@@ -151,12 +161,11 @@ export class SaveServiceImpl implements SaveService {
     return meta;
   }
 
-  /** Reads the previous save's `createdAt` from its stored `SaveMeta` — `SaveMeta.createdAt` is
-   * already tracked per-slot by the store, so this needs no decode/decompression of the old file. */
+  /** Reads the previous save's `createdAt` via `SaveStore.getMeta` — a single-slot lookup, not
+   * `list()` (which would fetch every slot's bytes just to read one string). */
   private async existingCreatedAt(slot: number): Promise<string | undefined> {
     try {
-      const metas = await this.store.list();
-      return metas.find((m) => m.slot === slot)?.createdAt;
+      return (await this.store.getMeta(slot))?.createdAt;
     } catch {
       return undefined; // corrupt/missing prior save: just start a fresh createdAt
     }
@@ -197,6 +206,14 @@ export async function register(ctx: GameContext): Promise<void> {
   //   call triggerAutosave() directly rather than requestAutosave(), which would defer it.
   ctx.events.on('state-changed', (from, to) => {
     if (from === 'explore' && to === 'combat') triggerAutosave();
+  });
+  // A deferred autosave must not survive a load(): otherwise the first 'explore' tick after loading
+  // manual slot N fires the stale request and overwrites the autosave with a duplicate of slot N,
+  // discarding a distinct restore point. Clear it both when a load finishes ('loaded') and when one
+  // begins (state-changed -> 'loading'), so it can't sneak in mid-load either.
+  ctx.events.on('loaded', () => { pendingAutosave = false; });
+  ctx.events.on('state-changed', (_from, to) => {
+    if (to === 'loading') pendingAutosave = false;
   });
   // - quest complete/advance, and fast travel: hooked lazily below once their services exist.
   let questHooked = false;

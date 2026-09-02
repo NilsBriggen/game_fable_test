@@ -11,6 +11,9 @@ import { calendarFromGameTime } from '@core/clock';
 
 export interface SaveStore {
   get(slot: number): Promise<Uint8Array | null>;
+  /** Reads just one slot's `SaveMeta` — cheaper than `list()` (which fetches every slot's bytes too)
+   * when only the metadata for one known slot is needed, e.g. `existingCreatedAt`. */
+  getMeta(slot: number): Promise<SaveMeta | null>;
   put(slot: number, bytes: Uint8Array, meta: SaveMeta): Promise<void>;
   delete(slot: number): Promise<void>;
   list(): Promise<SaveMeta[]>;
@@ -71,6 +74,15 @@ export class IndexedDbStore implements SaveStore {
     });
   }
 
+  async getMeta(slot: number): Promise<SaveMeta | null> {
+    const store = await this.tx('readonly');
+    return new Promise((resolve, reject) => {
+      const req = store.get(slot);
+      req.onsuccess = () => resolve(req.result ? (req.result as Row).meta : null);
+      req.onerror = () => reject(req.error ?? new Error('IndexedDB get failed'));
+    });
+  }
+
   async put(slot: number, bytes: Uint8Array, meta: SaveMeta): Promise<void> {
     const store = await this.tx('readwrite');
     return new Promise((resolve, reject) => {
@@ -108,6 +120,9 @@ export class MemoryStore implements SaveStore {
   async get(slot: number): Promise<Uint8Array | null> {
     return this.rows.get(slot)?.bytes ?? null;
   }
+  async getMeta(slot: number): Promise<SaveMeta | null> {
+    return this.rows.get(slot)?.meta ?? null;
+  }
   async put(slot: number, bytes: Uint8Array, meta: SaveMeta): Promise<void> {
     this.rows.set(slot, { slot, meta, bytes });
   }
@@ -142,6 +157,13 @@ export class LocalStorageStore implements SaveStore {
     if (!raw) return null;
     const { bytesBase64 } = JSON.parse(raw) as { bytesBase64: string };
     return base64ToBytes(bytesBase64);
+  }
+
+  async getMeta(slot: number): Promise<SaveMeta | null> {
+    const raw = localStorage.getItem(this.prefix + slot);
+    if (!raw) return null;
+    const { meta } = JSON.parse(raw) as { meta: SaveMeta };
+    return meta;
   }
 
   async put(slot: number, bytes: Uint8Array, meta: SaveMeta): Promise<void> {
@@ -201,6 +223,7 @@ export class ResilientStore implements SaveStore {
   }
 
   get(slot: number): Promise<Uint8Array | null> { return this.run((s) => s.get(slot)); }
+  getMeta(slot: number): Promise<SaveMeta | null> { return this.run((s) => s.getMeta(slot)); }
   put(slot: number, bytes: Uint8Array, meta: SaveMeta): Promise<void> { return this.run((s) => s.put(slot, bytes, meta)); }
   delete(slot: number): Promise<void> { return this.run((s) => s.delete(slot)); }
   list(): Promise<SaveMeta[]> { return this.run((s) => s.list()); }

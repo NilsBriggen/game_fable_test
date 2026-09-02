@@ -23,16 +23,40 @@ import { createSaveService, register } from './index';
 
 // ---------------- test helpers ----------------
 
+/** A tiny stand-in for `GameStateMachine`: `transition()` updates `state`/`prev` the same way (no
+ * legality table — the save module doesn't need one; `main.ts` owns that). Exposed separately from
+ * `SaveHost.state` (which only declares the read side) so test wiring can drive it explicitly. */
+class TestStateMachine {
+  state: string;
+  prev: string;
+  constructor(initial: string) {
+    this.state = initial;
+    this.prev = initial;
+  }
+  transition(to: string): void {
+    if (to === this.state) return;
+    this.prev = this.state;
+    this.state = to;
+  }
+}
+
 /** A SaveHost backed by real (non-WebGL) core classes — GameContext satisfies this structurally,
- * but constructing GameContext itself would create a WebGLRenderer, which is unavailable in Node. */
-function makeHost(seed: number, opts: { state?: string; prev?: string } = {}): SaveHost {
+ * but constructing GameContext itself would create a WebGLRenderer, which is unavailable in Node.
+ * By default, wires 'request-state' -> the state machine, mirroring `main.ts`'s
+ * `ctx.events.on('request-state', to => ctx.state.transition(to))`, so `doLoad`'s post-emit
+ * `host.state.state` check and its `host.state.prev` read on early failure behave exactly as they
+ * do against a real `GameContext`. Pass `autoTransition: false` to simulate an illegal/refused
+ * transition (state never actually changes), or `prev` to seed a starting value. */
+function makeHost(seed: number, opts: { state?: string; prev?: string; autoTransition?: boolean } = {}): SaveHost {
+  const stateMachine = new TestStateMachine(opts.state ?? 'explore');
+  if (opts.prev !== undefined) stateMachine.prev = opts.prev;
   const host: SaveHost = {
     world: new World(),
     rng: new RngStreams(seed),
     clock: new GameClock(),
     events: new EventBus<GameEvents>(),
     services: new ServiceRegistry(),
-    state: { state: opts.state ?? 'explore', prev: opts.prev ?? 'explore' },
+    state: stateMachine,
     seed,
     playtimeSec: 0,
     reseed(newSeed: number) {
@@ -44,6 +68,9 @@ function makeHost(seed: number, opts: { state?: string; prev?: string } = {}): S
       host.playtimeSec = 0;
     },
   };
+  if (opts.autoTransition ?? true) {
+    host.events.on('request-state', (to) => stateMachine.transition(to as string));
+  }
   return host;
 }
 
@@ -124,13 +151,14 @@ function fakeExplorationService(playerId: number): { exploration: ExplorationSer
   return { exploration, setDiscoveredCalls };
 }
 
-function fakeWorldService(): { world: WorldService; streamAroundCalls: [number, number, number | undefined][]; setWeatherCalls: Weather[] } {
+function fakeWorldService(): { world: WorldService; streamAroundCalls: [number, number, number | undefined][]; setWeatherCalls: Weather[]; setSeasonCalls: string[] } {
   const streamAroundCalls: [number, number, number | undefined][] = [];
   const setWeatherCalls: Weather[] = [];
+  const setSeasonCalls: string[] = [];
   const world: WorldService = {
     heightAt: () => 0, normalAt: () => ({} as ReturnType<WorldService['normalAt']>), surfaceAt: () => 'grass', isWater: () => false, slopeAt: () => 0,
     raycast: () => null, regionAt: () => null, setTimeOfDay() {}, getTimeOfDay: () => 0,
-    setWeather(w) { setWeatherCalls.push(w); }, getWeather: () => 'clear', setSeason() {},
+    setWeather(w) { setWeatherCalls.push(w); }, getWeather: () => 'clear', setSeason(s) { setSeasonCalls.push(s); },
     streamAround: async (x, z, r) => { streamAroundCalls.push([x, z, r]); },
     isSettled: () => true, placeInstances: () => ({} as ReturnType<WorldService['placeInstances']>), spawnModel: () => ({} as ReturnType<WorldService['spawnModel']>),
     registerModel() {}, hasModel: () => false, listModels: () => [],
@@ -139,7 +167,7 @@ function fakeWorldService(): { world: WorldService; streamAroundCalls: [number, 
     stats: () => ({ chunksLoaded: 0, chunksPending: 0, instances: 0 }),
     worldToMapUv: () => [0, 0], mapImage: async () => '',
   };
-  return { world, streamAroundCalls, setWeatherCalls };
+  return { world, streamAroundCalls, setWeatherCalls, setSeasonCalls };
 }
 
 function sampleCombat(): SerializedCombat {
@@ -376,9 +404,10 @@ describe('corrupt / invalid saves', () => {
     const store = new MemoryStore();
     await store.put(5, bad, metaStub(5, new Date().toISOString()));
 
-    // prev is a distinct sentinel ('creation') so the assertion proves ctx.state.prev was used,
-    // not that 'title' happens to be correct by coincidence.
-    const host = makeHost(1, { state: 'explore', prev: 'creation' });
+    // Starting state is 'paused' (distinct from 'title') so the assertion proves ctx.state.prev was
+    // actually used to return to wherever the load was started from, not that 'title' happens to be
+    // correct by coincidence — the pause menu's "load game" is exactly this scenario.
+    const host = makeHost(1, { state: 'paused' });
     const { ui, toasts } = fakeUi();
     host.services.register('ui', ui);
     const stateEvents: unknown[] = [];
@@ -388,7 +417,7 @@ describe('corrupt / invalid saves', () => {
     await expect(svc.load(5)).resolves.toBeUndefined(); // load() must not throw — it catches internally
 
     expect(toasts.some((t) => /could not load save/i.test(t))).toBe(true);
-    expect(stateEvents).toEqual(['loading', 'creation']);
+    expect(stateEvents).toEqual(['loading', 'paused']);
   });
 
   it('a failure *after* the world has been reset still returns to title, not the stale pre-load state', async () => {
@@ -399,7 +428,7 @@ describe('corrupt / invalid saves', () => {
     const store = new MemoryStore();
     await store.put(AUTOSAVE_SLOT, bytes, metaFromSave(fixture, bytes.byteLength));
 
-    const host2 = makeHost(0, { state: 'explore', prev: 'creation' });
+    const host2 = makeHost(0);
     host2.clock = new ThrowingClock(); // throws inside applyWorldState, *after* resetWorld()/world.load()
     const { ui } = fakeUi();
     host2.services.register('ui', ui);
@@ -408,6 +437,22 @@ describe('corrupt / invalid saves', () => {
 
     await createSaveService(host2, store).load(AUTOSAVE_SLOT);
     expect(stateEvents).toEqual(['loading', 'title']);
+  });
+
+  it('doLoad bails out (toast, no storage access) when the loading transition did not actually happen', async () => {
+    // autoTransition: false simulates a real GameStateMachine refusing e.g. dialogue -> loading:
+    // state.state never becomes 'loading' at all.
+    const host = makeHost(1, { state: 'dialogue', autoTransition: false });
+    const store = new MemoryStore();
+    const getSpy = vi.spyOn(store, 'get');
+    const { ui, toasts } = fakeUi();
+    host.services.register('ui', ui);
+
+    await createSaveService(host, store).load(1);
+
+    expect(getSpy).not.toHaveBeenCalled(); // never touched storage
+    expect(toasts.some((t) => /cannot load/i.test(t))).toBe(true);
+    expect(host.state.state).toBe('dialogue'); // left exactly where it was
   });
 
   it('importJson rejects structurally invalid JSON with a clear error', async () => {
@@ -428,6 +473,7 @@ describe('SaveService.load() success path', () => {
     fixture.playerId = 1; // entity 1 exists (from populateWorld) and carries a Transform
     fixture.discovered = ['poi.fluelen'];
     fixture.weather = 'rain';
+    fixture.season = 'winter';
     const bytes = await encodeSave(fixture);
     const store = new MemoryStore();
     await store.put(AUTOSAVE_SLOT, bytes, metaFromSave(fixture, bytes.byteLength));
@@ -436,7 +482,7 @@ describe('SaveService.load() success path', () => {
     const { ui, loadingCalls } = fakeUi();
     const { quest, restoreCalls: questRestoreCalls } = fakeQuestService();
     const { exploration, setDiscoveredCalls } = fakeExplorationService(1);
-    const { world, streamAroundCalls, setWeatherCalls } = fakeWorldService();
+    const { world, streamAroundCalls, setWeatherCalls, setSeasonCalls } = fakeWorldService();
     host2.services.register('ui', ui);
     host2.services.register('quest', quest);
     host2.services.register('exploration', exploration);
@@ -456,6 +502,7 @@ describe('SaveService.load() success path', () => {
     expect(setDiscoveredCalls).toEqual([['poi.fluelen']]);
     expect(streamAroundCalls).toHaveLength(1);
     expect(setWeatherCalls).toEqual(['rain']);
+    expect(setSeasonCalls).toEqual(['winter']); // issue 1: season is restored via world.setSeason, not write-only
     expect(loadingCalls[loadingCalls.length - 1]).toBe(false);
   });
 
@@ -494,6 +541,7 @@ describe('SaveStore', () => {
     await store.put(3, new Uint8Array([0]), metaStub(3, '2026-02-01T00:00:00.000Z'));
 
     expect((await store.list()).map((m) => m.slot)).toEqual([2, 3, 1]);
+    expect((await store.getMeta(3))?.updatedAt).toBe('2026-02-01T00:00:00.000Z'); // getMeta (issue 5): single-slot lookup
 
     await store.delete(2);
     expect((await store.list()).map((m) => m.slot)).toEqual([3, 1]);
@@ -509,6 +557,7 @@ describe('SaveStore', () => {
       await store.put(1, bytes, metaStub(1, '2026-01-01T00:00:00.000Z'));
       expect(await store.get(1)).toEqual(bytes);
       expect((await store.list()).map((m) => m.slot)).toEqual([1]);
+      expect((await store.getMeta(1))?.slot).toBe(1); // getMeta (issue 5)
       await store.delete(1);
       expect(await store.get(1)).toBeNull();
       expect(await store.list()).toEqual([]);
@@ -525,6 +574,7 @@ describe('SaveStore', () => {
       await store.put(1, bytes, metaStub(1, '2026-01-01T00:00:00.000Z'));
       expect(await store.get(1)).toEqual(bytes);
       expect((await store.list()).map((m) => m.slot)).toEqual([1]);
+      expect((await store.getMeta(1))?.slot).toBe(1); // getMeta (issue 5)
       await store.delete(1);
       expect(await store.get(1)).toBeNull();
     } finally {
@@ -534,8 +584,9 @@ describe('SaveStore', () => {
 
   it('ResilientStore falls back to the secondary store (and stays there) the first time the primary throws', async () => {
     let calls = 0;
-    const alwaysFails: { get: () => Promise<null>; put: () => Promise<void>; delete: () => Promise<void>; list: () => Promise<never[]> } = {
+    const alwaysFails: { get: () => Promise<null>; getMeta: () => Promise<null>; put: () => Promise<void>; delete: () => Promise<void>; list: () => Promise<never[]> } = {
       get: async () => { calls++; throw new Error('boom'); },
+      getMeta: async () => { calls++; throw new Error('boom'); },
       put: async () => { calls++; throw new Error('boom'); },
       delete: async () => { calls++; throw new Error('boom'); },
       list: async () => { calls++; throw new Error('boom'); },
@@ -551,6 +602,7 @@ describe('SaveStore', () => {
     await resilient.put(2, new Uint8Array([2]), metaStub(2, '2026-01-02T00:00:00.000Z'));
     expect(calls).toBe(1); // stayed on the fallback; primary not retried
     expect(await fallback.get(2)).toEqual(new Uint8Array([2]));
+    expect((await resilient.getMeta(2))?.slot).toBe(2); // getMeta forwards through the fallback too
   });
 
   it('createSaveStore() picks IndexedDB when available, and falls back cleanly when IndexedDB.open() throws', async () => {
@@ -666,6 +718,33 @@ describe('register(): autosave scheduling and gating', () => {
     await flush();
     const list = await svc.list();
     expect(list.map((m) => m.slot)).toContain(AUTOSAVE_SLOT);
+  });
+
+  it('clears a deferred autosave on load-finish (loaded) and load-start (state-changed -> loading), so it cannot fire stale afterward', async () => {
+    const fakeScheduler = {
+      systems: [] as { name: string; update: (dt: number) => void }[],
+      add(s: { name: string; update: (dt: number) => void }) { this.systems.push(s); },
+    };
+    const stateHolder = { state: 'dialogue' };
+    const ctx = { ...makeHost(1), scheduler: fakeScheduler, state: stateHolder };
+    await register(ctx as unknown as GameContext);
+    const svc = ctx.services.get('save');
+    const sys = fakeScheduler.systems.find((s) => s.name === 'save-autosave')!;
+
+    ctx.events.emit('chapter-changed', 'ch1-1307'); // defers an autosave (state is 'dialogue')
+    ctx.events.emit('loaded'); // a load just finished -> the stale deferred request must not survive it
+    stateHolder.state = 'explore';
+    sys.update(1.5);
+    await flush();
+    expect(await svc.list()).toHaveLength(0);
+
+    stateHolder.state = 'dialogue'; // back to a non-explore state so the next request defers again
+    ctx.events.emit('chapter-changed', 'ch1-1307'); // defer another one
+    ctx.events.emit('state-changed', 'explore', 'loading'); // a load *beginning* also clears it
+    stateHolder.state = 'explore';
+    sys.update(1.5);
+    await flush();
+    expect(await svc.list()).toHaveLength(0);
   });
 
   it('autosaves immediately (not deferred) on the explore->combat transition, carrying the combat block', async () => {
