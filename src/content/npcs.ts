@@ -109,7 +109,7 @@ const historicalCast: NpcDef[] = [
       { hour: 12, poi: 'poi.altdorf', activity: 'market' },
       { hour: 20, poi: 'poi.altdorf', activity: 'sleep' },
     ],
-    description: "An Uri householder at Altdorf; tradition makes him one of the three oath-swearers and Wilhelm Tell's father-in-law.",
+    description: "An Uri householder at Altdorf; tradition makes him one of the three oath-swearers and a kinsman of Wilhelm Tell's.",
     historical: 'legend', note: "L throughout (Weisses Buch/Tschudi/Schiller tradition); the game keeps Tell's kinship as 'kinsman' per LORE.md §5.",
   },
   {

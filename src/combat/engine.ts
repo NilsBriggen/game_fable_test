@@ -117,7 +117,7 @@ export class CombatEngineImpl implements CombatService {
   async start(encounterId: string, opts?: { ambush?: 'player' | 'enemy'; encounterOverride?: EncounterDef }): Promise<CombatResult> {
     let enc = opts?.encounterOverride ?? this.host.content.encounters.get(encounterId);
     if (!enc) throw new Error(`combat: unknown encounter "${encounterId}"`);
-    let hunenbergCaption: string | null = null;
+    const questCaptions: string[] = [];
     if (enc.id === 'enc.morgarten') {
       // Cross-module request (requests/quest-2.md §2, LORE §6 step 11): ignoring Heinrich von Hünenberg's
       // warning means fewer boulder caches were readied before the ambush. `getFlag` returns `unknown` (it
@@ -131,7 +131,30 @@ export class CombatEngineImpl implements CombatService {
         const dropCells = new Set(['10,11', '13,9']);
         const trimmed = (enc.terrainFeatures ?? []).filter((f) => !dropCells.has(`${f.cells[0][0]},${f.cells[0][1]}`));
         enc = { ...enc, terrainFeatures: trimmed };
-        hunenbergCaption = 'Without the warning, fewer stones were laid.';
+        questCaptions.push('Without the warning, fewer stones were laid.');
+      }
+      // Cross-module request (requests/quest-3.md): `quest.muster-1315`'s letzi-craft and recruit checks set
+      // two more flags for this same read-at-setup pattern — a success ADDS something earned, symmetric with
+      // `hunenberg-warning` above (which removes something when the warning was ignored).
+      if (this.host.questService?.getFlag('morgarten.letzi-improved') === true) {
+        // One extra letzi-wall segment on the Confederate side, extending the existing north/south wall one
+        // row closer to each Haufen block's own gap — cover for the "hold the slope" opening turns.
+        enc = { ...enc, terrainFeatures: [...(enc.terrainFeatures ?? []), { kind: 'letzi-wall', cells: [[8, 3], [8, 19]] }] };
+        questCaptions.push('The letzi stands higher than the old counts allowed.');
+      }
+      if (this.host.questService?.getFlag('morgarten.recruits-strong') === true) {
+        // Two extra militia-spear allies, one beside each Haufen block (same `group` as that block, so they
+        // merge into its formation naturally) — the Schwyz contingent's own strength check paying off on
+        // the field, not just in the dialogue's text.
+        enc = {
+          ...enc,
+          units: [
+            ...enc.units,
+            { archetype: 'militia-spear', side: 'player', q: 9, r: 7, group: 'haufen-a' },
+            { archetype: 'militia-spear', side: 'player', q: 9, r: 17, group: 'haufen-b' },
+          ],
+        };
+        questCaptions.push('The Schwyz contingent swelled past the old counts.');
       }
     }
     this.resetState();
@@ -156,7 +179,7 @@ export class CombatEngineImpl implements CombatService {
       for (const u of this.units.values()) if (u.side === 'enemy' && isPolearm(u.weapon)) u.stance = 'braced';
     }
     this.ended = false;
-    if (hunenbergCaption) this.pushLog('caption', hunenbergCaption);
+    for (const caption of questCaptions) this.pushLog('caption', caption);
     // Real deploy phase (issue 9): only when a human party exists to place — the harness/standalone fallback
     // squad has no one to hand deployment to, so it auto-deploys and rolls initiative immediately as before.
     const realPartyPresent = this.host.party.getParty().length > 0;

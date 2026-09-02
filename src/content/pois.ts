@@ -146,7 +146,7 @@ const mandated: PoiDef[] = [
     kind: 'village', historical: 'legend',
     population: { peasant: 5, 'woman-peasant': 2, herder: 2, child: 1 },
     note: 'Steinen as a Schwyz village is H; the tradition that Werner Stauffacher\'s house stood here is L. See LORE.md §2/§5.',
-    description: 'A farming village on the Steiner Aa — home, tradition holds, to Werner Stauffacher and his wife Gertrud.',
+    description: 'A farming village on the Steiner Aa — home, tradition holds, to Werner Stauffacher and his household.',
   }),
   fromGazetteer('brunnen', {
     kind: 'port', historical: true, discoverRadius: 120,
