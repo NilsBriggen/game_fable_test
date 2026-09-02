@@ -98,10 +98,11 @@
     },
     "quest": {
       "owner": "builder:quest",
-      "status": "in-progress",
+      "status": "built",
       "score": null,
       "fixRounds": 0,
-      "openIssues": []
+      "openIssues": [],
+      "notes": "47 tests; Act 1 walkthrough test green; awaiting critic"
     },
     "ui": {
       "owner": "builder:ui",
