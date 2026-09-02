@@ -123,6 +123,18 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     return e != null && (this.ctx.services.tryGet('party')?.isMember(e) ?? false);
   }
   getHour(): number { return this.ctx.clock.hour; }
+  playerPosition(): { x: number; z: number } | null {
+    const p = this.playerEntity();
+    if (p == null) return null;
+    const t = this.ctx.world.get(p, Transform);
+    return t ? { x: t.x, z: t.z } : null;
+  }
+  poiPosition(poiId: string): { x: number; z: number } | null {
+    return this.ctx.services.tryGet('exploration')?.poiPosition(poiId) ?? null;
+  }
+  regionIdAt(x: number, z: number): string | null {
+    return this.ctx.services.tryGet('world')?.regionAt(x, z)?.id ?? null;
+  }
 
   // ---------------------------------------------------------------- RuntimeWrites
   setFlag(key: string, value: unknown): void {

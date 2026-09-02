@@ -25,6 +25,7 @@ function fakeRt(opts: Options): DialogueRuntime & { effectsLog: string[] } {
     getVar: (qid, k) => vars[qid]?.[k],
     getRep: () => 0, getChapter: () => 'prologue-1291', getOrigin: () => 'uri', isDiscovered: () => false,
     getPfennig: () => 0, getSkillLevel: () => opts.skillLevel ?? 0, hasItem: () => false, hasCompanion: () => false, getHour: () => 12,
+    playerPosition: () => null, poiPosition: () => null, regionIdAt: () => null,
     setFlag: (k, v) => { flags[k] = v; },
     questOp: async () => {},
     setVar: (qid, k, v) => { (vars[qid] ??= {})[k] = v; },

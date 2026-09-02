@@ -9,6 +9,7 @@ function fakeRuntime(overrides: Partial<Runtime> = {}): Runtime & { calls: strin
     getVar: () => undefined, getRep: () => 0, getChapter: () => 'prologue-1291', getOrigin: () => null,
     isDiscovered: () => false, getPfennig: () => 0, getSkillLevel: () => 0, hasItem: () => false,
     hasCompanion: () => false, getHour: () => 12,
+    playerPosition: () => null, poiPosition: () => null, regionIdAt: () => null,
     setFlag: (k, v) => calls.push(`setFlag:${k}=${v}`),
     questOp: async (op, qid, stage) => { calls.push(`questOp:${op}:${qid}:${stage ?? ''}`); },
     setVar: (qid, k, v) => calls.push(`setVar:${qid}:${k}=${v}`),

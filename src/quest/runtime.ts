@@ -22,6 +22,12 @@ export interface RuntimeReads {
   hasItem(itemId: string, qty: number): boolean;
   hasCompanion(npcId: string): boolean;
   getHour(): number;
+  /** player's current world position, or null if there is no live player entity yet. */
+  playerPosition(): { x: number; z: number } | null;
+  /** a POI's world position, or null if unknown. */
+  poiPosition(poiId: string): { x: number; z: number } | null;
+  /** region id at a world position, or null outside any authored region. */
+  regionIdAt(x: number, z: number): string | null;
 }
 
 /** Mutating operations the effect runner needs, on top of the reads above. */

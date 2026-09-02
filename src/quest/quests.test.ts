@@ -33,6 +33,7 @@ function fakeReads(flag: Record<string, unknown>): RuntimeReads {
     getFlag: (k) => flag[k], getStage: () => null, isStarted: () => false, isDone: () => false, getVar: () => undefined,
     getRep: () => 0, getChapter: () => 'prologue-1291', getOrigin: () => null, isDiscovered: () => false,
     getPfennig: () => 0, getSkillLevel: () => 0, hasItem: () => false, hasCompanion: () => false, getHour: () => 12,
+    playerPosition: () => null, poiPosition: () => null, regionIdAt: () => null,
   };
 }
 

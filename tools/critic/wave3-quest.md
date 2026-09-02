@@ -2,11 +2,7 @@
 
 Reference: Skyrim + KCD (quests with choices, factions with memory, grounded tone); LORE.md for act1-content
 Code reviewed: working tree at `116a8f5` ("Quest: fix round 1 …, 60 tests").
-Harness run: **no clean capture this round.** `node tools/harness/run.mjs --scenario dialogue-gessler-hat` (foreground, 600 000 ms) exceeded the
-timeout with two builders rendering concurrently and was backgrounded (its output file is empty; 9 harness process(es) still alive at
-write time). Meanwhile `tools/harness/out/` was overwritten at 19:29 by another builder's `free-altdorf` run, which itself died
-("Target page … closed", `ERR_CONNECTION_REFUSED` on port 5543). The only module-specific harness evidence remains round 1's run on the
-pre-fix code (0 console errors, 0 page errors, 0 warnings). Scored on tests/code/probes per the coordinator's instruction.
+Harness run: 2026-09-02T19:26:25Z, renderer: `ANGLE / SwiftShader (software)`, scenarios: `dialogue-gessler-hat`. The foreground call exceeded the 600 000 ms tool limit (two builders rendering concurrently) and was backgrounded; it finished after 1 140 s. **App side clean: `errors` from the page = 0, `pageerror` = 0, `warnings` = 0, `state: explore`, drawCalls 678, tris 1 856 196, heap 115 MB.** The scenario is marked FAIL only by the harness's own `page.screenshot: Timeout 30000ms exceeded` (SwiftShader under load) — no PNG was written this round; the only screenshot on disk is round 1's (18:35). `tools/harness/out/` was also clobbered mid-way by another builder's `free-altdorf` run (19:29, itself dead with `ERR_CONNECTION_REFUSED` on port 5543) before my report overwrote it at 19:26 completion time — the shared out-dir is not safe for concurrent runs.
 Evidence read: `npx vitest run src/quest` → `Test Files 8 passed (8) / Tests 60 passed (60)`; `npx tsc --noEmit | grep …` → no lines (clean);
 `node tools/check-imports.mjs` → `imports ok`; full read of `src/quest/*.ts`, `src/content/{quests,dialogues,cutscenes}`, the 13 new tests,
 `requests/quest-2.md`, `src/combat/engine.ts:118-137`; 11 adversarial probes in `<scratchpad>/probes/quest2.probe.test.ts` +
@@ -58,5 +54,5 @@ Improved. Still works: "The wind is worse than the range." / "It is the Länder'
 6. Integrator: `src/exploration/poi.ts:24-28` per `requests/quest-2.md`; `npcs.ts:112` / `pois.ts:149` wording.
 
 ## Explicitly out of reach for a browser engine (not counted)
-- Voice, facial animation, cinematic dialogue camera; the harness PNG shows the world, not the stub dialogue panel.
+- Voice, facial animation, cinematic dialogue camera; the harness PNG (when it captures) shows the world, not the stub dialogue panel.
 - SwiftShader draw-call/frame budgets (world/exploration's domain).

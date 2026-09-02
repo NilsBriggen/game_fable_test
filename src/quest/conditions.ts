@@ -47,6 +47,21 @@ export function evaluateCondition(cond: QuestCondition | undefined, rt: RuntimeR
     const [, value] = cond.pfennig;
     return rt.getPfennig() >= value;
   }
+  if ('nearPoi' in cond) {
+    const [poiId, radiusM] = cond.nearPoi;
+    const p = rt.playerPosition();
+    const poi = rt.poiPosition(poiId);
+    if (!p || !poi) return false;
+    const dx = p.x - poi.x;
+    const dz = p.z - poi.z;
+    return dx * dx + dz * dz <= radiusM * radiusM;
+  }
+  if ('inRegion' in cond) {
+    const p = rt.playerPosition();
+    if (!p) return false;
+    return rt.regionIdAt(p.x, p.z) === cond.inRegion;
+  }
+  if ('talkedTo' in cond) return !!rt.getFlag(`talked:${cond.talkedTo}`);
   // Exhaustiveness guard: every QuestCondition variant is handled above.
   const _exhaustive: never = cond;
   return _exhaustive;

@@ -15,6 +15,9 @@ export interface QuestRuntimeState {
   done: boolean;
   failed: boolean;
   started: number;
+  /** when true, `enterStage` skips `addJournal` for this run — used by retry loops (e.g. Morgarten's
+   *  muster hub) so replaying the same stages doesn't duplicate their journal lines every attempt. */
+  silentJournal?: boolean;
 }
 
 export interface QuestMachineDeps {
@@ -79,7 +82,7 @@ export class QuestMachine {
     this.deps.emit('journal', entry);
   }
 
-  async start(id: string): Promise<void> {
+  async start(id: string, opts: { silentJournal?: boolean } = {}): Promise<void> {
     if (this.isStarted(id) || this.isDone(id)) return;
     const def = this.deps.getQuestDef(id);
     if (!def) {
@@ -88,6 +91,7 @@ export class QuestMachine {
     }
     const q = this.ensure(id);
     q.started = this.deps.now();
+    q.silentJournal = !!opts.silentJournal;
     this.deps.emit('quest-started', id);
     await this.deps.runEffects(def.onStart, id);
     if (def.stages.length) await this.enterStage(id, def.stages[0].id);
@@ -111,7 +115,7 @@ export class QuestMachine {
       console.warn(`[quest] ${id}: unknown stage "${stageId}"`);
       return;
     }
-    this.addJournal(stage.journal, id);
+    if (!q.silentJournal) this.addJournal(stage.journal, id);
     await this.deps.runEffects(stage.onEnter, id);
   }
 
@@ -137,6 +141,14 @@ export class QuestMachine {
   /** Clears a quest's runtime state entirely so it can be `start()`ed again (retry loops). */
   reset(id: string): void {
     this.quests.delete(id);
+  }
+
+  /** Deletes every var on `id` whose key starts with `prefix` — used to un-cache rolled dialogue
+   *  checks (`_dialogue` pseudo-quest, keys `dlg.<id>:...`) so a retried hub can roll fresh again. */
+  clearVarPrefix(id: string, prefix: string): void {
+    const q = this.quests.get(id);
+    if (!q) return;
+    for (const k of Object.keys(q.vars)) if (k.startsWith(prefix)) delete q.vars[k];
   }
 
   /** Cheap: only started+active quests, only their current stage's `advanceWhen`. */

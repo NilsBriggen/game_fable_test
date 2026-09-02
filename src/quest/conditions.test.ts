@@ -18,6 +18,7 @@ function fakeReads(overrides: Partial<RuntimeReads> = {}): RuntimeReads {
     hasItem: () => false,
     hasCompanion: () => false,
     getHour: () => 12,
+    playerPosition: () => null, poiPosition: () => null, regionIdAt: () => null,
     ...overrides,
   };
 }

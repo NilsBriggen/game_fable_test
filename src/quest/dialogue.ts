@@ -139,6 +139,12 @@ export async function runDialogue(
   let effectsRun = 0;
   const ui = rt.ui();
 
+  // Critic wave3-quest.md round 2 #? / talkedTo: the root's speaker is who this dialogue "belongs to" —
+  // mark the NPC as spoken-to as soon as their dialogue actually opens (before any node runs), so a
+  // `{talkedTo: npcId}` gate elsewhere becomes true the moment the conversation happens, not after.
+  const rootSpeaker = def.nodes[nodeId]?.speaker;
+  if (rootSpeaker && rootSpeaker !== 'player' && rootSpeaker !== 'narrator') rt.setFlag(`talked:${rootSpeaker}`, true);
+
   try {
   while (true) {
     const node = def.nodes[nodeId];
@@ -148,19 +154,23 @@ export async function runDialogue(
     }
     lastNode = nodeId;
     const text = substitute(resolveText(node, rt), rt);
-    if (node.effects) {
-      await runEffects(node.effects, rt, questId);
-      effectsRun += node.effects.length;
-    }
     const speakerName = resolveSpeakerName(node, rt, speakerEntity);
     const speakerPortrait = resolveSpeakerPortrait(node, rt);
 
+    // Critic wave3-quest.md round 2 #2: show the node BEFORE running its effects — a node's own
+    // `effects` (e.g. `{cutscene:...}`, `{quest:['advance',...]}`) must never race ahead of the text
+    // that motivates them. `runEffects` is itself scene-depth-guarded (see index.ts) so anything it
+    // triggers is deferred until this whole dialogue call returns, not just until this node.
     if (node.end || !node.choices || node.choices.length === 0) {
       if (ui) {
         await ui.show({ speakerName, speakerPortrait, text, choices: [] });
         ui.hide();
       } else {
         console.info(`[dialogue:${dialogueId}] ${speakerName ? `${speakerName}: ` : ''}${text}`);
+      }
+      if (node.effects) {
+        await runEffects(node.effects, rt, questId);
+        effectsRun += node.effects.length;
       }
       if (!node.end && node.next) {
         nodeId = node.next;
@@ -183,6 +193,10 @@ export async function runDialogue(
       console.info(`[dialogue:${dialogueId}] ${speakerName ? `${speakerName}: ` : ''}${text}`);
       const firstEnabled = shown.findIndex((s) => s.enabled);
       picked = firstEnabled >= 0 ? firstEnabled : 0;
+    }
+    if (node.effects) {
+      await runEffects(node.effects, rt, questId);
+      effectsRun += node.effects.length;
     }
     const chosen = shown[Math.max(0, Math.min(picked, shown.length - 1))];
     if (!chosen || !chosen.enabled) break;
