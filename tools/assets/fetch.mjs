@@ -29,10 +29,15 @@ async function download(url, name, init) {
   const file = path.join(CACHE, `${createHash('sha1').update(url + (init?.body ?? '')).digest('hex').slice(0, 12)}-${name}`);
   if (fs.existsSync(file) && fs.statSync(file).size > 0) return file;
   log('GET', url.slice(0, 110));
-  const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
-  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-  return file;
+  // ambientCG rate-limits bursts with 503s; back off and retry rather than failing the run.
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(url, init);
+    if (res.ok) { fs.writeFileSync(file, Buffer.from(await res.arrayBuffer())); return file; }
+    if (attempt >= 6) throw new Error(`${res.status} ${res.statusText} for ${url}`);
+    const wait = 4000 * attempt;
+    log(`  ${res.status}; retry ${attempt} in ${wait / 1000}s`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
 }
 
 function unzip(zip, dest, patterns = []) {
@@ -169,6 +174,19 @@ function accessor(glb, i) {
   return out;
 }
 
+/** Rest-pose skeleton: parent index + local translation/rotation, in file order. */
+function restSkeleton(json, bones) {
+  const idx = new Map(bones.map((b, i) => [b, i]));
+  const parent = new Map();
+  json.nodes.forEach((n, i) => { for (const c of n.children || []) parent.set(c, i); });
+  return bones.map((name) => {
+    const i = json.nodes.findIndex((n) => n.name === name);
+    const n = json.nodes[i];
+    const p = parent.has(i) ? json.nodes[parent.get(i)].name : null;
+    return { name, parent: p !== null && idx.has(p) ? idx.get(p) : -1, t: n.translation || [0, 0, 0], r: n.rotation || [0, 0, 0, 1] };
+  });
+}
+
 /** World-space bind translation of every node, from the file's own rest transforms. */
 function bindWorld(json) {
   const out = {};
@@ -195,12 +213,13 @@ function packAnims(entry, dir) {
   const floats = [];
   const push = (arr) => { const off = floats.length; for (const v of arr) floats.push(v); return { off, len: arr.length }; };
   const clips = [];
-  let bones = null, bind = null;
+  let bones = null, bind = null, skeleton = null;
   for (const cf of entry.clipFiles) {
     const glb = readGlb(path.join(dir, cf.file));
     if (!bones) {
       bind = bindWorld(glb.json);
       bones = glb.json.nodes.filter((n) => n.mesh === undefined && n.name && bind[n.name]).map((n) => n.name);
+      skeleton = restSkeleton(glb.json, bones);
     }
     for (const name of cf.clips) {
       const anim = glb.json.animations.find((a) => a.name === name);
@@ -222,7 +241,7 @@ function packAnims(entry, dir) {
       clips.push({ name, duration, tracks });
     }
   }
-  const header = Buffer.from(JSON.stringify({ bones, bind, clips }), 'utf8');
+  const header = Buffer.from(JSON.stringify({ bones, bind, skeleton, clips }), 'utf8');
   const data = Buffer.from(new Float32Array(floats).buffer);
   const out = Buffer.alloc(8 + header.length + data.length);
   out.write('EANM', 0, 'ascii');
