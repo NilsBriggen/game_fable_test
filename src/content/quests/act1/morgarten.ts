@@ -9,7 +9,7 @@ export const morgarten: QuestDef = {
     {
       id: 'travel-morgarten', journal: 'The muster marches for the Morgarten slope, above the road from Ägeri.',
       marker: 'poi.morgarten', objectiveText: 'Take position on the Morgarten slope.',
-      advanceWhen: [{ cond: { discovered: 'poi.morgarten' }, to: 'battle' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.morgarten', 160] }, to: 'battle' }],
     },
     {
       id: 'battle', journal: '15 November, 1315. The column comes on between the lake and the slope, and the boulder caches wait above the road.',

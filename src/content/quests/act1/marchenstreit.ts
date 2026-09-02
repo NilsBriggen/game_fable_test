@@ -15,8 +15,8 @@ export const marchenstreit: QuestDef = {
       id: 'travel-einsiedeln', journal: 'Word carries ahead of you, toward Einsiedeln.',
       marker: 'poi.einsiedeln', objectiveText: 'Make for Einsiedeln abbey.',
       advanceWhen: [
-        { cond: { all: [{ discovered: 'poi.einsiedeln' }, { var: ['quest.marchenstreit', 'restraint', false] }] }, to: 'raid' },
-        { cond: { all: [{ discovered: 'poi.einsiedeln' }, { var: ['quest.marchenstreit', 'restraint', true] }] }, to: 'speech-path' },
+        { cond: { all: [{ nearPoi: ['poi.einsiedeln', 140] }, { var: ['quest.marchenstreit', 'restraint', false] }] }, to: 'raid' },
+        { cond: { all: [{ nearPoi: ['poi.einsiedeln', 140] }, { var: ['quest.marchenstreit', 'restraint', true] }] }, to: 'speech-path' },
       ],
     },
     {

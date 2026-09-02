@@ -14,7 +14,7 @@ export const derSaeumer: QuestDef = {
     {
       id: 'schoellenen', journal: 'The road climbs into the Schöllenen gorge, toward the Teufelsbrücke.',
       marker: 'poi.teufelsbruecke', objectiveText: 'Lead the train to the Teufelsbrücke.',
-      advanceWhen: [{ cond: { discovered: 'poi.teufelsbruecke' }, to: 'crossing' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.teufelsbruecke', 60] }, to: 'crossing' }],
     },
     {
       id: 'crossing', journal: "Spray from the falls slicks the bridge timber underfoot.",

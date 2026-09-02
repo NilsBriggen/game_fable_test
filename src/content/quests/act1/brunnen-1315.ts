@@ -9,7 +9,7 @@ export const brunnen1315: QuestDef = {
     {
       id: 'travel-brunnen', journal: 'Word goes out to gather at Brunnen for the renewal of the covenant.',
       marker: 'poi.brunnen', objectiveText: 'Make for Brunnen.',
-      advanceWhen: [{ cond: { discovered: 'poi.brunnen' }, to: 'pact' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.brunnen', 120] }, to: 'pact' }],
     },
     {
       id: 'pact', journal: 'The quay at Brunnen fills for the renewal of the covenant.',

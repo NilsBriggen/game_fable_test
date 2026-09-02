@@ -3,7 +3,7 @@ import { register, QuestServiceImpl } from './index';
 import { loadContent } from '../content/index';
 function loadContentInto(ctx: ReturnType<typeof makeTestContext>): void { loadContent(ctx.content); }
 import {
-  makeTestContext, spawnTestPlayer, FakePartyService, FakeExplorationService, FakeCombatService, ScriptedUiService,
+  makeTestContext, spawnTestPlayer, movePlayerToPoi, FakePartyService, FakeExplorationService, FakeCombatService, ScriptedUiService,
   asPartyService, asExplorationService, asCombatService, asUiService,
 } from './testHarness';
 import type { QuestDef, DialogueDef, FactionDef, CutsceneDef } from '@core/schemas';
@@ -304,14 +304,21 @@ describe('QuestServiceImpl (register + integration)', () => {
     };
     ctx.services.register('combat', asCombatService(combat));
     await register(ctx);
-    const quest = ctx.services.get('quest');
+    const quest = ctx.services.get('quest') as QuestServiceImpl;
     const trace: string[] = [];
     quest.on('quest-failed', (id) => trace.push(`fail:${id}`));
     quest.on('quest-started', (id) => trace.push(`start:${id}`));
     quest.on('quest-completed', (id) => trace.push(`complete:${id}`));
     quest.start('quest.muster-1315');
-    for (const poi of ['poi.sattel-letzi', 'poi.zug', 'poi.morgarten', 'poi.brunnen']) exploration.discover(poi);
-    for (let i = 0; i < 400 && !quest.isDone('quest.brunnen-1315'); i++) await flush();
+    // Gates are now `{nearPoi}` (presence), not the one-time `discovered` flag — cycle the fake
+    // player through every POI this retry loop needs repeatedly, so whichever gate is *currently*
+    // active sees the player there on some pass (both the first attempt and the retried one).
+    const cyclePois = ['poi.sattel-letzi', 'poi.zug', 'poi.morgarten', 'poi.brunnen'];
+    for (let i = 0; i < 400 && !quest.isDone('quest.brunnen-1315'); i++) {
+      movePlayerToPoi(ctx, playerId, cyclePois[i % cyclePois.length]);
+      quest.tick(1);
+      await flush();
+    }
     expect(morgartenCalls).toBe(2); // lost once, then fought again and won
     expect(trace).toContain('fail:quest.morgarten');
     // quest.muster-1315 ran twice (reset + retried), not stuck on an instant re-fight of the same battle.
@@ -319,5 +326,40 @@ describe('QuestServiceImpl (register + integration)', () => {
     expect(trace.filter((t) => t === 'complete:quest.muster-1315')).toHaveLength(2); // both the first (failed) run and the retry complete the muster hub itself; only Morgarten fails
     expect(quest.isDone('quest.morgarten')).toBe(true);
     expect(quest.isDone('quest.brunnen-1315')).toBe(true); // the retried run reaches the end of Act 1
+  });
+
+  it('critic wave3-quest.md round 2 #2 (probe 9): "So sworn" (the oath dialogue\'s own close) is shown before the sealing cutscene\'s caption, not after', async () => {
+    const { ctx } = setup();
+    loadContentInto(ctx);
+    const playerId = spawnTestPlayer(ctx);
+    const party = new FakePartyService(ctx.world, playerId);
+    for (const skill of ctx.content.skills.keys()) party.skills.set(skill, 40);
+    ctx.services.register('party', asPartyService(party));
+    const exploration = new FakeExplorationService(ctx.world, playerId, ctx.content.pois);
+    ctx.services.register('exploration', asExplorationService(exploration));
+    ctx.services.register('combat', asCombatService(new FakeCombatService()));
+    const ui = new ScriptedUiService();
+    ctx.services.register('ui', asUiService(ui));
+    await register(ctx);
+    const quest = ctx.services.get('quest') as QuestServiceImpl;
+
+    async function drainLocal(rounds = 40): Promise<void> { for (let i = 0; i < rounds; i++) { quest.tick(1); await flush(); } }
+
+    quest.start('quest.der-eid');
+    await drainLocal();
+    movePlayerToPoi(ctx, playerId, 'poi.altdorf');
+    await drainLocal();
+    await quest.runDialogue('dlg.walter-fuerst');
+    await drainLocal();
+    movePlayerToPoi(ctx, playerId, 'poi.ruetli');
+    await drainLocal(60);
+
+    expect(quest.isDone('quest.der-eid')).toBe(true); // the whole chain, including the sealing cutscene, ran
+
+    const swornIdx = ui.log.findIndex((l) => l.includes('So sworn'));
+    const sealingCaptionIdx = ui.log.findIndex((l) => l.startsWith('[caption]') && l.includes('By torchlight on the Rütli meadow'));
+    expect(swornIdx).toBeGreaterThanOrEqual(0);
+    expect(sealingCaptionIdx).toBeGreaterThanOrEqual(0);
+    expect(swornIdx).toBeLessThan(sealingCaptionIdx); // the dialogue's own line is shown before its effect's cutscene opens
   });
 });

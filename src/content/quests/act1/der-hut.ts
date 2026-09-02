@@ -9,7 +9,7 @@ export const derHut: QuestDef = {
     {
       id: 'travel-altdorf', journal: "Sixteen years since the Rütli. Word from Altdorf says a hat now sits on a pole by the lime tree, and every man is made to bow to it — though the tellers of Sarnen, setting this down long after, give no year for it.",
       marker: 'poi.altdorf', objectiveText: 'Make for Altdorf and see the hat for yourself.',
-      advanceWhen: [{ cond: { discovered: 'poi.altdorf' }, to: 'altdorf-pole' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.altdorf', 160] }, to: 'altdorf-pole' }],
     },
     {
       id: 'altdorf-pole', journal: "Gessler's hat stands over the square, and Vogt-Schreiber Ludwig watches who bows to it.",
@@ -24,7 +24,7 @@ export const derHut: QuestDef = {
     {
       id: 'travel-tellsplatte', journal: 'Arrested regardless of the shot, Tell is carried toward Küssnacht by boat.',
       marker: 'poi.tellsplatte', objectiveText: 'Follow the boat down the Urnersee toward the Tellsplatte.',
-      advanceWhen: [{ cond: { discovered: 'poi.tellsplatte' }, to: 'tellsplatte' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.tellsplatte', 70] }, to: 'tellsplatte' }],
     },
     {
       id: 'tellsplatte', journal: 'A storm on the Urnersee gives Tell his chance.',
@@ -34,7 +34,7 @@ export const derHut: QuestDef = {
     {
       id: 'travel-hohle-gasse', journal: 'Word reaches you: Tell means to wait for Gessler in the sunken road toward Küssnacht.',
       marker: 'poi.hohle-gasse', objectiveText: 'Make for the Hohle Gasse.',
-      advanceWhen: [{ cond: { discovered: 'poi.hohle-gasse' }, to: 'hohle-gasse' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.hohle-gasse', 80] }, to: 'hohle-gasse' }],
     },
     {
       id: 'hohle-gasse', journal: 'Tell waits in the sunken road for Gessler. The party holds the road behind him.',

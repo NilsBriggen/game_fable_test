@@ -78,7 +78,7 @@ export const namedCastDialogues: DialogueDef[] = [
     ],
     nodes: {
       prologue: {
-        speaker: 'npc.arnold-von-melchtal', text: 'A young Obwalden herdsman, not yet grown into the man Uri and Schwyz will one day call kinsman of the sworn. "Word is a King has died, {player}," he says. "My father says that changes little for men like us. I am not so sure."',
+        speaker: 'npc.arnold-von-melchtal', text: 'A young Obwalden herdsman, driving a few goats down off the Melchtal alp before the weather turns. "Word is a King has died, {player}," he says. "My father says that changes little for men like us. I am not so sure."',
         end: true,
       },
       ch1: {

@@ -10,7 +10,7 @@ export const derEid: QuestDef = {
       id: 'fluelen-news', journal: 'Flüelen, dawn: a Säumer boat brings word that King Rudolf of Habsburg is dead.',
       marker: 'poi.altdorf', objectiveText: 'Learn the news at Flüelen, then make for Altdorf.',
       onEnter: [{ cutscene: 'cs.intro-1291' }],
-      advanceWhen: [{ cond: { discovered: 'poi.altdorf' }, to: 'altdorf-message' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.altdorf', 160] }, to: 'altdorf-message' }],
     },
     {
       id: 'altdorf-message', journal: 'The Landsgemeinde is called at Altdorf. Walter Fürst asks you to carry word to Freiherr Werner von Attinghausen.',
@@ -34,7 +34,7 @@ export const derEid: QuestDef = {
     {
       id: 'travel-ruetli', journal: 'Word passes quietly: gather at the Rütli meadow after dark.',
       marker: 'poi.ruetli', objectiveText: 'Make for the Rütli meadow.',
-      advanceWhen: [{ cond: { discovered: 'poi.ruetli' }, to: 'ruetli-oath' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.ruetli', 100] }, to: 'ruetli-oath' }],
     },
     {
       id: 'ruetli-oath', journal: 'Night falls on the Rütli meadow. Werner Stauffacher, Walter Fürst and Arnold von Melchtal — and their witnesses — gather to swear.',

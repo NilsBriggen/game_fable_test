@@ -45,9 +45,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   private chapterSet = false;
   private tickAcc = 0;
   private activeDialogueId = '';
-  /** >0 while a `runCutscene()` call (possibly several nested) is mid-flight. */
-  private cutsceneDepth = 0;
-  /** Effects queued by `runEffects` while `cutsceneDepth > 0`; drained once the outermost cutscene ends. */
+  /** >0 while a `runCutscene()` or `runDialogue()` call (possibly several nested/interleaved) is
+   *  mid-flight — a "scene" in the sense that nothing else should visibly interrupt it. */
+  private sceneDepth = 0;
+  /** Effects queued by `runEffects` while `sceneDepth > 0`; drained once the outermost scene ends. */
   private deferredEffects: Array<() => Promise<void>> = [];
 
   constructor(private readonly ctx: GameContext) {
@@ -59,15 +60,24 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
       emit: (event, ...args) => { (this.bus.emit as (e: string, ...a: unknown[]) => void)(event, ...args); },
     };
     this.machine = new QuestMachine(deps);
-    // Critic wave3-quest.md #7: a lost Morgarten must be recoverable, not a dead end — send the player
-    // back through the whole muster-year hub rather than an instant re-fight.
+    // Critic wave3-quest.md round 1 #7 / round 2 #3: a lost Morgarten must be recoverable, not a dead
+    // end — send the player back through the whole muster-year hub rather than an instant re-fight.
     this.bus.on('quest-failed', (id) => {
       if (id !== 'quest.morgarten') return;
       // Reset quest.morgarten too — otherwise it stays permanently `done` (failed) and the retried
       // muster hub's own `{quest:['start','quest.morgarten']}` effect silently no-ops.
       this.machine.reset('quest.morgarten');
       this.machine.reset('quest.muster-1315');
-      this.questOp('start', 'quest.muster-1315').catch((e) => console.error('[quest] retry-from-muster failed', e));
+      // Round 2 #3: un-cache the muster hub's own rolled dialogue checks so "better prepared this
+      // time" can actually change the letzi/recruit/scout outcome, not just replay the first attempt.
+      this.machine.clearVarPrefix('_dialogue', 'dlg.muster-');
+      this.machine.clearVarPrefix('_dialogue', 'dlg.heinrich-von-hunenberg');
+      // Round 2 #3: the retry re-enters every muster stage, so its per-stage journal lines are
+      // silenced (see `silentJournal`) and replaced with one line marking this as the second pass.
+      this.machine.addJournal('Carried off the field once, you gather what is left and ready yourselves to march on Morgarten again.', 'quest.muster-1315');
+      this.machine.start('quest.muster-1315', { silentJournal: true })
+        .then(() => this.machine.checkAdvance(this))
+        .catch((e) => console.error('[quest] retry-from-muster failed', e));
     });
   }
 
@@ -303,40 +313,51 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   factionDef(id: string): FactionDef | undefined { return this.ctx.content.factions.get(id); }
   evaluate(cond: QuestCondition | undefined): boolean { return evaluateCondition(cond, this); }
   /**
-   * Critic wave3-quest.md #2: while a cutscene is mid-flight (`cutsceneDepth>0`), any effects run here
-   * (a quest stage's onStart/onEnter/onComplete/onFail, a dialogue node/choice, a cutscene step) are
-   * queued instead of run inline, so a follow-on quest's dialogue/cutscene can never open on top of a
-   * scene that hasn't finished its own steps yet. `runCutscene` drains the queue once the *outermost*
-   * cutscene call returns — see below.
+   * Critic wave3-quest.md round 1 #2 / round 2 #2: while a cutscene OR a dialogue is mid-flight
+   * (`sceneDepth>0`), any effects run here (a quest stage's onStart/onEnter/onComplete/onFail, a
+   * dialogue node/choice, a cutscene step) are queued instead of run inline, so a follow-on quest's
+   * dialogue/cutscene can never open on top of a scene that hasn't finished yet — dialogues get the
+   * same nesting guard cutscenes already had, so nothing pops up mid-conversation either.
+   * `runCutscene`/`runDialogue` drain the queue once the *outermost* scene call returns — see below.
    */
   async runEffects(effects: Effect[] | undefined, questId?: string): Promise<void> {
-    if (this.cutsceneDepth > 0) {
+    if (this.sceneDepth > 0) {
       // Do NOT return a promise tied to the deferred job's completion: whoever called us (a cutscene
-      // step, most likely) must not block waiting for work that is deliberately scheduled for *after*
-      // this very cutscene call returns — that would deadlock (the drain that resolves the job only
-      // runs once the outer runCutscene() call itself has finished awaiting all of its own steps).
+      // step or a dialogue node, most likely) must not block waiting for work that is deliberately
+      // scheduled for *after* this very scene call returns — that would deadlock (the drain that
+      // resolves the job only runs once the outer runCutscene()/runDialogue() call has itself finished).
       this.deferredEffects.push(() => runEffectsFn(effects, this, questId).catch((e) => console.error('[quest] deferred effects threw', e)));
       return;
     }
     return runEffectsFn(effects, this, questId);
   }
+  private async drainDeferredIfOutermost(): Promise<void> {
+    if (this.sceneDepth !== 0) return;
+    while (this.deferredEffects.length) {
+      const job = this.deferredEffects.shift()!;
+      await job();
+    }
+  }
   async runDialogue(dialogueId: string, speakerEntity?: EntityId, questId?: string): Promise<DialogueOutcome> {
     this.activeDialogueId = dialogueId;
-    return runDialogueFn(dialogueId, this, speakerEntity, questId);
+    this.sceneDepth++;
+    let outcome: DialogueOutcome;
+    try {
+      outcome = await runDialogueFn(dialogueId, this, speakerEntity, questId);
+    } finally {
+      this.sceneDepth--;
+    }
+    await this.drainDeferredIfOutermost();
+    return outcome;
   }
   async runCutscene(cutsceneId: string, questId?: string): Promise<void> {
-    this.cutsceneDepth++;
+    this.sceneDepth++;
     try {
       await runCutsceneFn(cutsceneId, this, questId);
     } finally {
-      this.cutsceneDepth--;
+      this.sceneDepth--;
     }
-    if (this.cutsceneDepth === 0) {
-      while (this.deferredEffects.length) {
-        const job = this.deferredEffects.shift()!;
-        await job();
-      }
-    }
+    await this.drainDeferredIfOutermost();
   }
   journal(): JournalEntry[] { return this.machine.journalEntries; }
   addJournal(text: string, questId?: string): void { this.machine.addJournal(text, questId); }
@@ -372,6 +393,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     this.flags = new Map(Object.entries(s.flags ?? {}));
     this.machine.journalEntries = [...(s.journal ?? [])];
     this.chapterId = s.chapter ?? 'prologue-1291';
+    // Round 2 #4: a restored save always has a definite chapter — derive chapterSet from its presence
+    // so a subsequent setChapter(sameChapter) (e.g. a stale caller re-issuing the load-time call) stays
+    // a no-op instead of re-populating the world / duplicating the chapter journal line after load.
+    this.chapterSet = !!s.chapter;
   }
   on<K extends keyof QuestEvents & string>(event: K, cb: (...a: QuestEvents[K]) => void): Unsubscribe {
     return this.bus.on(event, cb);

@@ -245,6 +245,34 @@ describe('runDialogue', () => {
     expect(shown).toBe('fail');
   });
 
+  it('critic wave3-quest.md round 2 talkedTo: sets talked:<npcId> from the root node\'s speaker as soon as the dialogue opens', async () => {
+    const dialogues: Record<string, DialogueDef> = {
+      'dlg.werner-stauffacher': {
+        id: 'dlg.werner-stauffacher', historical: 'invented', note: 'x', root: 'greet',
+        nodes: { greet: { speaker: 'npc.werner-stauffacher', text: 'Hail.', end: true } },
+      },
+    };
+    const rt = fakeRt({ dialogues });
+    expect(rt.getFlag('talked:npc.werner-stauffacher')).toBeUndefined();
+    await runDialogue('dlg.werner-stauffacher', rt);
+    expect(rt.getFlag('talked:npc.werner-stauffacher')).toBe(true);
+  });
+
+  it('critic wave3-quest.md round 2 #2: shows the node BEFORE running its own effects', async () => {
+    const order: string[] = [];
+    const dialogues: Record<string, DialogueDef> = {
+      'dlg.test': {
+        id: 'dlg.test', historical: 'invented', note: 'x', root: 'n',
+        nodes: { n: { speaker: 'narrator', text: 'Shown first.', effects: [{ toast: 'effect-ran' }], end: true } },
+      },
+    };
+    const ui: DialogueUiHandle = { show: async (n) => { order.push(`shown:${n.text}`); return 0; }, hide: () => {} };
+    const rt = fakeRt({ dialogues, ui });
+    rt.toast = (m) => order.push(`effect:${m}`);
+    await runDialogue('dlg.test', rt);
+    expect(order).toEqual(['shown:Shown first.', 'effect:effect-ran']);
+  });
+
   it('an unknown dialogue id logs a warning and returns a closed outcome', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const rt = fakeRt({ dialogues: {} });

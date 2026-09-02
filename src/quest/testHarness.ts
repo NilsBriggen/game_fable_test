@@ -12,7 +12,7 @@ import { ServiceRegistry } from '@core/services';
 import { GameStateMachine } from '@core/state';
 import { ContentRegistry } from '@core/content';
 import type { GameContext } from '@core/context';
-import { Name, Player } from '@core/components';
+import { Name, Player, Transform } from '@core/components';
 import type { NpcDef, PoiDef } from '@core/schemas';
 import type {
   CameraRig, CombatResult, CombatService, DialogueNodeView, ExplorationEvents, ExplorationService, PartyService, UiService,
@@ -36,12 +36,23 @@ export function makeTestContext(seed = 1291): GameContext {
   return ctx as GameContext;
 }
 
-/** Creates the player entity with a real `Player`+`Name` component so `QuestServiceImpl.getOrigin()` etc. work. */
-export function spawnTestPlayer(ctx: GameContext, opts: { origin?: 'uri' | 'schwyz' | 'unterwalden'; givenName?: string; familyName?: string } = {}): EntityId {
+/** Creates the player entity with a real `Player`+`Name`+`Transform` component so `QuestServiceImpl.getOrigin()`,
+ *  `playerPosition()` (for `{nearPoi}`/`{inRegion}`) etc. all work. */
+export function spawnTestPlayer(ctx: GameContext, opts: { origin?: 'uri' | 'schwyz' | 'unterwalden'; givenName?: string; familyName?: string; x?: number; z?: number } = {}): EntityId {
   const id = ctx.world.create('player');
   ctx.world.add(id, Player, { origin: opts.origin ?? 'uri', givenName: opts.givenName ?? 'Kuoni', familyName: opts.familyName ?? 'Imhof' });
   ctx.world.add(id, Name, { id: 'player', display: `${opts.givenName ?? 'Kuoni'} ${opts.familyName ?? 'Imhof'}` });
+  ctx.world.add(id, Transform, { x: opts.x ?? 0, y: 0, z: opts.z ?? 0, yaw: 0 });
   return id;
+}
+
+/** Moves the fake player's Transform to a POI's coordinates — simulates "the player walked there" for
+ *  `{nearPoi}`/`{inRegion}` gates, as opposed to `FakeExplorationService.discover()` (a one-time flag). */
+export function movePlayerToPoi(ctx: GameContext, playerId: EntityId, poiId: string): void {
+  const poi = ctx.content.pois.get(poiId);
+  if (!poi) throw new Error(`movePlayerToPoi: unknown poi "${poiId}"`);
+  const t = ctx.world.get(playerId, Transform);
+  if (t) { t.x = poi.x; t.z = poi.z; }
 }
 
 export class FakePartyService {

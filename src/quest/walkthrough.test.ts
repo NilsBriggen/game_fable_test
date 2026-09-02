@@ -1,23 +1,29 @@
 /**
  * Headless Act 1 walkthrough — the proof the main-quest spine is connected end to end. Registers all
- * real content, starts `quest.der-eid`, drives every travel/arrival gate (discovery) and dialogue choice,
- * fakes combat as an automatic win, and asserts the chain reaches `quest.brunnen-1315` complete with the
- * expected chapter transitions and flags. Run twice with different choice policies — critic
- * wave3-quest.md #3/#6: a "last enabled choice everywhere" run must reach the Pact of Brunnen exactly
- * like the "first enabled choice" run, proving there is no soft-lock on any branch (e.g. Abt Johannes's
- * "say nothing" option).
+ * real content, starts `quest.der-eid`, drives every travel/arrival gate by actually moving the fake
+ * player's position (critic wave3-quest.md round 2 #1: gates are `{nearPoi}`/`{inRegion}` — presence,
+ * not the one-time `discovered` flag) and every dialogue choice, fakes combat as an automatic win, and
+ * asserts the chain reaches `quest.brunnen-1315` complete with the expected chapter transitions and
+ * flags. Run twice with different choice policies — critic wave3-quest.md round 1 #3/#6: a "last
+ * enabled choice everywhere" run must reach the Pact of Brunnen exactly like the "first enabled choice"
+ * run, proving there is no soft-lock on any branch (e.g. Abt Johannes's "say nothing" option).
  */
 import { describe, it, expect } from 'vitest';
 import { register as registerQuest, QuestServiceImpl } from './index';
 import {
-  makeTestContext, spawnTestPlayer, FakePartyService, FakeExplorationService, FakeCombatService, ScriptedUiService,
+  makeTestContext, spawnTestPlayer, movePlayerToPoi, FakePartyService, FakeExplorationService, FakeCombatService, ScriptedUiService,
   asPartyService, asExplorationService, asCombatService, asUiService,
 } from './testHarness';
 import { loadContent } from '../content/index';
 import type { DialogueNodeView } from '@core/services';
 
 function flush(): Promise<void> { return new Promise((r) => setTimeout(r, 0)); }
-async function drain(rounds = 40): Promise<void> { for (let i = 0; i < rounds; i++) await flush(); }
+/** Flushes microtasks AND drives the quest module's periodic advanceWhen tick (ARCHITECTURE.md §5.6:
+ *  every 0.5s) — required now that `{nearPoi}`/`{inRegion}` gates have no discrete "you arrived" event
+ *  to react to; only the periodic sweep (or another quest transition) re-checks them. */
+async function drain(quest: QuestServiceImpl, rounds = 40): Promise<void> {
+  for (let i = 0; i < rounds; i++) { quest.tick(1); await flush(); }
+}
 
 const TRAVEL_POIS = ['poi.altdorf', 'poi.ruetli', 'poi.tellsplatte', 'poi.hohle-gasse', 'poi.einsiedeln', 'poi.sattel-letzi', 'poi.zug', 'poi.morgarten', 'poi.brunnen'];
 
@@ -60,22 +66,38 @@ async function runWalkthrough(policy: 'first' | 'last') {
 
   // --- Prologue: the two genuinely player-initiated beats (arriving at Altdorf, talking to Fürst) ---
   quest.start('quest.der-eid');
-  await drain();
+  await drain(quest);
   expect(quest.stage('quest.der-eid')).toBe('fluelen-news');
 
-  exploration.discover('poi.altdorf');
-  await drain();
+  movePlayerToPoi(ctx, playerId, 'poi.altdorf');
+  await drain(quest);
   expect(quest.stage('quest.der-eid')).toBe('altdorf-message');
 
   await quest.runDialogue('dlg.walter-fuerst');
-  await drain();
+  await drain(quest);
 
-  // Every other travel/arrival gate in the spine (der-eid's Rütli, der-hut's Tellsplatte/Hohle Gasse,
-  // marchenstreit's Einsiedeln, muster-1315's Sattel/Zug, morgarten's slope, brunnen-1315's quay) —
-  // simulating the player having already been there, which is exactly what `isDiscovered` persisting
-  // across chapters means in real play.
-  for (const poi of TRAVEL_POIS) exploration.discover(poi);
-  await drain(300);
+  // Chapter-seam parking (critic wave3-quest.md round 2 #1): the sealing cutscene ends with the player
+  // still physically at the Rütli in 1307 — der-hut's very first stage must NOT proceed until the
+  // player has actually walked to Altdorf, even though Altdorf was already visited in the prologue.
+  movePlayerToPoi(ctx, playerId, 'poi.ruetli');
+  await drain(quest);
+  expect(quest.isDone('quest.der-eid')).toBe(true);
+  expect(quest.isStarted('quest.der-hut')).toBe(true);
+  expect(quest.stage('quest.der-hut')).toBe('travel-altdorf'); // parked: player is at the Rütli, not Altdorf
+  expect(quest.chapter()).toBe('ch1-1307');
+
+  movePlayerToPoi(ctx, playerId, 'poi.altdorf');
+  await drain(quest);
+  expect(quest.stage('quest.der-hut')).not.toBe('travel-altdorf'); // unparked now that the player arrived
+
+  // Every other travel/arrival gate in the spine (der-hut's Tellsplatte/Hohle Gasse, marchenstreit's
+  // Einsiedeln, muster-1315's Sattel/Zug, morgarten's slope, brunnen-1315's quay) — walked to in turn;
+  // each is independent of the others (only the *current* one needs the player actually present).
+  for (const poi of TRAVEL_POIS) {
+    movePlayerToPoi(ctx, playerId, poi);
+    await drain(quest, 30);
+  }
+  await drain(quest, 100);
 
   return { quest, ctx, party, exploration, combat, trace };
 }

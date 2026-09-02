@@ -94,7 +94,7 @@ export const genericDialogues: DialogueDef[] = [
       { condition: { rep: ['habsburg', '>=', 0] }, node: 'neutral' },
     ],
     nodes: {
-      hostile: { speaker: 'narrator', text: '"You." The guardsman\'s hand does not leave his sword hilt. "The Landvogt has a name for people like you. Move along, if you know what\'s good for you."', end: true },
+      hostile: { speaker: 'narrator', text: '"You." The guardsman\'s hand does not leave his sword hilt. "The Landvogt keeps a list of names like yours, and mine goes on it too if I let you linger. Be elsewhere."', end: true },
       wary: { speaker: 'narrator', text: '"State your business." The guard looks you over the way a man looks over a debt he suspects won\'t be paid.', choices: [{ text: '"Just passing through."', end: true }], },
       neutral: { speaker: 'narrator', text: '"Keep the peace and you\'ll have no trouble from me." The Habsburg guard nods you past his post.', end: true },
     },

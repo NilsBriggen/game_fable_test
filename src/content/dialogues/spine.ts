@@ -96,7 +96,8 @@ export const spineDialogues: DialogueDef[] = [
         ],
       },
       'delegated-success': {
-        speaker: 'narrator', text: 'Your companions carry it off cleanly — word comes back within days that all three have fallen with barely a scratch between them.',
+        speaker: 'narrator',
+        text: 'Word comes back within days, each messenger arriving grinning and travel-worn. At Zwing Uri, the labourers\' file carried its hidden halberds through the unfinished gate and the half-built keep surrendered before dawn. At Rotzberg, a rope dropped from a high window let the climbers over the wall while the garrison slept, and the servant girl\'s part in it is already half a song. At Sarnen, the New Year\'s gift baskets opened on Landenberg\'s own doorstep, and the hill was taken before he found his sword. All three, and barely a scratch between the lot of them.',
         effects: [{ rep: ['uri', 5] }, { rep: ['unterwalden', 5] }, { quest: ['advance', 'quest.burgenbruch', 'aftermath'] }],
         end: true,
       },
@@ -167,7 +168,7 @@ export const spineDialogues: DialogueDef[] = [
         speaker: 'narrator', text: 'The letzi wall at Sattel wants raising before the snow makes the work impossible — stone and timber both, and not enough hands who know how to lay either properly.',
         choices: [{ text: 'Set to work on the wall.', check: { skill: 'craft', dc: 14, fail: 'letzi-weak' }, next: 'letzi-strong' }],
       },
-      'letzi-strong': { speaker: 'narrator', text: 'By the time the first snow falls, the letzi stands higher and thicker than anyone hoped — a real wall, not a gesture of one.', effects: [{ setVar: ['quest.muster-1315', 'letzi', 'strong'] }, { quest: ['advance', 'quest.muster-1315', 'recruit'] }], end: true },
+      'letzi-strong': { speaker: 'narrator', text: 'By the time the first snow falls, the letzi stands higher and thicker than anyone hoped, a full extra course of stone and timber run the length of the Schornen valley floor — a real wall, not a gesture of one.', effects: [{ setVar: ['quest.muster-1315', 'letzi', 'strong'] }, { setFlag: ['morgarten.letzi-improved', true] }, { quest: ['advance', 'quest.muster-1315', 'recruit'] }], end: true },
       'letzi-weak': { speaker: 'narrator', text: 'The wall goes up, serviceable if unlovely — it will hold, though it will not impress anyone who has seen a proper fortification.', effects: [{ setVar: ['quest.muster-1315', 'letzi', 'weak'] }, { quest: ['advance', 'quest.muster-1315', 'recruit'] }], end: true },
     },
   },
@@ -178,7 +179,7 @@ export const spineDialogues: DialogueDef[] = [
         speaker: 'narrator', text: 'Every valley must send men, and every man sent must be fed, armed, and, ideally, willing. Walking the Landsgemeinde meadows to talk farmers into halberds is its own kind of work.',
         choices: [{ text: 'Make the rounds and recruit.', check: { skill: 'leadership', dc: 14, fail: 'recruit-thin' }, next: 'recruit-strong' }],
       },
-      'recruit-strong': { speaker: 'narrator', text: 'More men answer the call than the Ammann dared hope — the Schwyz contingent alone swells past what the old counts allowed for.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'strong'] }, { quest: ['advance', 'quest.muster-1315', 'scout-zug'] }], end: true },
+      'recruit-strong': { speaker: 'narrator', text: 'More men answer the call than the Ammann dared hope — the Schwyz contingent alone swells past what the old counts allowed for, a full two files of spears more than the last muster mustered.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'strong'] }, { setFlag: ['morgarten.recruits-strong', true] }, { quest: ['advance', 'quest.muster-1315', 'scout-zug'] }], end: true },
       'recruit-thin': { speaker: 'narrator', text: 'You get enough men to matter, though not so many that anyone feels easy about the odds. It will have to do.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'thin'] }, { quest: ['advance', 'quest.muster-1315', 'scout-zug'] }], end: true },
     },
   },
@@ -186,11 +187,27 @@ export const spineDialogues: DialogueDef[] = [
     id: 'dlg.muster-scout', historical: true, note: "Leopold's staging camp at Zug before Morgarten is H. LORE.md §3.", root: 'scout',
     nodes: {
       scout: {
-        speaker: 'narrator', text: "Zug's streets are thick with Habsburg banners and unfamiliar accents — Duke Leopold's column musters here before it moves. Getting close enough to count tents without being taken for a spy is the trick of it.",
+        speaker: 'narrator', text: "Zug's streets are thick with Habsburg banners and unfamiliar accents — Duke Leopold's column musters here before it moves, tent-rows enough to count from the hillside if a man is patient and unseen.",
         choices: [{ text: 'Scout the camp.', check: { skill: 'stealth', dc: 15, fail: 'scout-caught' }, next: 'scout-clean' }],
       },
-      'scout-clean': { speaker: 'narrator', text: 'You count the column at a glance and slip out again unseen — knights, crossbowmen, and a long baggage train, all pointed toward Ägeri.', effects: [{ setVar: ['quest.muster-1315', 'scouted', true] }, { quest: ['advance', 'quest.muster-1315', 'hunenberg'] }], end: true },
-      'scout-caught': { speaker: 'narrator', text: 'A sentry\'s eyes catch yours a moment too long — you get clear of Zug at a dead run, count of the column half-finished but good enough to matter.', effects: [{ setVar: ['quest.muster-1315', 'scouted', 'partial'] }, { quest: ['advance', 'quest.muster-1315', 'hunenberg'] }], end: true },
+      'scout-clean': {
+        speaker: 'narrator', text: 'From the hillside above the camp you count it properly and slip out again unseen: knights foremost, then rank on rank of footmen and crossbowmen, then a baggage train long enough that its tail is still making camp when its head has already struck tents — by your best count, some two thousand men, and no mistaking the size of it.',
+        effects: [
+          { setVar: ['quest.muster-1315', 'scouted', true] },
+          { journal: "Your scout's count, brought back to the letzi: some two thousand men in Leopold's column, knights foremost." },
+          { quest: ['advance', 'quest.muster-1315', 'hunenberg'] },
+        ],
+        end: true,
+      },
+      'scout-caught': {
+        speaker: 'narrator', text: "A sentry's eyes catch yours a moment too long — you get clear of Zug at a dead run before you can count past the knights and the first ranks of footmen. Enough to know it is no small column; not enough to put a firm number to it.",
+        effects: [
+          { setVar: ['quest.muster-1315', 'scouted', 'partial'] },
+          { journal: "Your scout's count is incomplete — knights and footmen in some strength, the rest guessed at rather than counted." },
+          { quest: ['advance', 'quest.muster-1315', 'hunenberg'] },
+        ],
+        end: true,
+      },
     },
   },
 ];

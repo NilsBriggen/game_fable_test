@@ -9,7 +9,7 @@ export const muster1315: QuestDef = {
     {
       id: 'travel-sattel', journal: 'A year of readiness begins. The letzi at Sattel needs raising before the work becomes impossible in the snow.',
       marker: 'poi.sattel-letzi', objectiveText: 'Make for the letzi at Sattel.',
-      advanceWhen: [{ cond: { discovered: 'poi.sattel-letzi' }, to: 'letzi-craft' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.sattel-letzi', 80] }, to: 'letzi-craft' }],
     },
     {
       id: 'letzi-craft', journal: 'The letzi wall at Sattel must be raised before the snow makes the work impossible.',
@@ -24,7 +24,7 @@ export const muster1315: QuestDef = {
     {
       id: 'travel-zug', journal: "Word says Duke Leopold's column is mustering at Zug — someone must see how many they are.",
       marker: 'poi.zug', objectiveText: 'Make for Zug.',
-      advanceWhen: [{ cond: { discovered: 'poi.zug' }, to: 'scout-zug' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.zug', 190] }, to: 'scout-zug' }],
     },
     {
       id: 'scout-zug', journal: "Duke Leopold's column musters at Zug.",
@@ -38,7 +38,12 @@ export const muster1315: QuestDef = {
     },
     {
       id: 'ready', journal: 'The muster is as ready as it will ever be. Word comes that Leopold\'s column has begun to move.',
+      // Critic wave3-quest.md round 2 #3: setTime here, BEFORE quest.morgarten starts — quest.morgarten's
+      // own 'battle' stage journals "15 November, 1315" as its *stage-level* journal text, which is
+      // recorded before that stage's own onEnter runs (see quests.ts enterStage), so setting the date
+      // there would be too late. Setting it here means the clock is already 15 Nov by the time it matters.
       onEnter: [
+        { setTime: [1315, 11, 15, 6] },
         { quest: ['complete', 'quest.muster-1315'] },
         { quest: ['start', 'quest.morgarten'] },
       ],

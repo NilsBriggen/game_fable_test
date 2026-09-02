@@ -89,4 +89,25 @@ describe('evaluateCondition', () => {
     expect(evaluateCondition({ var: ['quest.a', 'x', 3] }, rt)).toBe(true);
     expect(evaluateCondition({ var: ['quest.a', 'x', 4] }, rt)).toBe(false);
   });
+
+  it('nearPoi: true within radius of the POI centre, false outside it or with no player/poi position', () => {
+    const rt = fakeReads({ playerPosition: () => ({ x: 100, z: 200 }), poiPosition: (id) => (id === 'poi.altdorf' ? { x: 130, z: 200 } : null) });
+    expect(evaluateCondition({ nearPoi: ['poi.altdorf', 50] }, rt)).toBe(true); // 30m away, within 50m
+    expect(evaluateCondition({ nearPoi: ['poi.altdorf', 20] }, rt)).toBe(false); // 30m away, outside 20m
+    expect(evaluateCondition({ nearPoi: ['poi.unknown', 9999] }, rt)).toBe(false); // unresolvable poi
+    expect(evaluateCondition({ nearPoi: ['poi.altdorf', 50] }, fakeReads({ playerPosition: () => null }))).toBe(false);
+  });
+
+  it('inRegion: true when the player is inside the named region, false otherwise or with no player position', () => {
+    const rt = fakeReads({ playerPosition: () => ({ x: 1, z: 2 }), regionIdAt: () => 'uri-reusstal' });
+    expect(evaluateCondition({ inRegion: 'uri-reusstal' }, rt)).toBe(true);
+    expect(evaluateCondition({ inRegion: 'schwyz-talkessel' }, rt)).toBe(false);
+    expect(evaluateCondition({ inRegion: 'uri-reusstal' }, fakeReads({ playerPosition: () => null }))).toBe(false);
+  });
+
+  it('talkedTo: reads the talked:<npcId> flag', () => {
+    const rt = fakeReads({ getFlag: (k) => (k === 'talked:npc.walter-fuerst' ? true : undefined) });
+    expect(evaluateCondition({ talkedTo: 'npc.walter-fuerst' }, rt)).toBe(true);
+    expect(evaluateCondition({ talkedTo: 'npc.hermann-gessler' }, rt)).toBe(false);
+  });
 });

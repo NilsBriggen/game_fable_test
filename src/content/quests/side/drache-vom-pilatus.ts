@@ -14,7 +14,7 @@ export const dracheVomPilatus: QuestDef = {
     {
       id: 'climb', journal: 'The alp of Pilatus rises above the Luzern basin.',
       marker: 'poi.pilatus', objectiveText: 'Climb toward Pilatus.',
-      advanceWhen: [{ cond: { discovered: 'poi.pilatus' }, to: 'truth' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.pilatus', 55] }, to: 'truth' }],
     },
     {
       id: 'truth', journal: 'Something large circles the high cliffs.',
