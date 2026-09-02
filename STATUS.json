@@ -80,26 +80,24 @@
     },
     "exploration": {
       "owner": "builder:exploration",
-      "status": "pending",
+      "status": "in-progress",
       "score": null,
       "fixRounds": 0,
       "openIssues": []
     },
     "combat": {
       "owner": "builder:combat",
-      "status": "fix-round",
-      "score": 7,
+      "status": "passed",
+      "score": 8,
       "fixRounds": 2,
       "openIssues": [
-        "Morgarten 100-round attrition endgame: unlimited ammo, no rout threshold, knight flees forever, block never advances",
-        "column too small (7 units) \u2014 waves of 16",
-        "drowning never occurs / escapable",
-        "aimed shot no Edge; shield block missing",
-        "restore() result promise",
-        "brace/attack event order",
-        "AI never disengages/shoves"
+        "abilitiesFor omits roll-boulders (must land before UI)",
+        "indiscipline not punished at Morgarten (charger 92% vs disciplined 83%): Habsburg footmen never brace",
+        "brace trigger 2 cells vs charge 3; infantry gets every-facing brace",
+        "shield block silently spends player reaction",
+        "routed units flee into lake at Brunnen"
       ],
-      "notes": "70 tests; fix round 1 applied; Morgarten AI-vs-AI 29%; harness 2/2 pass (527/167 calls)"
+      "notes": "74 tests; critic 5\u21927\u21928; Morgarten AI-vs-AI 83%, fights end by rout median 19 rounds"
     },
     "quest": {
       "owner": "builder:quest",
