@@ -87,11 +87,26 @@
       "notes": "50 unit tests; critic 5\u21928; polish applied; chapter ids prologue-1291/ch1-1307/ch2-1314 must be adopted by quest builder"
     },
     "exploration": {
-      "owner": "builder:exploration",
-      "status": "built",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
+      "owner": "integrator (fixes)",
+      "status": "fix-round",
+      "score": 7,
+      "fixRounds": 1,
+      "openIssues": [
+        "3 invented POIs underwater",
+        "Zug/K\u00fcssnacht building pile-up",
+        "companions destroyed at chapter change",
+        "98 crowd talk prompts open nothing",
+        "no boat travel interactables",
+        "fastTravel ungated",
+        "NPC life static",
+        "discoveries wiped at chapter change",
+        "patrol/settlement state after load",
+        "pads on 49\u00b0 slopes",
+        "patrol encounter reuses altdorf-square",
+        "content nits",
+        "Gessler pole out of frame",
+        "shared material dispose"
+      ],
       "notes": "52 tests; 94 POIs, 98 NPCs; Altdorf 638 calls, R\u00fctli 265; 6 scenarios not re-verified post-fix; awaiting critic"
     },
     "combat": {
