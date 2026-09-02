@@ -13,7 +13,7 @@
  * A final classification pass produces the (season-independent) surface mask.
  */
 import { MAP_BOUNDS } from '@content/gazetteer';
-import { clamp, pointInPolygon, smoothstep } from '@core/math';
+import { clamp, pointInPolygon, polygonSdf, smoothstep } from '@core/math';
 import { fbm2D, ridge2D } from './noise';
 import { buildWorldGeo, nearestOnSpline, valleyProfile, peakBump, lakeShelf, type WorldGeo, type Corridor } from './geodata';
 
@@ -74,6 +74,25 @@ function baseRidge(x: number, z: number, seed: number, centroids: Float64Array):
   return 60 + edge * 260 + n * 90 * (0.4 + edge);
 }
 
+/** How strongly a peak may add relief here, damped toward 0 right at a lakeshore. Some peaks
+ * (e.g. Fronalpstock) sit only a few hundred metres from the water even after the 1:4.5 compression;
+ * without this, the peak's own rise collides with the lake's flat-and-drop pass (step 6, applied last)
+ * with nothing in between, producing a sheer, unplayable wall right at the shoreline instead of a
+ * mountain. Real shores are gentler near the waterline and steepen further back — this reproduces
+ * that qualitatively cheaply (nearest-lake prefilter, one polygonSdf call) rather than truly. */
+function shoreDamp(x: number, z: number, geo: WorldGeo, centroids: Float64Array): number {
+  let nearest = -1;
+  let bestD2 = Infinity;
+  for (let i = 0; i < geo.lakes.length; i++) {
+    const dx = x - centroids[i * 2], dz = z - centroids[i * 2 + 1];
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bestD2) { bestD2 = d2; nearest = i; }
+  }
+  if (nearest < 0 || bestD2 > 3000 * 3000) return 1;
+  const d = polygonSdf(x, z, geo.lakes[nearest].poly); // negative inside the lake
+  return smoothstep(0, 380, d);
+}
+
 /** Snow line (game metres above lake) for a season; used by the live surfaceAt() override, not baked. */
 export function snowLineFor(season: 'winter' | 'spring' | 'summer' | 'autumn'): number {
   switch (season) {
@@ -121,8 +140,12 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       const row = gz * width;
       for (let gx = gx0; gx <= gx1; gx++) {
         const x = toX(gx);
-        const bump = peakBump(Math.hypot(x - p.x, z - p.z), p);
-        if (bump > 0) { const idx = row + gx; if (bump > peakAdd[idx]) peakAdd[idx] = bump; }
+        let bump = peakBump(Math.hypot(x - p.x, z - p.z), p);
+        if (bump > 0) {
+          bump *= shoreDamp(x, z, geo, centroids);
+          const idx = row + gx;
+          if (bump > peakAdd[idx]) peakAdd[idx] = bump;
+        }
       }
     }
   }
