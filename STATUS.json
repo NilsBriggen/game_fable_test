@@ -2,24 +2,111 @@
   "updatedAt": "2026-09-02T11:30:00Z",
   "wave": 1,
   "waves": {
-    "1": { "status": "in-progress", "modules": ["core", "world", "save", "party"] },
-    "2": { "status": "pending", "modules": ["exploration", "combat"] },
-    "3": { "status": "pending", "modules": ["quest", "ui", "act1-content"] },
-    "final": { "status": "pending" }
+    "1": {
+      "status": "in-progress",
+      "modules": [
+        "core",
+        "world",
+        "save",
+        "party"
+      ]
+    },
+    "2": {
+      "status": "pending",
+      "modules": [
+        "exploration",
+        "combat"
+      ]
+    },
+    "3": {
+      "status": "pending",
+      "modules": [
+        "quest",
+        "ui",
+        "act1-content"
+      ]
+    },
+    "final": {
+      "status": "pending"
+    }
   },
   "modules": {
-    "core": { "owner": "integrator", "status": "done", "score": null, "notes": "ECS, RNG, clock, schemas, services, state machine, graphics owner; 6 unit tests pass" },
-    "harness": { "owner": "integrator", "status": "done", "score": null, "notes": "Playwright + SwiftShader; screenshots, draw calls, frame times, console capture; report.json/md" },
-    "world": { "owner": "builder:world", "status": "in-progress", "score": null, "fixRounds": 0, "openIssues": [] },
-    "save": { "owner": "builder:save", "status": "in-progress", "score": null, "fixRounds": 0, "openIssues": [] },
-    "party": { "owner": "builder:party", "status": "in-progress", "score": null, "fixRounds": 0, "openIssues": [] },
-    "exploration": { "owner": "builder:exploration", "status": "pending", "score": null, "fixRounds": 0, "openIssues": [] },
-    "combat": { "owner": "builder:combat", "status": "pending", "score": null, "fixRounds": 0, "openIssues": [] },
-    "quest": { "owner": "builder:quest", "status": "pending", "score": null, "fixRounds": 0, "openIssues": [] },
-    "ui": { "owner": "builder:ui", "status": "pending", "score": null, "fixRounds": 0, "openIssues": [] },
-    "act1-content": { "owner": "builder:content", "status": "pending", "score": null, "fixRounds": 0, "openIssues": [] }
+    "core": {
+      "owner": "integrator",
+      "status": "done",
+      "score": null,
+      "notes": "ECS, RNG, clock, schemas, services, state machine, graphics owner; 6 unit tests pass"
+    },
+    "harness": {
+      "owner": "integrator",
+      "status": "done",
+      "score": null,
+      "notes": "Playwright + SwiftShader; screenshots, draw calls, frame times, console capture; report.json/md"
+    },
+    "world": {
+      "owner": "builder:world",
+      "status": "in-progress",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    },
+    "save": {
+      "owner": "builder:save",
+      "status": "built",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": [],
+      "notes": "8 unit tests; 5000-entity save = 212 KB gzip; awaiting critic"
+    },
+    "party": {
+      "owner": "builder:party",
+      "status": "in-progress",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    },
+    "exploration": {
+      "owner": "builder:exploration",
+      "status": "pending",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    },
+    "combat": {
+      "owner": "builder:combat",
+      "status": "pending",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    },
+    "quest": {
+      "owner": "builder:quest",
+      "status": "pending",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    },
+    "ui": {
+      "owner": "builder:ui",
+      "status": "pending",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    },
+    "act1-content": {
+      "owner": "builder:content",
+      "status": "pending",
+      "score": null,
+      "fixRounds": 0,
+      "openIssues": []
+    }
   },
   "coreChanges": [],
   "escalations": [],
-  "harness": { "lastRun": null, "passed": null, "total": null, "renderer": null }
+  "harness": {
+    "lastRun": null,
+    "passed": null,
+    "total": null,
+    "renderer": null
+  }
 }
