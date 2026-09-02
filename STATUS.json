@@ -100,7 +100,7 @@
     },
     "quest": {
       "owner": "builder:quest",
-      "status": "fix-round",
+      "status": "critic-round-2",
       "score": 5,
       "fixRounds": 1,
       "openIssues": [
@@ -115,7 +115,7 @@
         "stage ids disagree with exploration/poi.ts",
         "no lose branches on spine fights"
       ],
-      "notes": "47 tests; Act 1 walkthrough test green; awaiting critic"
+      "notes": "60 tests; fix round 1 applied; first- and last-choice walkthroughs reach Brunnen"
     },
     "ui": {
       "owner": "builder:ui",
@@ -126,7 +126,7 @@
     },
     "act1-content": {
       "owner": "builder:quest",
-      "status": "fix-round",
+      "status": "critic-round-2",
       "score": 5,
       "fixRounds": 1,
       "openIssues": [],
@@ -153,6 +153,11 @@
       "from": "critic:combat",
       "change": "AbilityRequires.terrainFeature string|string[], shield, mounted, minChargeCells; SerializedCombat.log unknown[]",
       "status": "applied"
+    },
+    {
+      "from": "builder:quest (requests/quest-2.md)",
+      "change": "canonical encounter\u2192quest/stage map relayed to exploration; hunenberg-warning flag relayed to combat",
+      "status": "relayed"
     }
   ],
   "escalations": [
