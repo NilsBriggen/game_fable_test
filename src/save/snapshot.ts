@@ -3,7 +3,7 @@
  * Optional services (party/quest/exploration/combat) are read via `services.tryGet` and default
  * to empty/neutral values when not registered, so this works from wave 1 (world+save only) onward.
  */
-import type { SaveFile, Canton } from '@core/schemas';
+import type { SaveFile, Canton, SerializedCombat } from '@core/schemas';
 import { SAVE_SCHEMA_VERSION } from '@core/schemas';
 import { Player, Transform } from '@core/components';
 import type { GfxLike, SaveHost } from './host';
@@ -15,11 +15,22 @@ function defaultQuestData(): Pick<SaveFile, 'quests' | 'reputation' | 'flags' | 
 }
 
 const THUMB_MAX_BYTES = 12 * 1024;
+const THUMB_QUALITIES = [0.6, 0.4, 0.3];
 
-/** Draws the current frame to a 160x90 JPEG data URL (<=12KB). Returns undefined if unavailable/unreadable. */
+function approxDataUrlBytes(url: string): number {
+  const comma = url.indexOf(',');
+  return comma >= 0 ? Math.ceil(((url.length - comma - 1) * 3) / 4) : url.length;
+}
+
+/** Renders the current frame and draws it to a 160x90 JPEG data URL (<=12KB), retrying at lower
+ * quality before giving up. Returns undefined if unavailable/unreadable — never throws. */
 function renderThumbnail(gfx: GfxLike | undefined): string | undefined {
   if (!gfx || typeof document === 'undefined') return undefined;
   try {
+    // The canvas's WebGL drawing buffer is typically cleared right after compositing, so grabbing
+    // it lazily (e.g. from a keydown handler) captures a black/stale frame. Render synchronously,
+    // then read the buffer back in the same task.
+    gfx.render();
     const src = gfx.renderer.domElement;
     const canvas = document.createElement('canvas');
     canvas.width = 160;
@@ -27,11 +38,11 @@ function renderThumbnail(gfx: GfxLike | undefined): string | undefined {
     const ctx2d = canvas.getContext('2d');
     if (!ctx2d) return undefined;
     ctx2d.drawImage(src, 0, 0, 160, 90);
-    const url = canvas.toDataURL('image/jpeg', 0.6);
-    const comma = url.indexOf(',');
-    const approxBytes = comma >= 0 ? Math.ceil(((url.length - comma - 1) * 3) / 4) : url.length;
-    if (approxBytes > THUMB_MAX_BYTES) return undefined;
-    return url;
+    for (const quality of THUMB_QUALITIES) {
+      const url = canvas.toDataURL('image/jpeg', quality);
+      if (approxDataUrlBytes(url) <= THUMB_MAX_BYTES) return url;
+    }
+    return undefined; // even the lowest quality didn't fit the budget
   } catch (err) {
     console.warn('[save] thumbnail capture skipped', err);
     return undefined;
@@ -40,16 +51,33 @@ function renderThumbnail(gfx: GfxLike | undefined): string | undefined {
 
 /** Gathers a full `SaveFile` from live game state. Does not touch storage. */
 export function buildSnapshot(host: SaveHost, slot: number, label?: string): SaveFile {
+  // A save taken mid-`load()` (e.g. an autosave timer racing a load) would snapshot a half-restored
+  // world — refuse outright rather than write a corrupt/misleading file. `SaveServiceImpl` also
+  // serialises its own save()/load() calls against each other, so this is a defensive backstop.
+  if (host.state.state === 'loading') {
+    throw new Error('Cannot save while a load is in progress');
+  }
+
   const now = new Date().toISOString();
   const services = host.services;
   const quest = services.tryGet('quest');
   const party = services.tryGet('party');
   const exploration = services.tryGet('exploration');
   const combat = services.tryGet('combat');
+  const world = services.tryGet('world');
 
   const questData = quest ? quest.serialize() : defaultQuestData();
   const discovered = exploration ? exploration.discovered() : [];
-  const combatData = combat && combat.isActive() ? (combat.serialize() ?? undefined) : undefined;
+
+  // A save taken while actively in combat must carry the combat block, or it silently reloads mid-fight
+  // units into a frozen `explore` state. If combat claims to be active but has nothing to serialise,
+  // that's a bug worth surfacing loudly rather than writing a misleading save.
+  let combatData: SerializedCombat | undefined;
+  if (combat?.isActive()) {
+    const serialized = combat.serialize();
+    if (!serialized) throw new Error('Cannot save: combat is active but combat.serialize() returned no state');
+    combatData = serialized;
+  }
 
   const playerId = party?.getPlayer() ?? 0;
   const partyIds = party?.getParty() ?? [];
@@ -91,6 +119,8 @@ export function buildSnapshot(host: SaveHost, slot: number, label?: string): Sav
     playtimeSec: host.playtimeSec,
     playerOrigin,
     location,
+    weather: world?.getWeather(),
+    season: host.clock.season(),
     thumbnailDataUrl: renderThumbnail(host.gfx),
   };
 }

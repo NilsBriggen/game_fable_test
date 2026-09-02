@@ -7,6 +7,7 @@
 import type { SaveFile, SaveMeta } from '@core/schemas';
 import { SAVE_MAX_BYTES } from '@core/schemas';
 import type { SerializedWorld } from '@core/ecs';
+import { calendarFromGameTime } from '@core/clock';
 
 export interface SaveStore {
   get(slot: number): Promise<Uint8Array | null>;
@@ -184,7 +185,7 @@ function base64ToBytes(b64: string): Uint8Array {
 // ---------------- Automatic store selection ----------------
 
 /** Falls back to `fallback` (and stays there) the first time `primary` throws — e.g. IndexedDB in private mode. */
-class ResilientStore implements SaveStore {
+export class ResilientStore implements SaveStore {
   private useFallback = false;
   constructor(private primary: SaveStore, private fallback: SaveStore, private fallbackName: string) {}
 
@@ -330,17 +331,35 @@ export async function decodeSave(bytes: Uint8Array): Promise<SaveFile> {
   }
 }
 
-export function metaFromSave(save: SaveFile, bytes: number, calendarLabel: string): SaveMeta {
+/** Derives `SaveMeta` from a `SaveFile`. The calendar label always comes from `save.gameTime` (via
+ * `calendarFromGameTime`), never from a live clock — that keeps `importJson()`'s meta honest about
+ * the *save's* date instead of showing whatever date the current playthrough happens to be at. */
+export function metaFromSave(save: SaveFile, bytes: number): SaveMeta {
   return {
     slot: save.slot,
     label: save.label,
+    createdAt: save.createdAt,
     updatedAt: save.updatedAt,
     chapter: save.chapter,
-    calendar: calendarLabel,
+    calendar: calendarFromGameTime(save.gameTime).label,
     location: save.location,
     playtimeSec: save.playtimeSec,
     thumbnailDataUrl: save.thumbnailDataUrl,
     schemaVersion: save.schemaVersion,
     bytes,
   };
+}
+
+/** Structural sanity check run after `decodeSave`+`migrateToCurrent` (on load, and on `importJson`
+ * for arbitrary pasted-in files) — catches shapes that parse as JSON but aren't a real save. */
+export function assertSaveShape(save: unknown): asserts save is SaveFile {
+  if (!save || typeof save !== 'object') throw new Error('Invalid save: not an object');
+  const s = save as Record<string, unknown>;
+  if (typeof s.schemaVersion !== 'number') throw new Error('Invalid save: missing numeric schemaVersion');
+  if (typeof s.seed !== 'number') throw new Error('Invalid save: missing numeric seed');
+  if (typeof s.gameTime !== 'number') throw new Error('Invalid save: missing numeric gameTime');
+  const world = s.world as { entities?: unknown } | undefined;
+  if (!world || !Array.isArray(world.entities)) throw new Error('Invalid save: world.entities is not an array');
+  const rngState = s.rngState as { world?: unknown } | undefined;
+  if (!rngState || !Array.isArray(rngState.world)) throw new Error('Invalid save: rngState.world is not an array');
 }

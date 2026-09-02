@@ -13,6 +13,8 @@ import type { ServiceRegistry } from '@core/services';
 /** Just enough of `Graphics` to grab a thumbnail; keeps this module decoupled from three.js. */
 export interface GfxLike {
   renderer: { domElement: HTMLCanvasElement };
+  /** renders one frame; called right before we grab the thumbnail so the drawing buffer isn't stale/cleared */
+  render(): void;
 }
 
 export interface SaveHost {
@@ -21,8 +23,8 @@ export interface SaveHost {
   clock: GameClock;
   events: EventBus<GameEvents>;
   services: ServiceRegistry;
-  /** current game-state machine state, e.g. 'explore' | 'combat' | ... */
-  state: { readonly state: string };
+  /** current game-state machine state, e.g. 'explore' | 'combat' | ...; `prev` is the state before it */
+  state: { readonly state: string; readonly prev: string };
   seed: number;
   playtimeSec: number;
   reseed(seed: number): void;
