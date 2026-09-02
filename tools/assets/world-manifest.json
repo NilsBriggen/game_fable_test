@@ -1,0 +1,81 @@
+{
+  "$comment": "World-look builder asset manifest. Every source is CC0 (public domain). Fetched reproducibly by tools/assets/fetch-world.mjs; outputs land in public/assets/textures/** and are credited in public/assets/CREDITS-world.md.",
+  "sources": {
+    "ambientcg": {
+      "url": "https://ambientcg.com/get?file={name}_1K-JPG.zip",
+      "licence": "CC0 1.0 Universal (public domain dedication)",
+      "author": "Lennart Demes / ambientCG.com",
+      "homepage": "https://ambientcg.com/"
+    }
+  },
+  "terrainLayers": [
+    {
+      "layer": 0,
+      "id": "grass",
+      "asset": "Grass001",
+      "note": "lush lowland pasture (Reuss floor, Rütli meadow, lake shores)"
+    },
+    {
+      "layer": 1,
+      "id": "meadow",
+      "asset": "Grass004",
+      "note": "drier, yellower alpine meadow above the villages"
+    },
+    {
+      "layer": 2,
+      "id": "forest",
+      "asset": "Ground023",
+      "note": "dark needle/leaf litter of the spruce-fir-beech forest floor"
+    },
+    {
+      "layer": 3,
+      "id": "rock",
+      "asset": "Rocks011",
+      "note": "pale grey limestone cliff face (Axen, Mythen, Schöllenen, Pilatus)"
+    },
+    {
+      "layer": 4,
+      "id": "scree",
+      "asset": "Gravel022",
+      "note": "talus / scree fans below the cliffs"
+    },
+    {
+      "layer": 5,
+      "id": "snow",
+      "asset": "Snow006",
+      "note": "old snow above the snow line"
+    },
+    {
+      "layer": 6,
+      "id": "mud",
+      "asset": "Ground047",
+      "note": "damp river gravel, lake shore, marsh"
+    },
+    {
+      "layer": 7,
+      "id": "road",
+      "asset": "Ground078",
+      "note": "beaten earth track / trampled village ground"
+    }
+  ],
+  "vegetation": [
+    {
+      "id": "bark-conifer",
+      "asset": "Bark012",
+      "note": "spruce/fir bark for tree trunks"
+    }
+  ],
+  "outputs": {
+    "terrainAlbedoArray": "public/assets/textures/terrain/albedo-array.jpg",
+    "terrainNormalArray": "public/assets/textures/terrain/normal-array.jpg",
+    "terrainOrmArray": "public/assets/textures/terrain/orm-array.jpg",
+    "barkAlbedo": "public/assets/textures/vegetation/bark-conifer.jpg",
+    "barkNormal": "public/assets/textures/vegetation/bark-conifer-n.jpg"
+  },
+  "layerSize": 512,
+  "jpegQuality": {
+    "albedo": 0.9,
+    "normal": 0.94,
+    "orm": 0.88
+  }
+}
