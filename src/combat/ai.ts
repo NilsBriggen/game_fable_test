@@ -203,12 +203,14 @@ function crossbowmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
 }
 
 function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
-  // Roll boulders if standing on a ready feature with a target in its line.
+  // Roll boulders if standing on a ready feature AND the column has actually bunched up in its line —
+  // balance pass: firing on the first lone soldier to wander past (the old `hasTarget` check) wasted the
+  // cache on 1 enemy instead of catching several; a competent defender waits.
   const cell = engine.cellViewAt(u.q, u.r);
   if (cell?.feature === 'boulder-cache' || cell?.feature === 'trunk-cache') {
     const feature = engine.encounterDef()?.terrainFeatures?.[cell.featureIndex ?? -1];
-    const hasTarget = feature?.affects?.some(([q, r]) => enemies.some((e) => e.q === q && e.r === r));
-    if (hasTarget && u.ap.action) { engine.aiAbility(u, 'ability.roll-boulders'); return; }
+    const nearLine = feature?.affects?.reduce((n, [q, r]) => n + (enemies.some((e) => cellDistance(e.q, e.r, q, r) <= 1) ? 1 : 0), 0) ?? 0;
+    if (nearLine >= 3 && u.ap.action) { engine.aiAbility(u, 'ability.roll-boulders'); return; }
   }
   // issue 2: Brace whenever a mounted threat is within charge range (2× this unit's speed), so the Haufen
   // isn't caught flat-footed the way probe10b's 24/24 samples showed (`braces=0` — the AI never used it).

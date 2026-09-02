@@ -86,12 +86,23 @@ function presetGasse(): PresetSample {
  *  40×24 (LORE §6 step 12, §1): q = depth from the lake (0..39), r = position along the column (0..23).
  */
 function presetMorgarten(): PresetSample {
+  // Balance pass (LORE §1's actual mechanism): the column could not deploy off the road — the slope directly
+  // above it was too steep to climb except at a few narrow points. Modeled as a >45\u00b0 rock face at the first
+  // two slope columns, impassable to EVERY mover (not just mounted, unlike `letzi-wall`), except three 2-row
+  // gaps: the two Haufen blocks' own rows, and one up-column (also where the third cache and the Schwyz relief
+  // column's descent sit). At most the handful of column units standing in a gap's row can ever reach a block
+  // in a turn; everyone else queues on the road, exactly where the boulder/trunk caches hit them.
+  const gapRows: [number, number][] = [[4, 8], [10, 12], [14, 18]];
   return (q, r, cols) => {
     const lakeCols = Math.max(3, Math.floor(cols * 0.12));
     const roadCols = [lakeCols, lakeCols + 2] as const;
     if (q < lakeCols) return { height: -0.3, surface: 'water', passable: true, cover: 0, difficult: true };
     if (q >= roadCols[0] && q <= roadCols[1]) return { height: 0.1, surface: 'road', passable: true, cover: 0, difficult: false };
     const slopeStart = roadCols[1] + 1;
+    const inGap = gapRows.some(([a, b]) => r >= a && r <= b);
+    if ((q === slopeStart || q === slopeStart + 1) && !inGap) {
+      return { height: 6, surface: 'rock', passable: false, cover: 0, difficult: true };
+    }
     const t = Math.max(0, (q - slopeStart) / Math.max(1, cols - 1 - slopeStart));
     const height = t * 12;
     const surface: SurfaceType = t > 0.6 ? 'forest' : 'grass';

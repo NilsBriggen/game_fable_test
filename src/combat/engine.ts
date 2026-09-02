@@ -75,6 +75,11 @@ export class CombatEngineImpl implements CombatService {
   private activeUnitId: EntityId | null = null;
   private log: CombatEventRecord[] = [];
   private objectives: { def: Objective; done: boolean; progress?: string }[] = [];
+  // Balance pass: `rout.threshold` must be computed against the FULL eventual column (initial units +
+  // every scripted `spawn`), not just whoever has spawned so far — otherwise routing the round-1 vanguard
+  // alone could satisfy a 60% threshold before waves 2/3 (11 more Habsburg units) ever arrive. Set once in
+  // `start()`.
+  private totalEnemyEverCount = 0;
   private loseObjectives: { def: Objective; done: boolean }[] = [];
   private featureUses = new Map<number, number>();
   private deployZone: DeployZone = { q: 0, r: 0, cols: 1, rows: 1 };
@@ -118,6 +123,8 @@ export class CombatEngineImpl implements CombatService {
     this.cells = cells;
     this.deployZone = enc.deploy;
     this.objectives = enc.objectives.map((def) => ({ def, done: false }));
+    const scriptedSpawnEnemyCount = (enc.scripted ?? []).reduce((n, e) => n + e.actions.reduce((m, a) => m + ('spawn' in a && a.spawn.side === 'enemy' ? (a.spawn.count ?? 1) : 0), 0), 0);
+    this.totalEnemyEverCount = enc.units.filter((u) => u.side === 'enemy').reduce((n, u) => n + (u.count ?? 1), 0) + scriptedSpawnEnemyCount;
     this.loseObjectives = (enc.loseObjectives ?? []).map((def) => ({ def, done: false }));
     this.placeUnits(enc);
     // Ambushed defenders (§5.3: "unseen attacker" round) start with weapons already set: a braced polearm
@@ -380,8 +387,13 @@ export class CombatEngineImpl implements CombatService {
    *  20 unchanged rounds in a row ends it. */
   private checkStalemate(): void {
     if (this.ended) return;
+    // Balance pass: a Routed unit's exact position doesn't matter for "is this fight decided" — it just
+    // wanders toward its own edge every turn (`doRoutedTurn`), which changed the fingerprint every round and
+    // meant a fight with nothing left but a few fleeing stragglers, permanently stuck behind the new
+    // chokepoint terrain and never quite reaching the map edge, could run for hundreds of rounds without ever
+    // tripping stalemate detection.
     const fp = [...this.units.values()]
-      .map((u) => `${u.id}:${u.hp}:${u.q},${u.r}:${u.down ? 1 : 0}:${u.routed ? 1 : 0}`)
+      .map((u) => (u.routed ? `${u.id}:R` : `${u.id}:${u.hp}:${u.q},${u.r}:${u.down ? 1 : 0}:0`))
       .sort().join('|');
     if (fp === this.stalemateFingerprint) {
       this.stalemateRounds++;
@@ -462,9 +474,29 @@ export class CombatEngineImpl implements CombatService {
       const triggersLoss = lo.def.type === 'protect' ? !met : met;
       if (triggersLoss) { this.outcome = 'lose'; return true; }
     }
-    if (enemyAlive.length === 0) { this.outcome = 'win'; return true; }
-    if (enemyAlive.every((u) => u.routed)) { this.outcome = 'win'; return true; }
-    if (this.objectives.length && this.objectives.every((o) => this.objectiveMet(o.def))) { this.outcome = 'win'; return true; }
+    // Balance pass: these two unconditional "wipe/rout everyone currently on the field" checks must wait
+    // for every scripted reinforcement wave to have actually spawned — otherwise wiping out just the round-1
+    // vanguard (5 of ~16 Habsburg units) reads as defeating "the enemy" and ends the fight before waves 2/3
+    // (11 more units) ever arrive.
+    const allEnemiesSpawned = [...this.units.values()].filter((u) => u.side === 'enemy').length >= this.totalEnemyEverCount;
+    if (allEnemiesSpawned && enemyAlive.length === 0) { this.outcome = 'win'; return true; }
+    if (allEnemiesSpawned && enemyAlive.every((u) => u.routed)) { this.outcome = 'win'; return true; }
+    // Balance pass: "you have defeated the enemy" (`rout`/`defeat-all`) is always independently sufficient
+    // for victory, regardless of whatever other checkpoint objectives (`hold-cells`, `trigger-features`, ...)
+    // are also listed — those describe how well you fought, not a precondition for winning at all. Without
+    // this, combining a checkpoint objective that can regress (a block advancing off its `hold-cells` cells
+    // once the AI presses the attack, by design) with `rout` in the same `every()` AND meant the encounter
+    // could satisfy `rout` and then run forever, never able to also re-satisfy the checkpoint — the actual
+    // cause of several AI-vs-AI samples hitting the sampler's 500-round cap.
+    if (this.objectives.some((o) => (o.def.type === 'rout' || o.def.type === 'defeat-all') && (o.done || this.objectiveMet(o.def)))) { this.outcome = 'win'; return true; }
+    // Balance pass: objectives like `hold-cells` are checkpoints ("held the line for 3 rounds") that can
+    // legitimately stop being true later (the block advances off those exact cells once the AI presses the
+    // attack, by design) — recomputing them fresh here would mean the encounter could NEVER win once the
+    // block moved, even after the column had long since broken (this was the actual cause of several
+    // AI-vs-AI samples running to the 500-round sampler cap: rout threshold satisfied, hold-cells regressed,
+    // and `every()` blocked forever). `o.done` is sticky (see `updateObjectiveProgress`) — `|| objectiveMet`
+    // here just means a same-round transition doesn't have to wait for the next `updateObjectiveProgress`.
+    if (this.objectives.length && this.objectives.every((o) => o.done || this.objectiveMet(o.def))) { this.outcome = 'win'; return true; }
     return false;
   }
 
@@ -474,11 +506,16 @@ export class CombatEngineImpl implements CombatService {
       case 'rout': {
         // round-2 issue (b): the schema's `threshold?` was declared but never read — every `rout` objective
         // silently demanded 100%. Morgarten sets 0.6 so Leopold and a rump can "escape" (LORE §1) instead of
-        // the fight dragging on until every last routed straggler is hunted down.
+        // the fight dragging on until every last routed straggler is hunted down. Balance pass: the
+        // denominator is the FULL eventual column (`totalEnemyEverCount`, including units that haven't
+        // scripted-spawned in yet), not just whoever currently exists — otherwise routing the round-1
+        // vanguard alone could satisfy 60% on round 1, before waves 2/3 (11 more Habsburg units) ever showed
+        // up, which is exactly what an early version of this fix did (instant "wins" at round 1).
         const enemyUnits = [...this.units.values()].filter((u) => u.side === 'enemy');
-        if (enemyUnits.length === 0) return true;
+        const total = Math.max(enemyUnits.length, this.totalEnemyEverCount);
+        if (total === 0) return true;
         const removed = enemyUnits.filter((u) => u.dead || u.down || u.routed).length;
-        return removed / enemyUnits.length >= (def.threshold ?? 1);
+        return removed / total >= (def.threshold ?? 1);
       }
       case 'survive': return this.round >= def.turns;
       case 'trigger-features': {
@@ -509,7 +546,10 @@ export class CombatEngineImpl implements CombatService {
 
   private updateObjectiveProgress(): void {
     for (const o of this.objectives) {
-      o.done = this.objectiveMet(o.def);
+      // Sticky: once a checkpoint objective is met, it stays met for end-condition purposes even if it later
+      // regresses (a block advancing off its `hold-cells` cells, a rallied unit un-Routing below `rout`'s
+      // threshold) — see the comment in `checkEndConditions`.
+      o.done = o.done || this.objectiveMet(o.def);
       o.progress = this.objectiveProgressText(o.def);
     }
   }
@@ -1673,6 +1713,8 @@ export class CombatEngineImpl implements CombatService {
     if (!enc) throw new Error(`combat: restore: unknown encounter ${s.encounterId}`);
     this.resetState();
     this.enc = enc;
+    const scriptedSpawnEnemyCount = (enc.scripted ?? []).reduce((n, e) => n + e.actions.reduce((m, a) => m + ('spawn' in a && a.spawn.side === 'enemy' ? (a.spawn.count ?? 1) : 0), 0), 0);
+    this.totalEnemyEverCount = enc.units.filter((u) => u.side === 'enemy').reduce((n, u) => n + (u.count ?? 1), 0) + scriptedSpawnEnemyCount;
     const os = s.objectivesState as { objectives: { done: boolean; progress?: string }[]; phase: CombatStateView['phase']; ended: boolean; outcome: 'win' | 'lose' | 'fled' | null; deployZone: DeployZone; grid: GridInfo; cells: CellView[]; activeUnitId: EntityId | null };
     this.grid = os.grid;
     this.cells = os.cells;

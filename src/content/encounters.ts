@@ -148,14 +148,13 @@ export const encounters: EncounterDef[] = [
       // with it), the "hold vs. chase" tension the design asks for, rather than every cache sitting free on
       // a cell the block already occupies.
       { kind: 'boulder-cache', cells: [[10, 11]], affects: [[6, 11], [5, 11], [4, 11]] },
+      // Balance pass, 4th cache: sits on one of the Schwyz relief column's own arrival cells (round 3 below),
+      // so they can fire it the moment they arrive rather than needing a separate approach turn.
+      { kind: 'trunk-cache', cells: [[13, 9]], affects: [[6, 9], [5, 9], [4, 9]] },
       // The letzi wall (LORE §1: the Sattel letzi blocked cavalry) fences both flanks beyond the two Haufen
       // blocks — mounted units cannot cross it (path.ts), funnelling the column into the r=3..20 killing
       // ground between the lake-road and the slope instead of riding around the blocks.
       { kind: 'letzi-wall', cells: [[8, 0], [8, 1], [8, 2], [8, 21], [8, 22], [8, 23]] },
-      // East flank of each Haufen block: mounted units cannot circle around behind the block on the
-      // slope side either — with 16 attackers in play, an unwalled east flank let cavalry simply
-      // envelop the block from every side at once, which no amount of Haufen/Brace math survives.
-      { kind: 'letzi-wall', cells: [[11, 4], [11, 5], [11, 6], [11, 7], [11, 14], [11, 15], [11, 16], [11, 17]] },
     ],
     scripted: [
       // Second wave (fix round 2 issue (b)): Leopold himself, with the sergeant riding as his banner-man
@@ -177,6 +176,19 @@ export const encounters: EncounterDef[] = [
         { spawn: { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 23, group: 'rearguard' } },
         { spawn: { archetype: 'habsburg-squire', side: 'enemy', q: 5, r: 23, group: 'rearguard' } },
       ] },
+      // Balance pass: the Schwyz main body (LORE ~1500 Confederates total — the two Haufen blocks alone were
+      // a token squad, not remotely that). Arrives round 3, descending from the slope top through the same
+      // gap corridor as the third cache, and can reinforce either block or press onto the road once the
+      // cavalry breaks.
+      { round: 3, actions: [
+        { caption: 'The men of Schwyz come down from the Sattel.' },
+        { spawn: { archetype: 'militia-halberd', side: 'player', q: 13, r: 9, group: 'schwyz' } },
+        { spawn: { archetype: 'militia-halberd', side: 'player', q: 14, r: 9, group: 'schwyz' } },
+        { spawn: { archetype: 'militia-halberd', side: 'player', q: 13, r: 10, group: 'schwyz' } },
+        { spawn: { archetype: 'militia-halberd', side: 'player', q: 14, r: 10, group: 'schwyz' } },
+        { spawn: { archetype: 'militia-halberd', side: 'player', q: 13, r: 11, group: 'schwyz' } },
+        { spawn: { archetype: 'militia-halberd', side: 'player', q: 14, r: 11, group: 'schwyz' } },
+      ] },
       // Third wave (existing caption/morale hit, unchanged): the tail of the column piles into the ambush.
       { round: 4, actions: [
         { moraleAll: { side: 'enemy', delta: -15 } },
@@ -188,7 +200,7 @@ export const encounters: EncounterDef[] = [
       { round: 10, actions: [{ caption: 'Duke Leopold wheels his banner back toward Zug \u2014 by every chronicle, the Duke himself must escape the field.' }] },
     ],
     description: 'The Confederate slope ambush above the Ägerisee road, 15 November 1315: boulders and trunks, then the Haufen against the cramped Habsburg cavalry.',
-    historical: true, note: 'LORE.md §1 and §6 Chapter 2 step 12. Chroniclers (Johannes of Winterthur) and the founding tradition describe rocks and tree trunks rolled onto the column from the Figlenfluh above, then halberds against horsemen trapped between the lake and the slope. Leopold survives (objective is rout, not kill-all), per §1 — mechanically he is a named knight who can rout and flee just like the rest of the column, never scripted to die.',
+    historical: true, note: 'LORE.md §1 and §6 Chapter 2 step 12. Chroniclers (Johannes of Winterthur) and the founding tradition describe rocks and tree trunks rolled onto the column from the Figlenfluh above, then halberds against horsemen trapped between the lake and the slope. §1\'s actual mechanism — the column, strung out on the narrow road between lake and slope, could not deploy or bring its numbers to bear — is modelled directly in the terrain (a rock chokepoint above the road, passable only at three narrow gaps) as well as the letzi and the caches. The Habsburg column arrives as a small vanguard plus two scripted reinforcement waves (round 2, round 4) rather than all ~16 men from round 1, standing in for a much larger historical column strung along the road; the Confederate side is likewise not a token squad — two Haufen blocks at deployment plus the Schwyz main body arriving round 3 (LORE ~1500 Confederates total). Leopold survives (objective is rout, not kill-all), per §1 — mechanically he is a named knight who can rout and flee just like the rest of the column, never scripted to die.',
   },
 ];
 
