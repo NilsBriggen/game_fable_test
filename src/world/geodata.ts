@@ -136,23 +136,27 @@ export function buildWorldGeo(): WorldGeo {
     corridors.push({ id: r.id, kind: 'road', pts, length: pts[pts.length - 1].s, surface: 'road' });
   }
 
-  // Peaks: landmark-kind gazetteer places with real elevation, radius sized per massif.
+  // Peaks: landmark-kind gazetteer places with real elevation, radius sized per massif (real base-to-
+  // summit run compressed 1:4.5 horizontally, so radius roughly scales with height: a peak's slope
+  // should read as a mountain, never a cliff, from anywhere outside its own footprint).
   const peakRadius: Record<string, number> = {
-    pilatus: 1500, 'rigi-kulm': 1550, rigi: 1550, buergenstock: 700, stanserhorn: 900,
-    fronalpstock: 620, urirotstock: 1250, 'grosser-mythen': 480, rossberg: 950, bristen: 1300,
+    pilatus: 1700, 'rigi-kulm': 1650, rigi: 1650, buergenstock: 900, stanserhorn: 1150,
+    fronalpstock: 1150, urirotstock: 1500, 'grosser-mythen': 650, rossberg: 1150, bristen: 1500,
   };
-  const peakSharp: Record<string, number> = { 'grosser-mythen': 2.1, fronalpstock: 1.7 };
+  // sharp > 1 only for the genuinely spire-like summits (the Mythen); everything else stays close to
+  // 1 (the smoothstep base shape in peakBump() already gives a natural broad-massif silhouette).
+  const peakSharp: Record<string, number> = { 'grosser-mythen': 1.4 };
   const peaks: Peak[] = [];
   const seenPeak = new Set<string>();
   for (const p of Object.values(PLACES)) {
     if (p.kind !== 'landmark' || p.h < 150) continue;
     if (seenPeak.has(`${p.x}|${p.z}`)) continue; // rigi & rigi-kulm share coords
     seenPeak.add(`${p.x}|${p.z}`);
-    peaks.push({ id: p.id, x: p.x, z: p.z, h: p.h, radius: peakRadius[p.id] ?? 800, sharp: peakSharp[p.id] ?? 1.35 });
+    peaks.push({ id: p.id, x: p.x, z: p.z, h: p.h, radius: peakRadius[p.id] ?? 1000, sharp: peakSharp[p.id] ?? 1.0 });
   }
   // Kleiner Mythen: a smaller unnamed twin beside the Grosser Mythen (visual silhouette only, no gazetteer entry needed).
   const gm = PLACES['grosser-mythen'];
-  if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 260, z: gm.z + 120, h: gm.h - 80, radius: 320, sharp: 2.3 });
+  if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 260, z: gm.z + 120, h: gm.h - 80, radius: 500, sharp: 1.3 });
 
   const lakes: LakePoly[] = LAKES.map((l) => ({ id: l.id, name: l.name, levelGameH: gameHeightFromAsl(l.levelAsl), poly: l.poly }));
 
@@ -194,9 +198,16 @@ export function valleyProfile(dist: number, floorH: number, p: SegParams): numbe
 }
 
 export function peakBump(dist: number, p: Peak): number {
-  if (dist >= p.radius * 1.6) return 0;
-  const t = clamp(1 - dist / (p.radius * 1.6), 0, 1);
-  return p.h * Math.pow(t, p.sharp);
+  const r = p.radius * 1.6;
+  if (dist >= r) return 0;
+  const t = clamp(1 - dist / r, 0, 1);
+  // Smoothstep first (a real massif's footprint is broad — most of the height is already there well
+  // before the summit, tapering smoothly at both the outer skirt and the very top), then `sharp`
+  // pulls individual peaks pointier on top of that. A raw t^sharp (no smoothstep) concentrates almost
+  // all of the relief into the last ~15% of the radius, which reads as a sheer wall, not a mountain —
+  // that was a real bug here (Fronalpstock rendered as a cliff blocking the Seelisberg lake view).
+  const s = t * t * (3 - 2 * t);
+  return p.h * Math.pow(s, p.sharp);
 }
 
 export function lakeShelf(x: number, z: number, lake: LakePoly): number | null {
