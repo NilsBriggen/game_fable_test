@@ -62,6 +62,12 @@ export const abilities: AbilityDef[] = [
     historical: true, note: 'Linen dressing was the basic period first aid, home-made or from a barber-surgeon (LORE §7).',
   },
   {
+    id: 'ability.haul-out', name: 'Haul Out', cost: { bonus: true }, target: 'ally', range: 1,
+    effects: [{ removeStatus: 'drowning' }],
+    description: 'Grab a drowning comrade by strap or collar and drag them clear of the water before mail and plate take them under.',
+    historical: true, note: 'A drowning man weighed down by armour cannot swim himself out (LORE §1) — only a comrade pulling him clear saves him.',
+  },
+  {
     id: 'ability.rally', name: 'Rally', cost: { action: true }, requires: { skill: 'leadership' }, target: 'cell', range: 3,
     effects: [{ rally: { radius: 3 } }],
     description: 'A commander\'s shout in a 3-cell radius: clears Shaken and steadies morale.',

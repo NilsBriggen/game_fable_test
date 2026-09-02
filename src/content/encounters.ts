@@ -96,18 +96,20 @@ export const encounters: EncounterDef[] = [
     ambush: 'player',
     deploy: { q: 11, r: 9, cols: 6, rows: 4 },
     units: [
-      // Habsburg column, strung along the lakeside road (q=4..6), marching along r. This encounter models the
-      // vanguard that actually reaches the ambush point (the historical column of several thousand is far
-      // larger than any encounter can represent) — sized against the two Haufen blocks below so an AI-vs-AI
-      // sample lands close to a real fight rather than a foregone one in either direction (fix round 1,
-      // wave2 critic issue 2 / probe 10b; see morgarten.test.ts for the sampler).
-      { archetype: 'habsburg-knight', side: 'enemy', q: 5, r: 4, mounted: true, group: 'column' },
-      { archetype: 'habsburg-knight', side: 'enemy', q: 5, r: 10, mounted: true, group: 'column', name: 'Duke Leopold' },
-      { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 6, group: 'column' },
-      { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 12, group: 'column' },
-      { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 18, group: 'column' },
-      { archetype: 'habsburg-crossbowman', side: 'enemy', q: 4, r: 0, group: 'column' },
-      { archetype: 'habsburg-crossbowman', side: 'enemy', q: 4, r: 23, group: 'column' },
+      // Habsburg column, arriving in three waves along the lakeside road (q=4..6, marching along r) instead
+      // of all ~16 men being in play from round 1 (fix round 2, wave2 critic issue 2/(b): a 7-unit "patrol"
+      // on a 24-cell road didn't read as Leopold's column, and everything arriving at once made every extra
+      // unit make the AI-vs-AI ratio worse, not more historical). The vanguard below is what's actually on
+      // the board at the ambush; `scripted` below spawns the second wave on round 2 and the third on round 4
+      // (with the existing "column bunches" caption/morale hit) so the caches and the Haufen's hold-vs-chase
+      // decision have something arriving to react to across several rounds, the way a real column would.
+      // One knight sits at q=4, the road's own lake edge, precisely so a Shove/Push-of-Pike from the block can
+      // put him in the water (critic (b): "knights on it").
+      { archetype: 'habsburg-knight', side: 'enemy', q: 4, r: 5, mounted: true, group: 'vanguard' },
+      { archetype: 'habsburg-knight', side: 'enemy', q: 5, r: 15, mounted: true, group: 'vanguard' },
+      { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 6, group: 'vanguard' },
+      { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 16, group: 'vanguard' },
+      { archetype: 'habsburg-crossbowman', side: 'enemy', q: 4, r: 8, group: 'vanguard' },
       // Confederate slope line: two 2×2 Haufen blocks (halberd front rank, spear rear rank) already formed at
       // deployment, sitting just above the road behind the letzi-fenced killing ground (wave2 critic issue 3
       // asks for exactly this shape — kept at 2×2 rather than padded out for win-rate tuning; see
@@ -125,7 +127,10 @@ export const encounters: EncounterDef[] = [
       { type: 'survive', turns: 3 },
       { type: 'hold-cells', cells: [[9, 5], [10, 5], [9, 6], [10, 6], [9, 15], [10, 15], [9, 16], [10, 16]], turns: 3 },
       { type: 'trigger-features', kind: 'boulder-cache', count: 2 },
-      { type: 'rout' },
+      // Fix round 2 issue (b): `threshold` existed on the schema but was never read — a bare `rout` silently
+      // demanded every last straggler dead or routed, so the fight never ended even after the column broke.
+      // 60% dead/down/routed lets Leopold and a rump "escape" (LORE §1) the moment the column actually breaks.
+      { type: 'rout', threshold: 0.6 },
     ],
     loseObjectives: [{ type: 'protect', npc: 'player' }],
     terrainFeatures: [
@@ -134,18 +139,53 @@ export const encounters: EncounterDef[] = [
       // fire it without needing a bespoke "go stand on the feature" pathing step (it already checks the cell
       // it's standing on for a ready cache) — two boulder-caches (satisfying the `trigger-features count:2`
       // objective) and two trunk-caches, each aimed at the column element nearest that block.
-      { kind: 'boulder-cache', cells: [[9, 5]], affects: [[7, 4], [6, 4], [5, 4]] },
+      { kind: 'boulder-cache', cells: [[9, 5]], affects: [[6, 5], [5, 5], [4, 5]] },
       { kind: 'trunk-cache', cells: [[10, 5]], affects: [[7, 6], [6, 6], [5, 6]] },
-      { kind: 'boulder-cache', cells: [[9, 15]], affects: [[7, 18], [6, 18], [5, 18]] },
-      { kind: 'trunk-cache', cells: [[10, 15]], affects: [[6, 23], [5, 23], [4, 23]] },
+      { kind: 'boulder-cache', cells: [[9, 15]], affects: [[7, 15], [6, 15], [5, 15]] },
+      { kind: 'trunk-cache', cells: [[10, 15]], affects: [[7, 16], [6, 16], [5, 16]] },
+      // Fix round 2 issue (b) "third cache": up-column, roughly equidistant between the two Haufen blocks —
+      // reaching it means a unit leaving its block's adjacency (and the formation Defense bonus that comes
+      // with it), the "hold vs. chase" tension the design asks for, rather than every cache sitting free on
+      // a cell the block already occupies.
+      { kind: 'boulder-cache', cells: [[10, 11]], affects: [[6, 11], [5, 11], [4, 11]] },
       // The letzi wall (LORE §1: the Sattel letzi blocked cavalry) fences both flanks beyond the two Haufen
       // blocks — mounted units cannot cross it (path.ts), funnelling the column into the r=3..20 killing
       // ground between the lake-road and the slope instead of riding around the blocks.
       { kind: 'letzi-wall', cells: [[8, 0], [8, 1], [8, 2], [8, 21], [8, 22], [8, 23]] },
+      // East flank of each Haufen block: mounted units cannot circle around behind the block on the
+      // slope side either — with 16 attackers in play, an unwalled east flank let cavalry simply
+      // envelop the block from every side at once, which no amount of Haufen/Brace math survives.
+      { kind: 'letzi-wall', cells: [[11, 4], [11, 5], [11, 6], [11, 7], [11, 14], [11, 15], [11, 16], [11, 17]] },
     ],
     scripted: [
-      { round: 4, actions: [{ moraleAll: { side: 'enemy', delta: -15 } }, { caption: 'The column bunches between the lake and the slope.' }] },
-      { round: 10, actions: [{ caption: 'Duke Leopold wheels his banner back toward Zug — by every chronicle, the Duke himself must escape the field.' }] },
+      // Second wave (fix round 2 issue (b)): Leopold himself, with the sergeant riding as his banner-man
+      // (same `group` — the sergeant's archetype already counts as a morale "leader" in `applyDamage`, so his
+      // going down is a shock to the whole column, and losing Leopold specifically is doubly so).
+      // Split north/south (rather than all piling in behind the vanguard's northern half) so both Haufen
+      // blocks face a comparable share of the 16-unit column over the course of the fight, matching the
+      // vanguard's own north/south balance instead of leaving haufen-b (r=15-16) essentially unopposed while
+      // haufen-a (r=5-6) alone faces the whole reinforced column (an early rebalance pass that put all of
+      // waves 2-3 at r=0-2 made every AI-vs-AI sample a fast, lopsided loss \u2014 see morgarten.test.ts).
+      { round: 2, actions: [
+        { caption: 'More riders come down the col road \u2014 the Duke\'s own company from the north, more men-at-arms from the south.' },
+        { spawn: { archetype: 'habsburg-knight', side: 'enemy', q: 4, r: 1, mounted: true, group: 'command', name: 'Duke Leopold' } },
+        { spawn: { archetype: 'habsburg-sergeant', side: 'enemy', q: 5, r: 1, group: 'command' } },
+        { spawn: { archetype: 'habsburg-knight', side: 'enemy', q: 4, r: 0, mounted: true, group: 'command' } },
+        { spawn: { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 0, group: 'command' } },
+        { spawn: { archetype: 'habsburg-squire', side: 'enemy', q: 5, r: 0, group: 'command' } },
+        { spawn: { archetype: 'habsburg-knight', side: 'enemy', q: 4, r: 23, mounted: true, group: 'rearguard' } },
+        { spawn: { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 23, group: 'rearguard' } },
+        { spawn: { archetype: 'habsburg-squire', side: 'enemy', q: 5, r: 23, group: 'rearguard' } },
+      ] },
+      // Third wave (existing caption/morale hit, unchanged): the tail of the column piles into the ambush.
+      { round: 4, actions: [
+        { moraleAll: { side: 'enemy', delta: -15 } },
+        { caption: 'The column bunches between the lake and the slope.' },
+        { spawn: { archetype: 'habsburg-footman', side: 'enemy', q: 4, r: 0, group: 'command' } },
+        { spawn: { archetype: 'habsburg-footman', side: 'enemy', q: 6, r: 22, group: 'rearguard' } },
+        { spawn: { archetype: 'habsburg-crossbowman', side: 'enemy', q: 5, r: 22, group: 'rearguard' } },
+      ] },
+      { round: 10, actions: [{ caption: 'Duke Leopold wheels his banner back toward Zug \u2014 by every chronicle, the Duke himself must escape the field.' }] },
     ],
     description: 'The Confederate slope ambush above the Ägerisee road, 15 November 1315: boulders and trunks, then the Haufen against the cramped Habsburg cavalry.',
     historical: true, note: 'LORE.md §1 and §6 Chapter 2 step 12. Chroniclers (Johannes of Winterthur) and the founding tradition describe rocks and tree trunks rolled onto the column from the Figlenfluh above, then halberds against horsemen trapped between the lake and the slope. Leopold survives (objective is rout, not kill-all), per §1 — mechanically he is a named knight who can rout and flee just like the rest of the column, never scripted to die.',

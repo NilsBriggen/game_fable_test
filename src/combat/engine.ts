@@ -79,6 +79,11 @@ export class CombatEngineImpl implements CombatService {
   private featureUses = new Map<number, number>();
   private deployZone: DeployZone = { q: 0, r: 0, cols: 1, rows: 1 };
   private resultResolve: ((r: CombatResult) => void) | null = null;
+  // round-2 issue 5: `restore()` never re-armed the original `start()` promise (documented as a builder-
+  // admitted gap) — a loaded mid-combat save had no way to learn how the fight eventually ended except by
+  // subscribing to `on('end', ...)` before it happened. `resume()` below fixes this: it returns a promise
+  // that resolves once (either immediately, from the last stored result, or whenever `finish()` next runs).
+  private lastResult: CombatResult | null = null;
   private forceAiAll = false;
   /** set during a `{type:'auto', rounds:N}` command: advance() stops cleanly once this many rounds have
    *  played, instead of running to completion (win/lose) — see BUILDER_RULES.md's `auto` semantics. */
@@ -232,7 +237,13 @@ export class CombatEngineImpl implements CombatService {
 
   private spawnUnit(def: NpcDef, side: Side, q: number, r: number, opts: { mounted?: boolean; group?: string; name?: string; npcId?: string }): Unit {
     const id = this.host.party.createCharacter(def);
-    return this.attachExistingUnit(id, side, q, r, opts, def.name);
+    const unit = this.attachExistingUnit(id, side, q, r, opts, def.name);
+    // round-2 endgame rule a: archetype/NPC squads (not the real party, whose own inventory governs ammo) get
+    // a finite quiver — the fake test party service hands out a flat 20, which reads as effectively unlimited
+    // and was the actual root cause of the 100-round crossbowman-kiting grind the critic traced issue 1 to.
+    // 8-10 bolts, deterministic per archetype so the same encounter always starts the same way.
+    if (unit.ranged) unit.ammoQty = Math.min(unit.ammoQty, 9);
+    return unit;
   }
 
   private attachExistingUnit(id: EntityId, side: Side, q: number, r: number, opts: { mounted?: boolean; group?: string; name?: string; npcId?: string } = {}, fallbackName?: string): Unit {
@@ -289,6 +300,15 @@ export class CombatEngineImpl implements CombatService {
     // instead of only discovering the round boundary after the whole initiative order has already acted once.
     this.turnIndex = this.order.length;
     this.activeUnitId = null;
+  }
+
+  /** A scripted mid-encounter reinforcement (issue (b), the Morgarten waves) rolls its own initiative and is
+   *  appended to the end of `this.order` — safe to do at any point since `order` is a fixed, cycled array and
+   *  appending never disturbs `turnIndex`'s position among the entries already visited this round. It then
+   *  acts every round from here on, at the tail of the sequence. */
+  private insertIntoInitiative(u: Unit): void {
+    u.initiative = this.host.rng.die(10) + u.initiativeBonus;
+    this.order.push(u.id);
   }
 
   // ---------------- round / turn loop ----------------
@@ -387,6 +407,10 @@ export class CombatEngineImpl implements CombatService {
     // the enemy" rule would need per-step direction tracking in the pathfinder).
     if (hasStatus(u, 'shaken')) { u.ap.moveM = u.speedMBase / 2; u.ap.moveMax = u.ap.moveM; }
     this.tickDrowning(u);
+    // round-2 issue 3: a drowning unit cannot swim itself out — it needs a comrade to spend a bonus action
+    // hauling it out (`ability.haul-out`, which clears the status). Previously it kept its full move budget
+    // and simply walked out on its own next turn, which is why Drowning never mattered in play.
+    if (hasStatus(u, 'drowning')) { u.ap.moveM = 0; u.ap.moveMax = 0; }
     this.pushLog('turn-start', `${u.name}'s turn.`, u.id);
   }
 
@@ -447,7 +471,15 @@ export class CombatEngineImpl implements CombatService {
   private objectiveMet(def: Objective): boolean {
     switch (def.type) {
       case 'defeat-all': return [...this.units.values()].filter((u) => u.side === 'enemy').every((u) => u.dead);
-      case 'rout': return [...this.units.values()].filter((u) => u.side === 'enemy').every((u) => u.dead || u.routed);
+      case 'rout': {
+        // round-2 issue (b): the schema's `threshold?` was declared but never read — every `rout` objective
+        // silently demanded 100%. Morgarten sets 0.6 so Leopold and a rump can "escape" (LORE §1) instead of
+        // the fight dragging on until every last routed straggler is hunted down.
+        const enemyUnits = [...this.units.values()].filter((u) => u.side === 'enemy');
+        if (enemyUnits.length === 0) return true;
+        const removed = enemyUnits.filter((u) => u.dead || u.down || u.routed).length;
+        return removed / enemyUnits.length >= (def.threshold ?? 1);
+      }
       case 'survive': return this.round >= def.turns;
       case 'trigger-features': {
         let count = 0;
@@ -523,12 +555,24 @@ export class CombatEngineImpl implements CombatService {
       if (ch) { ch.hp = u.hp; ch.down = u.down; }
     }
     const result: CombatResult = { outcome, rounds: this.round, downed, dead, xp, loot: [], log: this.log.map((l) => l.text) };
+    this.lastResult = result;
     this.pushLog('end', `Combat ends: ${outcome}.`, undefined, { outcome });
     this.emitState();
     this.bus.emit('end', result);
     this.host.events?.emit('request-state', outcome === 'lose' && ![...this.units.values()].some((u) => u.isPlayerControlled && !u.dead) ? 'gameover' : 'explore');
     this.resultResolve?.(result);
     this.resultResolve = null;
+  }
+
+  /** round-2 issue 5: exposed alongside `restore()` (not part of the `CombatService` interface — see
+   *  `index.ts`, which wires it in as an extra property since the save module's load path awaits `restore()`
+   *  for the state sync but must NOT await `start()` again). Call after `restore()` to learn the eventual
+   *  outcome of a mid-combat save: resolves immediately if the restored encounter had already ended, or once
+   *  `finish()` next runs if it's still active. */
+  resume(): Promise<CombatResult> {
+    if (this.lastResult && (this.ended || !this.isActive())) return Promise.resolve(this.lastResult);
+    if (!this.isActive()) return Promise.resolve({ outcome: 'fled', rounds: this.round, downed: [], dead: [], xp: {}, loot: [], log: this.log.map((l) => l.text) });
+    return new Promise<CombatResult>((resolve) => { this.resultResolve = resolve; });
   }
 
   private skillIdForDamage(u: Unit): string | null {
@@ -560,7 +604,14 @@ export class CombatEngineImpl implements CombatService {
       else if ('lose' in a) { this.outcome = 'lose'; }
       else if ('spawn' in a) {
         const def = a.spawn.npc ? this.host.content.npcs.get(a.spawn.npc) : a.spawn.archetype ? this.host.content.archetypes.get(a.spawn.archetype) : undefined;
-        if (def && this.enc) this.spawnUnit(def, a.spawn.side, a.spawn.q, a.spawn.r, { mounted: a.spawn.mounted, group: a.spawn.group, npcId: a.spawn.npc });
+        if (def && this.enc) {
+          // round-2 issue (b): `a.spawn.name` was silently dropped (never passed to spawnUnit) — a scripted
+          // reinforcement named 'Duke Leopold' would spawn as a plain "Habsburg Knight". Also: a spawned unit
+          // was never added to `this.order`, so it existed as a valid target but was never actually given a
+          // turn — the "second/third wave" would stand there forever, decorative only.
+          const unit = this.spawnUnit(def, a.spawn.side, a.spawn.q, a.spawn.r, { mounted: a.spawn.mounted, group: a.spawn.group, npcId: a.spawn.npc, name: a.spawn.name });
+          this.insertIntoInitiative(unit);
+        }
       }
       // 'dialogue' / 'camera' are UI/render concerns; recorded in the log for visibility, no engine effect here.
       else if ('dialogue' in a) this.pushLog('log', `[dialogue: ${a.dialogue}]`);
@@ -672,8 +723,8 @@ export class CombatEngineImpl implements CombatService {
     const out: string[] = [];
     out.push('ability.attack'); // always available — an unarmed strike is the fallback (see attackInputsFor)
     if (u.ranged && u.loaded) out.push('ability.aimed-shot');
-    if (u.ranged && !u.loaded) out.push('ability.reload');
-    out.push('ability.shove', 'ability.disengage', 'ability.dash', 'ability.bandage');
+    if (u.ranged && !u.loaded && u.ammoQty > 0) out.push('ability.reload');
+    out.push('ability.shove', 'ability.disengage', 'ability.dash', 'ability.bandage', 'ability.haul-out');
     if (u.leadershipLevel >= 10) out.push('ability.rally');
     if (isPolearm(u.weapon)) out.push('ability.brace');
     if (u.mounted && u.weapon) out.push('ability.charge');
@@ -772,15 +823,21 @@ export class CombatEngineImpl implements CombatService {
     return cellDistance(attacker.q, attacker.r, target.q, target.r) <= this.abilityRangeCells(attacker, ability);
   }
 
+  /** issue (round 2, endgame rule a): a ranged weapon with an empty quiver is not usable at range —
+   *  `canFireRanged` is the single gate every reach/weapon-selection check below goes through. */
+  private canFireRanged(u: Unit): boolean {
+    return !!u.ranged && u.ammoQty > 0;
+  }
+
   private abilityRangeCells(u: Unit, ability: AbilityDef): number {
     if (ability.range === 'weapon') {
-      if (ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot') return u.ranged?.range?.long ?? 8;
+      if (ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot') return this.canFireRanged(u) ? (u.ranged?.range?.long ?? 8) : 0;
       // 'ability.attack' is "whatever is in hand": a unit carrying both a melee sidearm and a loaded ranged
       // weapon (every crossbowman archetype does — a dagger alongside the Armbrust) can reach with EITHER,
       // so its target list is the union of both reaches, not just the melee sidearm's 1-cell reach (that bug
       // silently reduced every dagger+crossbow unit to melee-only — no crossbowman ever actually fired).
       const meleeReach = u.weapon?.reach ?? (u.ranged ? 0 : 1);
-      const rangedReach = u.ranged ? (u.ranged.range?.long ?? u.ranged.reach ?? 0) : 0;
+      const rangedReach = this.canFireRanged(u) ? (u.ranged?.range?.long ?? u.ranged?.reach ?? 0) : 0;
       return Math.max(meleeReach, rangedReach, 1);
     }
     return ability.range;
@@ -800,16 +857,17 @@ export class CombatEngineImpl implements CombatService {
     return isFlanked({ q: target.q, r: target.r }, { q: attacker.q, r: attacker.r, reach: this.meleeReach(attacker) }, hostiles);
   }
 
-  private attackInputsFor(attacker: Unit, target: Unit, ability: AbilityDef): { attackBonus: number; edge: string[]; burden: string[]; weapon: WeaponInfo } {
+  private attackInputsFor(attacker: Unit, target: Unit, ability: AbilityDef, notMoved = false): { attackBonus: number; edge: string[]; burden: string[]; weapon: WeaponInfo } {
     // issue 5: Disarmed forces the unarmed fallback regardless of what's equipped.
     const disarmed = hasStatus(attacker, 'disarmed');
     // Plain 'ability.attack' picks whichever weapon can actually reach the target: melee if the target is
     // within the sidearm's reach (or there's no ranged weapon to fall back on), ranged otherwise. A unit with
-    // both (every crossbowman) is not melee-only just because it happens to also carry a dagger.
+    // both (every crossbowman) is not melee-only just because it happens to also carry a dagger — but only
+    // when there's still a bolt to loose (round-2 endgame rule a: empty quiver forces melee).
     const meleeReachFor = attacker.weapon?.reach ?? 1;
     const distToTarget = cellDistance(attacker.q, attacker.r, target.q, target.r);
-    const usingRanged = !disarmed && (ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot'
-      || (ability.id === 'ability.attack' && !!attacker.ranged && (!attacker.weapon || distToTarget > meleeReachFor)));
+    const usingRanged = !disarmed && this.canFireRanged(attacker) && (ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot'
+      || (ability.id === 'ability.attack' && (!attacker.weapon || distToTarget > meleeReachFor)));
     const weapon = disarmed ? undefined : ((usingRanged ? attacker.ranged : attacker.weapon) ?? attacker.weapon ?? attacker.ranged);
     if (!weapon) return { attackBonus: attacker.attackBonus['unarmed'] ?? 0, edge: [], burden: [], weapon: { defId: '', name: 'fists', hands: 1, reach: 1, damage: '1d2', damageType: 'blunt', properties: [] } };
     const def = this.host.content.items.get(weapon.defId);
@@ -823,6 +881,10 @@ export class CombatEngineImpl implements CombatService {
     if (usingRanged) {
       if (heightDelta >= 2) edge.push('high ground');
     } else if (heightDelta >= 1) edge.push('high ground');
+    // round-2 issue 4a: a steadied Aimed Shot (hasn't moved this turn) gets its own Edge source — captured by
+    // the caller (cmdAbility/aiAbility) BEFORE `checkAndSpendCost`'s `noMove` cost zeroes `ap.moveM`, since by
+    // the time this method runs that zeroing has already happened.
+    if (ability.id === 'ability.aimed-shot' && notMoved) edge.push('aimed');
     if (this.targetIsFlanked(target, attacker)) edge.push('flanked');
     if (hasStatus(target, 'prone')) edge.push('target prone');
     if (hasStatus(target, 'shaken')) edge.push('target shaken');
@@ -1151,10 +1213,12 @@ export class CombatEngineImpl implements CombatService {
     if (!u || !ability) return { ok: false, reason: 'no such unit/ability' };
     if (u.id !== this.activeUnitId && !this.forceAiAll) return { ok: false, reason: 'not this unit\'s turn' };
     if (!this.targetAllowed(u, ability, target)) return { ok: false, reason: 'target out of range' };
+    // round-2 issue 4a: capture "hasn't moved this turn" BEFORE checkAndSpendCost's `noMove` cost zeroes it.
+    const notMoved = u.ap.moveM === u.ap.moveMax;
     const costCheck = this.checkAndSpendCost(u, ability);
     if (!costCheck.ok) return costCheck;
     const events: CombatEventRecord[] = [];
-    this.executeAbility(u, ability, target, events);
+    this.executeAbility(u, ability, target, events, notMoved);
     this.emitState();
     this.advance();
     return { ok: true, events };
@@ -1170,6 +1234,9 @@ export class CombatEngineImpl implements CombatService {
       if (def?.weapon?.skill !== r.weaponSkill) return { ok: false, reason: 'wrong weapon skill' };
     }
     if (r?.ranged && !u.ranged) return { ok: false, reason: 'no ranged weapon' };
+    // round-2 endgame rule a: any ability that explicitly requires a ranged weapon (Aimed Shot, Cover Fire's
+    // snapshot) also requires ammunition left to load into it.
+    if (r?.ranged && u.ranged && u.ammoQty <= 0) return { ok: false, reason: 'out of ammo' };
     if (r?.loaded && !u.loaded) return { ok: false, reason: 'not loaded' };
     if (r?.shield && !u.shield) return { ok: false, reason: 'no shield' };
     if (r?.mounted && !u.mounted) return { ok: false, reason: 'not mounted' };
@@ -1191,6 +1258,7 @@ export class CombatEngineImpl implements CombatService {
     }
     // reload has a dynamic ladder cost; special-case before the generic cost object.
     if (ability.id === 'ability.reload') {
+      if (u.ranged && u.ammoQty <= 0) return { ok: false, reason: 'out of ammo' };
       const rung = this.reloadRung(u);
       if (rung === 'free') { if (u.freeReloadUsedThisTurn) return { ok: false, reason: 'free reload already used' }; u.freeReloadUsedThisTurn = true; return { ok: true }; }
       if (rung === 'bonus') { if (!u.ap.bonus) return { ok: false, reason: 'no bonus action' }; u.ap.bonus = false; return { ok: true }; }
@@ -1227,12 +1295,12 @@ export class CombatEngineImpl implements CombatService {
    * Rally's un-Routing (routed is a Unit flag, not a status the DSL can name). Everything else below is the
    * literal effect list from `content/abilities.ts`.
    */
-  private executeAbility(u: Unit, ability: AbilityDef, target: CellKey | EntityId | undefined, events: CombatEventRecord[]): void {
+  private executeAbility(u: Unit, ability: AbilityDef, target: CellKey | EntityId | undefined, events: CombatEventRecord[], notMoved = false): void {
     u.hasActedThisTurn = true;
     if (ability.attackRoll) {
       const t = typeof target === 'number' ? this.units.get(target) : undefined;
       if (!t) return;
-      this.resolveAttack(u, t, ability, { charge: ability.id === 'ability.charge' });
+      this.resolveAttack(u, t, ability, { charge: ability.id === 'ability.charge', notMoved });
       return;
     }
     switch (ability.id) {
@@ -1365,11 +1433,14 @@ export class CombatEngineImpl implements CombatService {
     this.pushLog('damage', `${u.name} heals ${amount}.`, u.id, { amount: -amount });
   }
 
-  private resolveAttack(attacker: Unit, target: Unit, ability: AbilityDef, opts: { charge?: boolean; free?: boolean } = {}): void {
+  private resolveAttack(attacker: Unit, target: Unit, ability: AbilityDef, opts: { charge?: boolean; free?: boolean; notMoved?: boolean } = {}): void {
     // issue 1: defensive reach re-check even for engine-internal callers (reactions already validate adjacency
     // themselves, but this keeps the invariant true everywhere resolveAttack is reached from).
     if (!opts.free && !this.withinReach(attacker, target, ability)) return;
-    const { attackBonus, edge, burden, weapon } = this.attackInputsFor(attacker, target, ability);
+    const { attackBonus, edge, burden, weapon } = this.attackInputsFor(attacker, target, ability, opts.notMoved ?? false);
+    // round-2 endgame rule a: every ranged shot (a loaded bolt actually loosed, incl. Cover Fire) spends one
+    // round of ammunition. `weapon.range` is only set on a WeaponInfo built from a ranged item.
+    if (weapon.range) attacker.ammoQty = Math.max(0, attacker.ammoQty - 1);
     if (opts.charge) edge.push('charge');
     // issue 8: being flanked is itself a morale trigger, independent of whether the hit lands.
     if (edge.includes('flanked')) this.tryMoraleTrigger(target, 'flanked', moraleDc(1));
@@ -1383,6 +1454,17 @@ export class CombatEngineImpl implements CombatService {
     };
     const roll = rollAttack(inputs, this.host.rng);
     if (roll.fumble) addStatus(attacker, 'fumbled', 1); // issue 8: Burden on the next attack
+    // round-2 issue 4b: Shield Block — a shield-bearing defender with a reaction still available blocks part
+    // of a hit automatically ("AI accepts automatically" per the critic; there's no rational reason to ever
+    // decline pure damage reduction, so this doesn't need the full interactive reaction queue the movement-
+    // triggered reactions use — it resolves inline, same as every other roll-time modifier).
+    if (roll.hit && roll.damage > 0 && target.shield && target.ap.reaction) {
+      const blocked = rollDice('1d6', this.host.rng);
+      const before = roll.damage;
+      roll.damage = Math.max(0, roll.damage - blocked);
+      target.ap.reaction = false;
+      this.pushLog('reaction', `${target.name} blocks with the shield, reducing the blow by ${before - roll.damage}.`, target.id, { target: attacker.id });
+    }
     this.pushLog('attack', `${attacker.name} attacks ${target.name}: ${roll.hit ? (roll.critical ? 'critical hit' : 'hit') : 'miss'}.`, attacker.id, { target: target.id, roll });
     if (roll.hit) {
       this.applyDamage(target, roll.damage, weapon.damageType, roll.soak);
@@ -1496,6 +1578,34 @@ export class CombatEngineImpl implements CombatService {
   cellViewAt(q: number, r: number): CellView | undefined { return this.cellAt(q, r); }
   encounterDef(): EncounterDef | null { return this.enc; }
   featureUsesMap(): Map<number, number> { return this.featureUses; }
+  /** round-2 issue (a)(c): a forced morale check the AI can invoke directly (rate-limited the same as every
+   *  other trigger — at most once per unit per reason per round) — replaces `knightAct`'s old "run to the
+   *  furthest cell forever, never actually Rout" special case with the real morale-check pipeline, so a
+   *  broken knight either rallies, gets Shaken, or is genuinely Routed (and then `doRoutedTurn` takes over). */
+  forceMoraleCheck(u: Unit, dc: number, reason: string): void { this.tryMoraleTrigger(u, reason, dc); }
+  /** round-2 issue 6: a move that triggers a reaction (Brace, OA, Cover Fire) against a `isPlayerControlled`
+   *  defender queues it instead of auto-resolving inline (so a human gets asked) whenever `forceAiAll` is off
+   *  — which happens for every side:'player' unit, including a standalone squad's own militia, any time an
+   *  enemy AI's move+attack is decided outside a bulk `{type:'auto'}` command. Nothing previously stopped the
+   *  mover's own follow-up attack (issued synchronously, in the same `decideAndAct` call) from firing before
+   *  that queued reaction ever resolved — logging the attack ahead of the Brace it should have had to survive
+   *  first. `ai.ts` checks this after every move and skips the follow-up attack while one is pending. */
+  hasPendingReaction(): boolean { return this.reactionQueue.length > 0; }
+  /** round-2 issue (c)/3: would pushing `target` away from `shover` land it on water or off a ≥3m ledge? Lets
+   *  the AI decide to Shove opportunistically instead of never using the ability at all (round-1 issue 15). */
+  shoveDestinationHazard(shover: Unit, target: Unit): boolean {
+    if (!this.grid) return false;
+    let dq = Math.sign(target.q - shover.q);
+    let dr = Math.sign(target.r - shover.r);
+    if (dq === 0 && dr === 0) return false;
+    const nq = target.q + dq, nr = target.r + dr;
+    if (!inBounds(nq, nr, this.grid.cols, this.grid.rows)) return false;
+    const dest = this.cellAt(nq, nr);
+    if (!dest || !dest.passable) return false;
+    if (this.occupantAt(nq, nr, target.id)) return false;
+    const startH = this.cellAt(target.q, target.r)?.height ?? 0;
+    return dest.surface === 'water' || startH - dest.height >= 3;
+  }
 
   aiMove(u: Unit, to: CellKey): void {
     const preview = this.previewMove(u.id, to);
@@ -1506,9 +1616,10 @@ export class CombatEngineImpl implements CombatService {
     const ability = this.host.content.abilities.get(abilityId);
     if (!ability) return false;
     if (!this.targetAllowed(u, ability, target)) return false;
+    const notMoved = u.ap.moveM === u.ap.moveMax;
     const cost = this.checkAndSpendCost(u, ability);
     if (!cost.ok) return false;
-    this.executeAbility(u, ability, target, []);
+    this.executeAbility(u, ability, target, [], notMoved);
     return true;
   }
   aiEndTurn(): void { this.activeUnitId = null; }

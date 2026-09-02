@@ -1,7 +1,8 @@
 /**
- * Fix round 1 (wave2 critic, tools/critic/wave2-combat.md, score 5/10): each adversarial probe the critic
- * used to substantiate an issue, reproduced as a standing regression test so the fix can't silently regress.
- * Probe numbers below match the critic doc's own numbering.
+ * Wave2 critic (tools/critic/wave2-combat.md), rounds 1 (5/10) and 2 (7/10): each adversarial probe used to
+ * substantiate an issue, reproduced as a standing regression test so the fix can't silently regress. Probe
+ * numbers match the critic doc's own numbering. Round-1 note (round 2 issue 8): the flank-reach and charge-
+ * run-up probes were originally left to `formation.test.ts`/`engine.test.ts` — named explicitly here too now.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '@core/ecs';
@@ -261,5 +262,104 @@ describe('probe 9: previously-dead content is now usable', () => {
     const allyAfter = engine.getState()!.units.find((u) => u.id === ally.id)!;
     expect(allyAfter.status.some((s) => s.id === 'shield-wall')).toBe(true);
     expect(allyAfter.defense).toBe(allyDefenseBefore + 1);
+  });
+});
+
+describe('probe 3b/3c: flank reach (named per round-2 critic issue 8)', () => {
+  it('a hostile 7 cells away does not flank, even standing opposite the target', () => {
+    const { engine } = makeEngine();
+    const enc = flatEncounter({
+      units: [
+        { archetype: 'militia-spear', side: 'enemy', q: 5, r: 5 }, // target
+        { archetype: 'peasant', side: 'player', q: 6, r: 5 }, // adjacent attacker
+        { archetype: 'peasant', side: 'player', q: -2, r: 5 }, // opposite side, but 7 cells away
+      ],
+    });
+    startManual(engine, 'enc.test', enc);
+    const target = engine.getState()!.units.find((u) => u.side === 'enemy')!;
+    const attacker = engine.getState()!.units.find((u) => u.q === 6)!;
+    const preview = engine.previewAttack(attacker.id, 'ability.attack', target.id)!;
+    expect(preview.context.flanked).toBe(false);
+  });
+
+  it('a Down hostile on the opposite side does not count toward flanking', () => {
+    const { engine } = makeEngine();
+    const enc = flatEncounter({
+      units: [
+        { archetype: 'militia-spear', side: 'enemy', q: 5, r: 5 }, // target
+        { archetype: 'peasant', side: 'player', q: 6, r: 5 }, // adjacent attacker
+        { archetype: 'peasant', side: 'player', q: 4, r: 5 }, // opposite side, adjacent, but Down
+      ],
+    });
+    startManual(engine, 'enc.test', enc);
+    const target = engine.getState()!.units.find((u) => u.side === 'enemy')!;
+    const attacker = engine.getState()!.units.find((u) => u.q === 6)!;
+    const downed = engine.getState()!.units.find((u) => u.q === 4)!;
+    unitsOf(engine).get(downed.id)!.down = true;
+    const preview = engine.previewAttack(attacker.id, 'ability.attack', target.id)!;
+    expect(preview.context.flanked).toBe(false);
+  });
+});
+
+describe('probe 4: charge run-up (named per round-2 critic issue 8)', () => {
+  it('Charge without having moved this turn (chargeCells 0) is refused: "no run-up"', () => {
+    const { engine } = makeEngine();
+    const enc = flatEncounter({
+      units: [
+        { archetype: 'habsburg-knight', side: 'player', q: 5, r: 5, mounted: true },
+        { archetype: 'peasant', side: 'enemy', q: 6, r: 5 },
+      ],
+    });
+    startManual(engine, 'enc.test', enc);
+    const knight = engine.getState()!.units.find((u) => u.side === 'player')!;
+    const target = engine.getState()!.units.find((u) => u.side === 'enemy')!;
+    expect(unitsOf(engine).get(knight.id)!.chargeCells).toBe(0);
+    const result = step(engine, knight.id, { type: 'ability', unit: knight.id, ability: 'ability.charge', target: target.id });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no run-up');
+  });
+});
+
+describe('round-2 issue 6: reaction-before-attack ordering', () => {
+  it('a Brace reaction against a moving knight is logged before the knight\'s own attack, across seeds', () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const { engine } = makeEngine(seed);
+      // A 2×2 Haufen (forms automatically — 4 mutually-adjacent polearm units) far enough from the knight
+      // that a genuine ≥3-cell charge run-up exists, but close enough for it to actually land.
+      const enc = flatEncounter({
+        grid: { cols: 20, rows: 20, cellM: 1.5 },
+        units: [
+          { archetype: 'militia-spear', side: 'player', q: 9, r: 9 },
+          { archetype: 'militia-spear', side: 'player', q: 10, r: 9 },
+          { archetype: 'militia-spear', side: 'player', q: 9, r: 10 },
+          { archetype: 'militia-spear', side: 'player', q: 10, r: 10 },
+          { archetype: 'habsburg-knight', side: 'enemy', q: 9, r: 4, mounted: true },
+        ],
+      });
+      // NOT startManual / NOT `{type:'auto'}`: this reproduces the critic's "minimal knight-vs-2×2 trace" —
+      // a genuinely un-forced single AI turn, the one path where a Haufen defender's Brace (isPlayerControlled
+      // = true, forceAiAll = false) gets queued instead of auto-resolved.
+      engine.start('enc.test', { encounterOverride: enc });
+      const knight = engine.getState()!.units.find((u) => u.side === 'enemy')!;
+      const anyEngine = engine as unknown as { activeUnitId: number | null; stepAi: () => void };
+      anyEngine.activeUnitId = knight.id;
+      anyEngine.stepAi();
+      // Drain any reaction the knight's move queued (an un-forced AI turn still needs someone to answer it —
+      // mirrors a human accepting the Brace prompt) so the encounter doesn't sit stuck mid-reaction.
+      let guard = 0;
+      while (engine.getState()?.pendingReaction && guard++ < 10) {
+        const pr = engine.getState()!.pendingReaction!;
+        engine.submit({ type: 'reaction', unit: pr.unit, accept: true });
+      }
+      const log = engine.serialize()!.log as { kind: string; unit?: number; data?: Record<string, unknown> }[];
+      const attackIdx = log.findIndex((l) => l.kind === 'attack' && l.unit === knight.id);
+      const reactionIdxs = log.map((l, i) => ({ l, i })).filter(({ l }) => l.kind === 'reaction' && l.data?.target === knight.id).map(({ i }) => i);
+      if (attackIdx !== -1 && reactionIdxs.length > 0) {
+        expect(Math.min(...reactionIdxs)).toBeLessThan(attackIdx);
+      }
+      // Either way, the invariant that actually matters: no reaction targeting the knight is EVER logged
+      // strictly after his own attack.
+      for (const ri of reactionIdxs) expect(attackIdx === -1 || ri < attackIdx).toBe(true);
+    }
   });
 });

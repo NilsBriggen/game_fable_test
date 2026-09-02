@@ -9,6 +9,7 @@ import type { CombatEngineImpl } from './engine';
 import type { Unit } from './types';
 import { hasStatus, isPolearm } from './types';
 import { cellDistance } from './rules/grid';
+import { moraleDc } from './rules/morale';
 
 function dist(a: Unit, b: Unit): number { return cellDistance(a.q, a.r, b.q, b.r); }
 
@@ -51,7 +52,22 @@ function furthestFrom(engine: CombatEngineImpl, u: Unit, enemies: Unit[]): CellK
   return best;
 }
 
+/** round-2 issue (c)/3: a bonus-action Shove costs nothing the main attack needs, so try it opportunistically
+ *  on any adjacent enemy the shove would actually drop into water or off a ledge — the AI never used Shove
+ *  at all before this (round-1 issue 15's admitted gap), which is also why Drowning never happened in play. */
+function tryShoveIntoHazard(engine: CombatEngineImpl, u: Unit, enemies: Unit[]): boolean {
+  if (!u.ap.bonus) return false;
+  const adjacent = enemies.filter((e) => dist(u, e) <= 1 && engine.shoveDestinationHazard(u, e));
+  if (adjacent.length === 0) return false;
+  return engine.aiAbility(u, 'ability.shove', adjacent[0].id);
+}
+
 function tryAttack(engine: CombatEngineImpl, u: Unit, target: Unit): boolean {
+  // round-2 issue 6: if this unit's own move just triggered a reaction (Brace/OA/Cover Fire) that got queued
+  // rather than auto-resolved (a `isPlayerControlled` defender outside a `forceAiAll` bulk command), the
+  // reaction must resolve — and be logged — before this attack does. Bail rather than let the attack log
+  // first; `advance()`'s reaction-queue drain will pick the mover's turn back up once it's clear.
+  if (engine.hasPendingReaction()) return false;
   // Union of melee and ranged reach, mirroring engine.ts's `abilityRangeCells('ability.attack')` — a unit
   // carrying both a sidearm and a loaded ranged weapon (every crossbowman) can reach with either.
   const meleeReach = u.weapon?.reach ?? (u.ranged ? 0 : 1);
@@ -93,6 +109,11 @@ function findChargeApproach(engine: CombatEngineImpl, u: Unit, target: Unit): Ce
 
 function knightAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
   if (u.morale < 20) {
+    // round-2 issue (a)(c): a forced DC-14 check every round below 20 morale — real odds of steady/shaken/
+    // Routed, not the old "run to the furthest cell forever, never actually Rout" special case that left a
+    // broken knight alive and fleeing for 100+ rounds, blocking the `rout` objective from ever completing.
+    engine.forceMoraleCheck(u, 14, 'shattered');
+    if (u.routed) return; // doRoutedTurn takes over from here on
     const away = furthestFrom(engine, u, enemies);
     if (away) engine.aiMove(u, away);
     return;
@@ -110,6 +131,9 @@ function knightAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng
     const approach = findChargeApproach(engine, u, target);
     if (approach) {
       engine.aiMove(u, approach);
+      // round-2 issue 6: the run-up itself can trigger a Brace — if it queued rather than auto-resolved, it
+      // must land (and log) before this charge does, so don't even attempt the charge this turn.
+      if (engine.hasPendingReaction()) return;
       // `u.chargeCells` reflects the straight-line length the path actually achieved (may fall short of the
       // plan if terrain forced a detour) — only charge if the run-up genuinely landed.
       if (u.chargeCells >= 3 && dist(u, target) <= reach && u.ap.action) { engine.aiAbility(u, 'ability.charge', target.id); return; }
@@ -121,6 +145,7 @@ function knightAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng
 }
 
 function footmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
+  tryShoveIntoHazard(engine, u, enemies); // bonus action — doesn't cost the attack below
   const target = [...enemies].sort((a, b) => (a.hp / a.hpMax) - (b.hp / b.hpMax) || dist(u, a) - dist(u, b))[0];
   if (!target) return;
   if (tryAttack(engine, u, target)) return;
@@ -143,6 +168,17 @@ function footmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rn
 
 function crossbowmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
   if (!u.ranged) { footmanAct(engine, u, enemies, _rng); return; }
+  // round-2 issue (a): an empty quiver — refused reload, no bolt to fire — means "close with the dagger",
+  // not "keep kiting uphill forever." This was the actual mechanism behind the 85-142-round attrition grind
+  // (a single unlimited-ammo crossbowman perched up the slope): with ammo finite, this is where it ends.
+  if (u.ammoQty <= 0) {
+    const allies = engine.unitList().filter((o) => o.id !== u.id && o.side === u.side && !o.dead && !o.down);
+    const isolated = allies.every((a) => dist(a, u) > 4);
+    if (isolated) engine.forceMoraleCheck(u, moraleDc(2), 'isolated'); // ally-down-class DC (12)
+    if (u.routed || u.dead || u.down) return;
+    footmanAct(engine, u, enemies, _rng);
+    return;
+  }
   if (!u.loaded) { engine.aiAbility(u, 'ability.reload'); return; }
   const nearest = [...enemies].sort((a, b) => dist(u, a) - dist(u, b))[0];
   if (!nearest) return;
@@ -181,6 +217,7 @@ function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
     const cavalryNear = enemies.some((e) => e.mounted && cellDistance(u.q, u.r, e.q, e.r) * cellM <= 2 * u.speedMBase);
     if (cavalryNear) engine.aiAbility(u, 'ability.brace');
   }
+  tryShoveIntoHazard(engine, u, enemies); // no-ops if the bonus action already went on Brace above
   const target = [...enemies].sort((a, b) => dist(u, a) - dist(u, b))[0];
   if (!target) return;
   if (isPolearm(u.weapon)) {
@@ -189,8 +226,12 @@ function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
     // "Hold, rockfall, Haufen" doctrine: a Gewalthaufen wins by staying a block and making the column come to
     // it, not by chasing individual enemies into the open where it loses the formation bonus and gets picked
     // off piecemeal by mounted knights. Only sally out for a target already fairly close; otherwise hold the
-    // line (bracing if a threat is on the way) and let the next attacker walk onto the halberds.
-    const holdRange = 5;
+    // line (bracing if a threat is on the way) and let the next attacker walk onto the halberds. Round-2
+    // issue (d): once no mounted enemy is left standing (dead, down, or routed), the cavalry threat that
+    // justified holding is gone — advance as a block instead of sitting there while a lone crossbowman up
+    // the slope plinks the Haufen to death outside its own reach forever.
+    const anyMountedThreat = enemies.some((e) => e.mounted && !e.routed);
+    const holdRange = anyMountedThreat ? 5 : Infinity;
     if (dist(u, target) > holdRange) {
       if (u.stance !== 'braced' && u.ap.bonus) engine.aiAbility(u, 'ability.brace');
       return;

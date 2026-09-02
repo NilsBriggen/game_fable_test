@@ -62,7 +62,7 @@ export async function register(ctx: GameContext): Promise<void> {
     },
   });
 
-  const service: CombatService = {
+  const serviceBase: CombatService = {
     start: async (encounterId, opts) => {
       const result = await engine.start(encounterId, opts);
       return result;
@@ -81,6 +81,12 @@ export async function register(ctx: GameContext): Promise<void> {
     stepAi: () => engine.stepAi(),
     runScript: (cmds) => engine.runScript(cmds),
   };
+  // round-2 issue 5: `resume` is deliberately NOT part of the `CombatService` interface (core-owned, out of
+  // scope here) — it's an extra property on the concrete service object, reached via a cast where needed
+  // (e.g. the save module's load path: `restore(s)` resolves once state is applied; a caller that wants the
+  // eventual win/lose/fled outcome of a restored mid-combat save then calls `resume()` separately — never
+  // `start()` again).
+  const service = Object.assign(serviceBase, { resume: () => engine.resume() });
 
   engine.on('state', () => frameCamera());
   ctx.services.register('combat', service);
