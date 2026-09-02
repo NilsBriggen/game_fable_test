@@ -12,7 +12,7 @@
       ]
     },
     "2": {
-      "status": "pending",
+      "status": "in-progress",
       "modules": [
         "exploration",
         "combat"
@@ -75,10 +75,11 @@
     },
     "combat": {
       "owner": "builder:combat",
-      "status": "pending",
+      "status": "built",
       "score": null,
       "fixRounds": 0,
-      "openIssues": []
+      "openIssues": [],
+      "notes": "55 tests; harness morgarten 369 calls/1.87M tris, quay 121 calls; gaps: directional cover, deploy phase auto, riposte/wall-of-iron/disarm/cover-fire not consumed; awaiting critic"
     },
     "quest": {
       "owner": "builder:quest",
