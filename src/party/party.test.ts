@@ -7,7 +7,7 @@ import { register as registerPerks } from '@content/perks';
 import { register as registerItems } from '@content/items';
 import { register as registerArchetypes } from '@content/archetypes';
 import { PartyServiceImpl, type PartyHost } from './index';
-import { applySkillXp, xpToNext, hpMax, carryCapacityKg } from './rules';
+import { applySkillXp, xpToNext, hpMax, carryCapacityKg, characterLevel, attributePointsEarned } from './rules';
 import type { PlayerCreation } from '@core/services';
 import type { Canton } from '@core/schemas';
 
@@ -219,6 +219,49 @@ describe('PartyServiceImpl', () => {
     expect(svc.getParty()).toContain(id);
     expect(svc.isMember(id)).toBe(true);
     expect(world.has(id, Skills)).toBe(true);
+  });
+
+  it('spendAttributePoint consumes a point on Character.unspentAttributePoints, bumps the attribute and rescales hpMax; refuses at zero points or the attribute cap', () => {
+    const id = svc.createCharacter(content.archetypes.get('peasant')!);
+    const ch = world.require(id, Character);
+    ch.unspentAttributePoints = 3;
+    const enduranceBefore = ch.attributes.endurance;
+    const hpMaxBefore = ch.hpMax;
+
+    // the attribute *modifier* (rules.modifier) only steps every 2 points, so spend twice to
+    // guarantee crossing a modifier boundary regardless of the archetype's starting parity —
+    // this exercises hpMax's ratio-preserving rescale (rules.hpMax depends on endurance).
+    expect(svc.spendAttributePoint(id, 'endurance')).toBe(true);
+    expect(svc.spendAttributePoint(id, 'endurance')).toBe(true);
+    expect(ch.attributes.endurance).toBe(enduranceBefore + 2);
+    expect(ch.unspentAttributePoints).toBe(1);
+    expect(ch.hpMax).toBeGreaterThan(hpMaxBefore);
+    // started fully healed, so a ratio-preserving rescale keeps the bar full
+    expect(ch.hp).toBe(ch.hpMax);
+
+    ch.attributes.wits = 20;
+    expect(svc.spendAttributePoint(id, 'wits')).toBe(false); // capped at 20 — refused, point kept
+    expect(ch.unspentAttributePoints).toBe(1);
+
+    expect(svc.spendAttributePoint(id, 'agility')).toBe(true);
+    expect(ch.unspentAttributePoints).toBe(0);
+    expect(svc.spendAttributePoint(id, 'agility')).toBe(false); // no points left
+  });
+
+  it('character creation and skill level-ups grant Character.unspentAttributePoints (+1 every 3 character levels)', () => {
+    const id = svc.createCharacter(content.archetypes.get('peasant')!);
+    const ch = world.require(id, Character);
+    // every skill defaults to level 10 (19 skills) -> a real starting character level, not always 0
+    expect(ch.level).toBe(characterLevel(19 * 10));
+    expect(ch.unspentAttributePoints).toBe(attributePointsEarned(ch.level));
+
+    const before = ch.unspentAttributePoints;
+    let needed = 0;
+    for (let l = 10; l < 90; l++) needed += xpToNext(l);
+    svc.grantSkillXp(id, 'unarmed', needed);
+    expect(ch.level).toBeGreaterThan(4);
+    expect(ch.unspentAttributePoints).toBeGreaterThan(before);
+    expect(ch.unspentAttributePoints).toBe(attributePointsEarned(ch.level));
   });
 });
 

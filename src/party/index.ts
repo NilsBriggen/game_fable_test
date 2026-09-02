@@ -88,9 +88,6 @@ export class PartyServiceImpl implements PartyService {
   private readonly clock?: PartyHost['clock'];
   private readonly bus = new EventBus<PartyEvents>();
   private readonly derivedCache = new Map<EntityId, DerivedStats>();
-  /** Unspent attribute points (+1 every 3 character levels). No core field exists yet — see requests/party-1.md.
-   *  Rebuilt from Character.level whenever it changes, and on the global 'loaded' event after a save load. */
-  private readonly unspentPoints = new Map<EntityId, number>();
   private instanceSeq = 1;
   private formationFallback: PartyStateC['formation'] = 'line';
 
@@ -99,10 +96,7 @@ export class PartyServiceImpl implements PartyService {
     this.content = host.content;
     this.clock = host.clock;
     host.events?.on('loaded', () => {
-      for (const id of this.getParty()) {
-        this.rebuildUnspent(id);
-        this.invalidate(id);
-      }
+      for (const id of this.getParty()) this.invalidate(id);
     });
   }
 
@@ -130,7 +124,6 @@ export class PartyServiceImpl implements PartyService {
     this.world.add(id, PartyState, { formation: this.formationFallback });
     this.recomputeCharacterLevel(id, true);
     this.recomputeVitals(id);
-    this.rebuildUnspent(id);
     return id;
   }
 
@@ -138,12 +131,9 @@ export class PartyServiceImpl implements PartyService {
     const id = this.world.create(def.id);
     this.world.add(id, Name, { id: def.id, display: def.name });
     this.initSkills(id, def.skills);
-    const skillsC = this.world.require(id, Skills);
-    const sum = Object.values(skillsC.levels).reduce((a, s) => a + s.level, 0);
-    const level = Math.max(1, characterLevel(sum));
     this.world.add(id, Character, {
       attributes: { ...def.attributes }, hp: 1, hpMax: 1, morale: 1, moraleMax: 1, fatigue: 0,
-      archetype: def.archetype, born: def.born, level, down: false,
+      archetype: def.archetype, born: def.born, level: 1, down: false,
     });
     this.world.add(id, Perks, { ids: [] });
     this.world.add(id, Equipment, {});
@@ -158,8 +148,8 @@ export class PartyServiceImpl implements PartyService {
     this.world.add(id, Transform, { x: 0, y: 0, z: 0, yaw: 0 });
     this.world.add(id, Renderable, { modelId: def.modelId ?? `char.${def.archetype}`, visible: true });
     this.world.add(id, Npc, { defId: def.id, home: def.home, schedule: def.schedule ?? [], frozen: true, generic: def.role === 'generic' });
+    this.recomputeCharacterLevel(id, true);
     this.recomputeVitals(id);
-    this.rebuildUnspent(id);
     return id;
   }
 
@@ -249,6 +239,25 @@ export class PartyServiceImpl implements PartyService {
     return ch ? modifier(ch.attributes[attr]) : 0;
   }
 
+  spendAttributePoint(id: EntityId, attr: keyof Attributes): boolean {
+    const ch = this.world.get(id, Character);
+    if (!ch) return false;
+    if (ch.unspentAttributePoints <= 0) return false;
+    if (ch.attributes[attr] >= 20) return false;
+    ch.unspentAttributePoints -= 1;
+    ch.attributes[attr] = Math.min(20, ch.attributes[attr] + 1);
+    const skillsC = this.world.get(id, Skills);
+    const leadership = skillsC?.levels['leadership']?.level ?? 0;
+    const newHpMax = hpMax(ch.attributes.endurance, ch.level);
+    const newMoraleMax = moraleMax(ch.attributes.presence, leadership);
+    ch.hp = rescaleHp(ch.hp, ch.hpMax || newHpMax, newHpMax);
+    ch.morale = rescaleHp(ch.morale, ch.moraleMax || newMoraleMax, newMoraleMax);
+    ch.hpMax = newHpMax;
+    ch.moraleMax = newMoraleMax;
+    this.invalidate(id);
+    return true;
+  }
+
   grantSkillXp(id: EntityId, skill: SkillId, amount: number): { leveled: boolean; newLevel?: number } {
     const skillsC = this.world.get(id, Skills) ?? this.world.add(id, Skills, {});
     const prog = skillsC.levels[skill] ?? { level: 0, xp: 0 };
@@ -297,15 +306,12 @@ export class PartyServiceImpl implements PartyService {
     const newMoraleMax = moraleMax(ch.attributes.presence, leadership);
     ch.hp = rescaleHp(ch.hp, ch.hpMax || newHpMax, newHpMax);
     ch.morale = rescaleHp(ch.morale, ch.moraleMax || newMoraleMax, newMoraleMax);
+    // +1 attribute point every 3 character levels (ARCHITECTURE §5.5), stored on Character.unspentAttributePoints.
+    const pointsGained = attributePointsEarned(newLevel) - attributePointsEarned(ch.level);
+    if (pointsGained > 0) ch.unspentAttributePoints += pointsGained;
     ch.hpMax = newHpMax;
     ch.moraleMax = newMoraleMax;
     ch.level = newLevel;
-    this.rebuildUnspent(id);
-  }
-
-  private rebuildUnspent(id: EntityId): void {
-    const ch = this.world.get(id, Character);
-    this.unspentPoints.set(id, ch ? attributePointsEarned(ch.level) : 0);
   }
 
   hasPerk(id: EntityId, perk: string): boolean {
