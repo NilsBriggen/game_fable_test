@@ -142,7 +142,9 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   const bestDist = new Float32Array(n).fill(Infinity);
   const bestValleyH = new Float32Array(n);
   const bestWeight = new Float32Array(n);
-  const MAX_GRADE_TAN = Math.tan((22 * Math.PI) / 180);
+  // Authored a little under the 25° test/design ceiling (not right at it) so the small amount of
+  // detail noise + relaxation applied afterward doesn't push a couple of samples back over the line.
+  const MAX_GRADE_TAN = Math.tan((18 * Math.PI) / 180);
   for (const c of geo.corridors) {
     const limitedH = limitGrade(c.pts, MAX_GRADE_TAN);
     for (let pi = 1; pi < c.pts.length; pi++) {
@@ -173,7 +175,13 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
           // surface band (road bed / river mud strip), stamped from the same segment pass so it is
           // continuous too — this is what gets 'road' onto ≥95% of centreline samples instead of the
           // old 100-300m-apart sample discs.
-          const half = Math.max(a.corridorWidthM, b.corridorWidthM) * 0.65;
+          // Classification stamp is deliberately wider than the height-shaping half-width above: the
+          // grid texel (~7.8m) is comparable to a road's physical width (halfWidth 6m), so a stamp
+          // sized to the exact physical width aliases badly against the lattice and undercounts
+          // 'road' on the nearest-grid-cell sampling exploration/the harness/this test all use. A
+          // ~9-10m stamped half-width for roads reliably covers at least the one grid cell the
+          // centreline actually falls in, without materially changing how the corridor looks.
+          const half = Math.max(a.corridorWidthM, b.corridorWidthM) * 1.6;
           if (d <= half) {
             if (c.surface === 'road') roadMask[idx] = 1;
             else if (c.surface === 'mud') mudMask[idx] = 1;
@@ -192,6 +200,13 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // *bilinearly* sampled (the same sampling heightAt()/the renderer actually use), because a corridor
   // half-width of only ~6m is barely one grid texel (~7.8m) wide, so off-centre grid nodes just past
   // the flat band would otherwise pick up nearly the full peak target.
+  // peakProtect: how strongly each cell is "on a summit", 0..1 — used below to shield the actual
+  // summit point from the slope-limited relaxation pass. A summit is, by construction, a local
+  // maximum surrounded by lower ground on every side; thermal-erosion-style relaxation (which pulls
+  // every cell toward its 4-neighbour average) rounds off exactly that apex first and hardest,
+  // otherwise silently eating 30-140m off heightAt(summit) despite the peak stage having targeted the
+  // gazetteer height exactly.
+  const peakProtect = new Float32Array(n);
   for (const p of geo.peaks) {
     const baseAtSummit = baseRidge(p.x, p.z, seed, centroids);
     const rx = (p.radius * 1.6) / scaleX;
@@ -205,15 +220,29 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       const row = gz * width;
       for (let gx = gx0; gx <= gx1; gx++) {
         const x = toX(gx);
-        const shape = peakShape(Math.hypot(x - p.x, z - p.z), p);
+        const dist = Math.hypot(x - p.x, z - p.z);
+        const shape = peakShape(dist, p);
         if (shape <= 0) continue;
         const idx = row + gx;
         const baseHere = baseRidge(x, z, seed, centroids);
         let target = baseHere + (p.h - baseAtSummit) * shape;
         const shoreD = shoreDampNear(x, z, geo, centroids);
-        const roadD = smoothstep(20, 150, bestDist[idx]); // 0 right at a corridor, full strength by 150m out
-        target = baseHere + (target - baseHere) * shoreD * roadD;
+        const roadD = smoothstep(20, 110, bestDist[idx]); // 0 right at a corridor, full strength by 110m out
+        // Damping (shore/road proximity) must fade OUT near the true summit (shape->1), not apply at
+        // uniform strength regardless of how close to the apex we are: a peak can sit geographically
+        // close, in map (x,z), to a road or lake shore while still being 300-500m higher in elevation
+        // at its actual summit — that summit must reach the gazetteer height exactly regardless of
+        // what's nearby in the flat projection. Only the peak's outer skirt (shape->0, already close
+        // to base-ridge height) is what actually needs shore/road damping.
+        const damp = shoreD * roadD + (1 - shoreD * roadD) * shape;
+        target = baseHere + (target - baseHere) * damp;
         if (target > heights[idx]) heights[idx] = target;
+        // Protect only right at the true summit (inside ~2 texels), not the whole broad shoulder —
+        // the flanks legitimately need relaxation to read as a mountainside, not a smooth dome.
+        if (dist < scaleX * 2.5) {
+          const p2 = smoothstep(0.7, 1.0, shape);
+          if (p2 > peakProtect[idx]) peakProtect[idx] = p2;
+        }
       }
     }
   }
@@ -221,7 +250,16 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // 4. corridors, PASS 2: apply the blend computed in pass 1, now that peaks are folded in — exactly
   // on a corridor's centreline (weight=1 within halfWidth) this unconditionally overwrites whatever a
   // peak put there, guaranteeing the pass points and the road/river bed keep their authored height.
-  for (let i = 0; i < n; i++) heights[i] = heights[i] + (bestValleyH[i] - heights[i]) * bestWeight[i];
+  // EXCEPT a true peak summit (peakProtect, computed above): a wide river's halfWidth/influence
+  // (up to 220/750m — much larger than a road's) can otherwise reach a summit that merely sits
+  // close in map (x,z) terms without being anywhere near that river in reality, silently overriding
+  // a correctly-targeted heightAt(summit) with the river's much lower floor height. Scaling the
+  // corridor weight down right at a summit (not anywhere else on its slopes) keeps rivers carving
+  // real valleys everywhere else while never drowning an actual mountaintop.
+  for (let i = 0; i < n; i++) {
+    const w = bestWeight[i] * (1 - peakProtect[i]);
+    heights[i] = heights[i] + (bestValleyH[i] - heights[i]) * w;
+  }
 
   // 4. detail noise, amplitude scaled by local pre-noise slope; the "jag" ridged term is now small
   // (≤3m) and gated on steep (rock/scree-classifying) ground only, not blended everywhere a raw
@@ -241,12 +279,21 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
     }
   }
 
+  // A dedicated, WIDER relaxation-protection mask: bestWeight itself (used for the corridor blend)
+  // decays back to 0 by each corridor's own `influence` radius, which for a road (~90m) is still only
+  // a handful of grid texels — a partially-protected cell there (say 15% unprotected) still drifts
+  // measurably toward a much steeper/taller neighbour over 12 compounding relaxation passes. This
+  // second mask ramps out over a fixed, more generous 220m regardless of the corridor's own influence,
+  // so the authored road/river height near (not just exactly on) a corridor survives relaxation intact.
+  const relaxProtect = new Float32Array(n);
+  for (let i = 0; i < n; i++) relaxProtect[i] = Math.max(bestWeight[i], 1 - smoothstep(0, 220, bestDist[i]), peakProtect[i]);
+
   // 5. slope-limited relaxation (thermal-erosion-like diffusion), so cliffs/valley walls read as
   // terrain rather than raw noise. Run generously (12 passes) before the shore pass so the walls the
   // shore blend has to match against are already talus-relaxed, then a shorter top-up pass afterward
   // to smooth the new shore transition into its neighbours.
   const RELAX_TAN = Math.tan((38 * Math.PI) / 180);
-  thermalSmooth(heights, width, height, scaleX, scaleZ, 12, RELAX_TAN);
+  thermalSmooth(heights, width, height, scaleX, scaleZ, 12, RELAX_TAN, relaxProtect);
 
   // 6. lake-shore blend pass (issue 1): treats each lake polygon boundary as a corridor whose floor
   // is the water level, blending the OUTSIDE terrain down to lake height near the shore and back up
@@ -273,21 +320,36 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       for (let gx = gx0; gx <= gx1; gx++) {
         const x = toX(gx);
         const d = polygonSdf(x, z, lake.poly); // negative inside
-        if (d <= 0 || d > D) continue;
+        // NOTE: deliberately no `d <= 0` exclusion here (only the `d > D` outer bound) — a boundary
+        // point (d≈0) needs this pass too, or it falls into a gap between this pass (used to require
+        // d>0 strictly) and the lake-interior drop below (which requires d<-0.01 strictly), leaving
+        // whatever raw pre-shore terrain height was there right at the waterline. Any cell with d<0
+        // this pass touches gets overwritten again by the interior drop (step 7, runs after), so
+        // covering a bit of the interior here too is harmless.
+        if (d > D) continue;
         // real Axen cliff: the Urnersee's east shore rises faster, but still continuously — restricted
         // to the actual Axen stretch (roughly Sisikon/Tellsplatte, z<1000) so the flat Flüelen/Reuss
         // delta at the lake's south end (z>1000, same x>cx side) doesn't also get force-steepened.
         const steep = lake.id === 'urnersee' && x > cx && z < 1000;
         const target = shoreProfile(d, lake.levelGameH, D, steep);
         const idx = row + gx;
-        const w = smoothstep(0, D, d); // 0 at the shoreline (full target), 1 at D (fully back to existing terrain)
+        let w = smoothstep(0, D, d); // 0 at the shoreline (full target), 1 at D (fully back to existing terrain)
+        // A shore-hugging road/river (the Axen path, the lake-shore stretches of several ROADS chains)
+        // must not get pulled down to the generic shore profile — its own corridor floor (bestWeight,
+        // computed above) already IS the correct, authored height right at the water's edge.
+        // Also protect a true peak summit that merely happens to sit within D of some lake in map
+        // (x,z) terms (e.g. Fronalpstock, a few hundred game-metres from the Urnersee) — it must not
+        // get partially pulled toward lake level just because it is geographically "close" to the
+        // shore while being several hundred metres higher in elevation.
+        w = Math.max(w, bestWeight[idx], peakProtect[idx]);
         heights[idx] = target + (heights[idx] - target) * w;
       }
     }
   }
 
-  // 5b. short relaxation top-up so the new shore transition blends into its neighbours too.
-  thermalSmooth(heights, width, height, scaleX, scaleZ, 6, RELAX_TAN);
+  // 5b. short relaxation top-up so the new shore transition blends into its neighbours too (still
+  // corridor-protected — a road hugging a shore, e.g. the Axen path, must not get eroded here either).
+  thermalSmooth(heights, width, height, scaleX, scaleZ, 6, RELAX_TAN, relaxProtect);
 
   // 7. lake interior: drop to a real bed below the surface (not a flat plate at lake height).
   for (const lake of geo.lakes) {
@@ -302,8 +364,13 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       const row = gz * width;
       for (let gx = gx0; gx <= gx1; gx++) {
         const x = toX(gx);
+        const idx = row + gx;
+        // A shore-hugging road's `pointInPolygon` test can technically read "inside" right at the
+        // boundary (the path runs along the polygon edge, e.g. the Axen path at Sisikon/Tellsplatte) —
+        // never drown a road cell into the lake bed.
+        if (roadMask[idx]) continue;
         const h = lakeShelf(x, z, lake);
-        if (h !== null) heights[row + gx] = h;
+        if (h !== null) heights[idx] = h;
       }
     }
   }
@@ -367,7 +434,9 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       const row = gz * width;
       for (let gx = gx0; gx <= gx1; gx++) {
         const x = toX(gx);
-        if (pointInPolygon(x, z, lake.poly)) surface[row + gx] = surfaceIdOf('water');
+        const idx = row + gx;
+        if (roadMask[idx]) continue; // shore road stays road even if the boundary test reads "inside" (Axen path)
+        if (pointInPolygon(x, z, lake.poly)) surface[idx] = surfaceIdOf('water');
       }
     }
   }
@@ -417,7 +486,8 @@ function thermalSmooth(heights: Float32Array, width: number, height: number, sca
         const grad = Math.max(Math.abs(hR - hL), Math.abs(hD - hU)) / (2 * avgScale);
         // 0 below the limit angle (leave it alone), ramping to a strong relax well above it.
         const over = clamp((grad - maxTan) / maxTan, 0, 1.5);
-        const amt = clamp(over, 0, 1) * 0.6;
+        let amt = clamp(over, 0, 1) * 0.6;
+        if (protect) amt *= 1 - protect[idx];
         tmp[idx] = heights[idx] + (avg - heights[idx]) * amt;
       }
     }

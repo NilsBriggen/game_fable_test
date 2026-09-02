@@ -95,15 +95,27 @@ function buildSpline(via: string[], samplesPerSeg: number, paramsFor: (aId: stri
     const p2 = places[i + 1];
     const p3 = places[Math.min(places.length - 1, i + 2)];
     const seg = paramsFor(ids[i], ids[i + 1]);
+    // Buffer this real segment's samples first (x, z, s) so height can be interpolated by ARC-LENGTH
+    // fraction, not raw t. Catmull-Rom curves don't move at constant speed in t (they slow down near
+    // control points) — linear-in-t height with an arc-length-based grade check produced a false
+    // steep spike right at a segment's tail (t=0.9->1.0 covering only ~35m of actual arc despite being
+    // 10% of t), which then had the *pass point itself* wrongly clamped by the max-grade filter below.
+    const segStartS = s;
+    const seg_x: number[] = [], seg_z: number[] = [], seg_s: number[] = [];
     for (let j = 0; j <= samplesPerSeg; j++) {
       if (i > 0 && j === 0) continue; // avoid duplicate join point
       const t = j / samplesPerSeg;
       const [x, z] = centripetalCatmullRom([p0.x, p0.z], [p1.x, p1.z], [p2.x, p2.z], [p3.x, p3.z], t);
-      const h = p1.h + (p2.h - p1.h) * t; // linear height along the segment (monotone, no overshoot)
       s += Math.hypot(x - prevX, z - prevZ);
-      pts.push({ x, z, h, s, ...seg });
-      prevX = x;
-      prevZ = z;
+      seg_x.push(x); seg_z.push(z); seg_s.push(s);
+      prevX = x; prevZ = z;
+    }
+    const segEndS = s;
+    const segLenS = Math.max(1e-3, segEndS - segStartS);
+    for (let k = 0; k < seg_x.length; k++) {
+      const frac = (seg_s[k] - segStartS) / segLenS;
+      const h = p1.h + (p2.h - p1.h) * frac;
+      pts.push({ x: seg_x[k], z: seg_z[k], h, s: seg_s[k], ...seg });
     }
   }
   return pts;
@@ -131,7 +143,13 @@ const STEEP_V: SegParams = { shape: 'steepV', halfWidth: 10, influence: 200, ris
 // wide flat floor for any query point that happens to sit a little closer to a road sample point than
 // to the river's, producing a fake ~90m hillside a stone's throw from a genuinely flat valley (a real
 // bug here — the free-altdorf camera ended up standing on one, seeing pure black self-shadowed rock).
-const ROAD_NORMAL: SegParams = { shape: 'wideU', halfWidth: 6, influence: 45, riseRate: 35, corridorWidthM: 6 };
+// halfWidth widened from a literal 6m mule-track tread to 14m (the cut/flattened bed, not the tread
+// itself): at the grid's ~7.8m texel size, a flat band much narrower than ~2 texels cannot reliably
+// survive *bilinear* sampling (heightAt() everywhere, including the renderer) once the surrounding
+// ground is steep — individual lattice nodes a texel or so off the true centreline fall outside a
+// too-narrow band and pick up significant neighbouring-terrain height, reappearing as bumps/cliffs
+// exactly on the "flat" road despite the analytic corridor shaping being centreline-correct.
+const ROAD_NORMAL: SegParams = { shape: 'wideU', halfWidth: 14, influence: 90, riseRate: 35, corridorWidthM: 6 };
 
 function riverSegParams(riverId: string, aId: string, bId: string): SegParams {
   const gorges = GORGE_SEGMENTS[riverId];

@@ -124,8 +124,10 @@ const REGION_SEEDS: RegionSeed[] = [
     id: 'alps-high', name: 'High Uri Alps', owner: 'none', note: 'LORE.md §3: impassable high country, visual backdrop only (Urirotstock, Glärnisch direction).',
     places: ['urirotstock', 'bristen'],
     // Hand-authored backdrop polygon (member points are far apart and mostly landmarks, not a hull-worthy cluster):
-    // the high ground north/east of the Schächental and Gotthard roads.
-    poly: [[-1400, 4200], [1200, 3600], [6200, 4200], [6800, 10500], [-1200, 10500], [-2200, 7200]],
+    // the high ground north/east of the Schächental and Gotthard roads. Extra vertex added at
+    // (-1900, 1600) so the polygon actually contains Urirotstock (-1689, 2100) — the original shape
+    // left the region's own member landmark outside its own polygon.
+    poly: [[-2400, 1900], [-1900, 1600], [1200, 3600], [6200, 4200], [6800, 10500], [-1200, 10500], [-2200, 7200]],
   },
 ];
 

@@ -251,9 +251,12 @@ export class TerrainManager {
     // peaks now clamped to the gazetteer target height and cameras genuinely above ground, terrain
     // receives its own shadows again.
     mesh.receiveShadow = true;
-    // CSM's cascades only cover ~0-600m (ARCHITECTURE.md §5.1); LOD3 chunks start at 900m so they can
-    // never appear in a shadow pass — skipping castShadow there is a big win under software rendering.
-    mesh.castShadow = msg.lod <= 2;
+    // Terrain does NOT cast shadows (onto itself/vegetation/props): with up to ~100+ chunks in view
+    // and CSM's 3 cascades each requiring an extra shadow-map draw per cast-shadow object, this alone
+    // was responsible for a 25x draw-call blowup (105 -> 2660, budget ≤1200) in testing — terrain
+    // self-shadowing is a much smaller visual win than staying inside the draw-call budget. Terrain
+    // still *receives* shadows (from vegetation/props) via receiveShadow above.
+    mesh.castShadow = false;
     mesh.name = `terrain-chunk-${msg.cx}-${msg.cz}`;
     e.mesh = mesh;
     this.group.add(mesh);

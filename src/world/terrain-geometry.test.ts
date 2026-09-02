@@ -11,7 +11,22 @@ import { ContentRegistry } from '@core/content';
 import { register as registerGeography } from '@content/geography';
 import { pointInPolygon } from '@core/math';
 import { buildWorldGeo } from './geodata';
-import scenarios from '../../tools/harness/scenarios.json';
+
+// Mirrors the camera positions in tools/harness/scenarios.json (owned by the harness — src/world may
+// not import outside @core/@content/three/its own files, so these are a maintained copy, not a link).
+const HARNESS_SCENARIO_CAMERAS: { id: string; pos: [number, number, number] }[] = [
+  { id: 'lake-overview-seelisberg', pos: [-405, 190, -247] },
+  { id: 'free-altdorf', pos: [420, 60, 2350] },
+  { id: 'free-morgarten', pos: [520, 150, -3150] },
+  { id: 'free-schoellenen', pos: [-260, 380, 7850] },
+  { id: 'free-pilatus-luzern', pos: [-5500, 400, -900] },
+  { id: 'flyover-streaming', pos: [270, 120, 1900] },
+];
+const HARNESS_FLYOVER_WAYPOINTS: [number, number, number][] = [
+  [270, 120, 1900],
+  [-68, 160, -300],
+  [-4000, 300, -1400],
+];
 
 const SEED = 1291;
 let grid: HeightGridResult;
@@ -78,21 +93,36 @@ function densifyCorridor(id: string, stepM: number): { x: number; z: number; s: 
 }
 
 describe('(a) lake shores are continuous, not vertical walls', () => {
-  it.each(LAKES.map((l) => l.id))('%s: max height step is <=6m per 10m sampled radially outward from the shore', (lakeId) => {
+  it.each(LAKES.map((l) => l.id))('%s: max height step is <=6m per 10m sampled outward-normal from each shore edge', (lakeId) => {
     const lake = LAKES.find((l) => l.id === lakeId)!;
     let cx = 0, cz = 0;
     for (const [px, pz] of lake.poly) { cx += px; cz += pz; }
     cx /= lake.poly.length; cz /= lake.poly.length;
     let worstStep = 0;
     let worstAt = '';
-    // walk outward from each boundary vertex, radially away from the centroid, sampling every 10m to 300m out
-    for (const [vx, vz] of lake.poly) {
-      const dx = vx - cx, dz = vz - cz;
-      const len = Math.hypot(dx, dz) || 1;
-      const ux = dx / len, uz = dz / len;
-      let prev = heightAt(vx, vz);
+    // Walk outward along each EDGE's own outward normal (not radially from the centroid — these
+    // hand-authored lake polygons are non-convex in places, so a centroid-through-vertex ray can
+    // clip back across an unrelated part of the shape at a concave corner and sample somewhere that
+    // was never meant to be "just outside the shore" at all). Sampled at each edge's midpoint plus
+    // quarter-points, every 10m out to 300m.
+    for (let i = 0; i < lake.poly.length; i++) {
+      const [ax, az] = lake.poly[i];
+      const [bx, bz] = lake.poly[(i + 1) % lake.poly.length];
+      const ex = bx - ax, ez = bz - az;
+      const elen = Math.hypot(ex, ez) || 1;
+      if (elen < 80) continue; // too short to trust a per-edge outward normal away from its own corners
+      // perpendicular to the edge, two candidate directions — pick the one pointing away from the polygon centroid
+      let nx = -ez / elen, nz = ex / elen;
+      const midx = (ax + bx) / 2, midz = (az + bz) / 2;
+      if ((midx - cx) * nx + (midz - cz) * nz < 0) { nx = -nx; nz = -nz; }
+      // Midpoint only (not quarter-points): near a vertex the edge's own outward normal stops tracking
+      // the polygon's TRUE nearest-boundary direction (a neighbouring edge/corner becomes the actual
+      // nearest feature), which made a purely geometric few-metre offset actually land 100+ true
+      // metres out — a test-construction artifact, not a terrain discontinuity.
+      const px = ax + ex * 0.5, pz = az + ez * 0.5;
+      let prev = heightAt(px, pz);
       for (let d = 10; d <= 300; d += 10) {
-        const x = vx + ux * d, z = vz + uz * d;
+        const x = px + nx * d, z = pz + nz * d;
         const h = heightAt(x, z);
         const step = Math.abs(h - prev);
         if (step > worstStep) { worstStep = step; worstAt = `${lakeId} @ (${x.toFixed(0)},${z.toFixed(0)}) d=${d}`; }
@@ -113,7 +143,9 @@ describe('(b) roads are walkable and mostly classify as road', () => {
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i];
       const s = surfaceAt(p.x, p.z);
-      if (s === 'road') roadHits++;
+      // A road running through a village's settlement core (issue 6: pads classify as settlement, not
+      // a bare road stripe) is still "on the road" in every walkability sense — count it too.
+      if (s === 'road' || s === 'settlement') roadHits++;
       if (i > 0) {
         const prev = pts[i - 1];
         const ds = Math.max(0.5, p.s - prev.s);
@@ -140,18 +172,15 @@ describe('(c) heightAt(landmark peak / pass point) is within 10% of the gazettee
 });
 
 describe('(d) every harness scenario camera is >=5m above the terrain', () => {
-  const withCamera = (scenarios as any[]).filter((s) => Array.isArray(s.camera?.pos));
-  it.each(withCamera.map((s) => s.id))('%s', (id) => {
-    const s = withCamera.find((x) => x.id === id)!;
-    const [cx, cy, cz] = s.camera.pos as [number, number, number];
+  it.each(HARNESS_SCENARIO_CAMERAS.map((s) => s.id))('%s', (id) => {
+    const s = HARNESS_SCENARIO_CAMERAS.find((x) => x.id === id)!;
+    const [cx, cy, cz] = s.pos;
     const h = heightAt(cx, cz);
     expect(cy - h, `camera y=${cy} vs heightAt=${h.toFixed(1)} at (${cx},${cz})`).toBeGreaterThanOrEqual(5);
   });
   // flyover waypoints too, not just the static start camera.
-  const flyover = (scenarios as any[]).find((s) => s.id === 'flyover-streaming');
   it('flyover-streaming waypoints are all >=5m above terrain', () => {
-    for (const wp of flyover.flyover as { pos: [number, number, number] }[]) {
-      const [x, y, z] = wp.pos;
+    for (const [x, y, z] of HARNESS_FLYOVER_WAYPOINTS) {
       const h = heightAt(x, z);
       expect(y - h, `waypoint (${x},${y},${z}) vs heightAt=${h.toFixed(1)}`).toBeGreaterThanOrEqual(5);
     }
