@@ -63,14 +63,8 @@
       "status": "passed",
       "score": 8,
       "fixRounds": 1,
-      "openIssues": [
-        "sling lacks weapon.ammo (herder starts unloaded)",
-        "bumpSkillLevel emits before level recompute",
-        "crossbow 75/100 perks hollow in Act 1",
-        "addItem unknown def creates phantom",
-        "era-gate warn should not be console.warn"
-      ],
-      "notes": "49 unit tests; critic 5\u21928; first perk \u224878 hits; chapter ids prologue-1291/ch1-1307/ch2-1314 must be adopted by quest builder"
+      "openIssues": [],
+      "notes": "50 unit tests; critic 5\u21928; polish applied; chapter ids prologue-1291/ch1-1307/ch2-1314 must be adopted by quest builder"
     },
     "exploration": {
       "owner": "builder:exploration",
