@@ -45,10 +45,21 @@
     },
     "world": {
       "owner": "builder:world",
-      "status": "critic-round-1",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
+      "status": "fix-round",
+      "score": 3,
+      "fixRounds": 1,
+      "openIssues": [
+        "lake shores vertical walls (trench)",
+        "roads/rivers stamped as sparse discs; passes 85\u00b0; road 0% of map",
+        "peaks additive \u2192 cameras underground, black frames",
+        "valley walls sheer, sawtooth jag, no triplanar",
+        "no vegetation beyond 900 m",
+        "settlement pads bare islands",
+        "region polygons overlap",
+        "tests use 256\u00b2 grid",
+        "events not emitted",
+        "no streaming-hitch evidence"
+      ],
       "notes": "builder stopped by integrator after 4h without report (ignored converge request); tree green (3559 lines, 24 tests); critic running on tree state; fresh builder will take fix rounds"
     },
     "save": {

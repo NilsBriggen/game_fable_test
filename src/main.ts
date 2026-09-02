@@ -217,11 +217,16 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
     if (!ui) notes.push('no ui module');
     else ui.openMenu(sc.menu as any);
   }
-  if (sc.flyover && ex) {
-    const rig = ex.getCameraRig();
-    rig.setMode('free');
+  if (sc.flyover) {
+    const rig = ex?.getCameraRig();
+    rig?.setMode('free');
+    const setCam = (pos: [number, number, number], la: [number, number, number]) => {
+      if (rig) rig.setFree(pos, la);
+      else { ctx.gfx.camera.position.set(...pos); ctx.gfx.camera.lookAt(...la); }
+    };
     const path = sc.flyover;
     const start = hitches;
+    const t0 = performance.now();
     for (let i = 1; i < path.length; i++) {
       const a = path[i - 1], b = path[i];
       const steps = 90;
@@ -229,11 +234,12 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
         const t = s / steps;
         const pos = a.pos.map((v, k) => v + (b.pos[k] - v) * t) as [number, number, number];
         const la = a.lookAt.map((v, k) => v + (b.lookAt[k] - v) * t) as [number, number, number];
-        rig.setFree(pos, la);
+        setCam(pos, la);
         await nextFrame();
       }
     }
     (window as any).__flyoverHitches = hitches - start;
+    (window as any).__flyoverMs = performance.now() - t0;
   }
   return { ok: true, skipped: notes.length ? notes.join('; ') : undefined };
 }
