@@ -7,6 +7,11 @@ import type { Material } from 'three';
 import type { CSM } from 'three/examples/jsm/csm/CSM.js';
 
 let activeCsm: CSM | null = null;
+/** Camera position published by sky.ts each frame; vegetation.ts reads it for near-camera grass. */
+const viewPos = { x: 0, y: 0, z: 0 };
+
+export function setViewPosition(x: number, y: number, z: number): void { viewPos.x = x; viewPos.y = y; viewPos.z = z; }
+export function getViewPosition(): { x: number; y: number; z: number } { return viewPos; }
 
 export function setActiveCsm(csm: CSM | null): void {
   activeCsm = csm;

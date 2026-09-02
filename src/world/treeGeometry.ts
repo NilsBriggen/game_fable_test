@@ -1,109 +1,180 @@
 /**
- * Procedural tree geometry: merged single-BufferGeometry-with-vertex-colors per species, so both the
- * model library (spawnModel) and vegetation.ts's InstancedMesh placement share one cheap draw target.
+ * Procedural trees: bark-textured trunk + branch whorls of alpha-tested needle/leaf cards, all UV'd
+ * into one shared atlas so every species and every LOD draws with a single material.
+ * LOD 0 full, LOD 1 reduced, LOD 2 a cross-quad billboard from the impostor atlas.
  */
-import {
-  BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DoubleSide, Float32BufferAttribute,
-  IcosahedronGeometry, Mesh, MeshStandardMaterial,
-} from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, Mesh, MeshStandardMaterial, Vector3 } from 'three';
 import type { Rng } from '@core/rng';
+import { treeAtlasTexture, treeCellUv, treeImpostorAtlas, impostorCellUv, grassTuftTexture, type TreeCell } from './textures';
+import { applyAerialFog } from './terrainMaterial';
+import { registerCsmMaterial } from './shadowCsm';
 
-export type TreeKind = 'spruce' | 'fir' | 'larch' | 'beech';
+export type TreeKind = 'spruce' | 'fir' | 'larch' | 'beech' | 'pine';
 
-/** Normalise to non-indexed (IcosahedronGeometry has no index; Cylinder/Cone do — mergeGeometries
- * requires every part to agree), then bake a flat vertex color. */
-function colored(geo: any, color: Color): any {
-  const g = geo.index ? geo.toNonIndexed() : geo;
-  const n = g.attributes.position.count;
-  const arr = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { arr[i * 3] = color.r; arr[i * 3 + 1] = color.g; arr[i * 3 + 2] = color.b; }
-  g.setAttribute('color', new (g.attributes.position.constructor)(arr, 3));
-  return g;
+interface Species {
+  height: [number, number];
+  crown: number;      // crown radius / height
+  whorls: number;
+  cardsPerWhorl: number;
+  droop: number;      // radians the cards tilt down from horizontal
+  foliage: TreeCell;
+  bark: TreeCell;
+  crownStart: number; // fraction of height where foliage begins
+  taper: number;
 }
 
-const TRUNK = new Color(0x4a3323);
-const TRUNK_LIGHT = new Color(0x6b4a2c);
+const SPECIES: Record<TreeKind, Species> = {
+  spruce: { height: [11, 16], crown: 0.21, whorls: 9, cardsPerWhorl: 7, droop: 0.42, foliage: 'spruce', bark: 'bark', crownStart: 0.14, taper: 1.35 },
+  fir:    { height: [10, 14], crown: 0.23, whorls: 8, cardsPerWhorl: 7, droop: 0.18, foliage: 'fir', bark: 'bark', crownStart: 0.2, taper: 1.1 },
+  larch:  { height: [9, 13],  crown: 0.17, whorls: 8, cardsPerWhorl: 5, droop: 0.3, foliage: 'larch', bark: 'barkPale', crownStart: 0.24, taper: 1.2 },
+  beech:  { height: [10, 15], crown: 0.34, whorls: 4, cardsPerWhorl: 9, droop: 0.05, foliage: 'beech', bark: 'barkPale', crownStart: 0.45, taper: 0.6 },
+  pine:   { height: [3, 5],   crown: 0.55, whorls: 4, cardsPerWhorl: 7, droop: 0.55, foliage: 'pine', bark: 'bark', crownStart: 0.1, taper: 0.9 },
+};
 
-function conifer(kind: 'spruce' | 'fir', rng: Rng): any {
-  const tiers = kind === 'spruce' ? 5 : 4;
-  const baseR = kind === 'spruce' ? 1.7 : 1.5;
-  const totalH = kind === 'spruce' ? 11 + rng.next() * 3 : 9 + rng.next() * 2.5;
-  const trunkH = totalH * 0.16;
-  const foliageColor = kind === 'spruce' ? new Color(0x203a24) : new Color(0x2c4a34);
-  const parts: any[] = [];
-  const trunk = new CylinderGeometry(0.18, 0.28, trunkH, 6);
-  trunk.translate(0, trunkH / 2, 0);
-  parts.push(colored(trunk, TRUNK));
-  let y = trunkH * 0.55;
-  const remaining = totalH - y;
-  for (let i = 0; i < tiers; i++) {
-    const t = i / (tiers - 1);
-    const h = (remaining / tiers) * 1.55;
-    const r = baseR * (1 - t * 0.72);
-    const cone = new ConeGeometry(r, h, kind === 'spruce' ? 7 : 6, 1);
-    cone.translate(0, y + h / 2, 0);
-    const c = foliageColor.clone().offsetHSL(0, 0, (rng.next() - 0.5) * 0.03);
-    parts.push(colored(cone, c));
-    y += (remaining / tiers) * 0.62;
+class MeshBuilder {
+  pos: number[] = []; nrm: number[] = []; uv: number[] = []; idx: number[] = [];
+  quad(o: Vector3, right: Vector3, up: Vector3, n: Vector3, uvRect: [number, number, number, number]): void {
+    const b = this.pos.length / 3;
+    const [u0, v0, du, dv] = uvRect;
+    const corners = [
+      [-1, 0, u0, v0], [1, 0, u0 + du, v0], [1, 1, u0 + du, v0 + dv], [-1, 1, u0, v0 + dv],
+    ];
+    for (const [rx, uy, uu, vv] of corners) {
+      this.pos.push(o.x + right.x * rx + up.x * uy, o.y + right.y * rx + up.y * uy, o.z + right.z * rx + up.z * uy);
+      this.nrm.push(n.x, n.y, n.z);
+      this.uv.push(uu, vv);
+    }
+    this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
   }
-  return mergeGeometries(parts, false);
-}
-
-function larch(rng: Rng): any {
-  const totalH = 8 + rng.next() * 2.5;
-  const trunkH = totalH * 0.22;
-  const parts: any[] = [];
-  const trunk = new CylinderGeometry(0.16, 0.24, trunkH, 6);
-  trunk.translate(0, trunkH / 2, 0);
-  parts.push(colored(trunk, TRUNK_LIGHT));
-  const tiers = 4;
-  let y = trunkH * 0.7;
-  const remaining = totalH - y;
-  const color = new Color(0x5c7a3a);
-  for (let i = 0; i < tiers; i++) {
-    const t = i / (tiers - 1);
-    const h = (remaining / tiers) * 1.4;
-    const r = 1.25 * (1 - t * 0.6);
-    const cone = new ConeGeometry(r, h, 6, 1, true);
-    cone.translate(0, y + h / 2, 0);
-    parts.push(colored(cone, color.clone().offsetHSL(0, 0, (rng.next() - 0.5) * 0.05)));
-    y += (remaining / tiers) * 0.75;
+  /** Tapered trunk; UV wraps the bark cell once around and twice up. */
+  trunk(h: number, r0: number, r1: number, sides: number, uvRect: [number, number, number, number], lean: number): void {
+    const [u0, v0, du, dv] = uvRect;
+    const rings = 3;
+    const base = this.pos.length / 3;
+    for (let ring = 0; ring <= rings; ring++) {
+      const t = ring / rings;
+      const y = h * t;
+      const r = r0 + (r1 - r0) * Math.pow(t, 0.7);
+      const off = lean * t * t * h * 0.06;
+      for (let s = 0; s <= sides; s++) {
+        const a = (s / sides) * Math.PI * 2;
+        this.pos.push(Math.cos(a) * r + off, y, Math.sin(a) * r);
+        this.nrm.push(Math.cos(a), 0.15, Math.sin(a));
+        this.uv.push(u0 + (s / sides) * du, v0 + t * dv);
+      }
+    }
+    const stride = sides + 1;
+    for (let ring = 0; ring < rings; ring++) {
+      for (let s = 0; s < sides; s++) {
+        const a = base + ring * stride + s, b = a + 1, c = a + stride, d = c + 1;
+        this.idx.push(a, c, b, b, c, d);
+      }
+    }
   }
-  return mergeGeometries(parts, false);
-}
-
-function beech(rng: Rng): any {
-  const totalH = 9 + rng.next() * 4;
-  const trunkH = totalH * 0.48;
-  const parts: any[] = [];
-  const trunk = new CylinderGeometry(0.22, 0.34, trunkH, 6);
-  trunk.translate(0, trunkH / 2, 0);
-  parts.push(colored(trunk, TRUNK_LIGHT));
-  const canopyR = totalH * 0.32;
-  const blobs = 3;
-  const green = new Color(0x4c6a34);
-  for (let i = 0; i < blobs; i++) {
-    const ico = new IcosahedronGeometry(canopyR * (0.75 + rng.next() * 0.35), 1);
-    const ox = (rng.next() - 0.5) * canopyR * 0.7;
-    const oz = (rng.next() - 0.5) * canopyR * 0.7;
-    const oy = trunkH + canopyR * (0.55 + i * 0.28);
-    ico.translate(ox, oy, oz);
-    parts.push(colored(ico, green.clone().offsetHSL(0, 0, (rng.next() - 0.5) * 0.06)));
+  geometry(): BufferGeometry {
+    const g = new BufferGeometry();
+    g.setAttribute('position', new Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('normal', new Float32BufferAttribute(this.nrm, 3));
+    g.setAttribute('uv', new Float32BufferAttribute(this.uv, 2));
+    g.setIndex(this.idx);
+    g.computeBoundingSphere();
+    return g;
   }
-  return mergeGeometries(parts, false);
 }
 
-const geoCache = new Map<string, any>();
-export function buildTreeGeometry(kind: TreeKind, rng: Rng): any {
-  const key = `${kind}:${Math.floor(rng.next() * 6)}`; // a handful of variants per species, reused across instances
+function buildTree(kind: TreeKind, rng: Rng, lod: 0 | 1): BufferGeometry {
+  const sp = SPECIES[kind];
+  const H = sp.height[0] + rng.next() * (sp.height[1] - sp.height[0]);
+  const mb = new MeshBuilder();
+  const barkUv = treeCellUv(sp.bark);
+  const folUv = treeCellUv(sp.foliage);
+  const sides = lod === 0 ? 7 : 5;
+  const lean = (rng.next() - 0.5) * 2;
+  mb.trunk(H * (kind === 'beech' ? 0.62 : 0.99), 0.055 * H * 0.4 + 0.12, 0.03, sides, barkUv, lean);
+
+  const whorls = lod === 0 ? sp.whorls : Math.max(3, Math.round(sp.whorls * 0.55));
+  const perWhorl = lod === 0 ? sp.cardsPerWhorl : Math.max(4, Math.round(sp.cardsPerWhorl * 0.6));
+  const Rmax = H * sp.crown;
+  const centre = new Vector3();
+  const right = new Vector3(), up = new Vector3(), nrm = new Vector3();
+
+  if (kind === 'beech') {
+    // dome of leaf cards on a squashed sphere shell
+    const cy = H * 0.78, R = H * sp.crown;
+    const count = whorls * perWhorl;
+    for (let i = 0; i < count; i++) {
+      const a = rng.next() * Math.PI * 2;
+      const v = Math.acos(1 - 1.35 * rng.next());
+      const rr = R * (0.72 + rng.next() * 0.32);
+      const dx = Math.sin(v) * Math.cos(a), dy = Math.cos(v) * 0.78, dz = Math.sin(v) * Math.sin(a);
+      centre.set(dx * rr, cy + dy * rr - R * 0.15, dz * rr);
+      nrm.set(dx, dy + 0.35, dz).normalize();
+      const s = R * (0.34 + rng.next() * 0.24);
+      const roll = rng.next() * Math.PI;
+      right.set(Math.cos(roll), 0, Math.sin(roll)).multiplyScalar(s);
+      up.copy(nrm).cross(right).normalize().multiplyScalar(s * 1.5);
+      mb.quad(centre, right, up, nrm, folUv);
+    }
+    // three lifting branches so the crown is not a floating ball
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + rng.next();
+      const dir = new Vector3(Math.cos(a), 1.55, Math.sin(a)).normalize();
+      const len = H * 0.3;
+      centre.set(dir.x * len * 0.5, H * 0.62 + dir.y * len * 0.5, dir.z * len * 0.5);
+      right.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(0.075 * H * 0.4);
+      up.copy(dir).multiplyScalar(len * 0.5);
+      nrm.set(Math.cos(a), 0.2, Math.sin(a)).normalize();
+      mb.quad(centre, right, up, nrm, barkUv);
+    }
+  } else {
+    for (let w = 0; w < whorls; w++) {
+      const t = sp.crownStart + (1 - sp.crownStart) * (w / whorls);
+      const y = H * t;
+      const shrink = Math.pow(1 - (t - sp.crownStart) / (1 - sp.crownStart), sp.taper);
+      const R = Rmax * (0.25 + 0.75 * shrink);
+      const jitter = rng.next() * Math.PI * 2;
+      const n = Math.max(3, Math.round(perWhorl * (0.6 + 0.4 * shrink)));
+      for (let c = 0; c < n; c++) {
+        const a = jitter + (c / n) * Math.PI * 2 + (rng.next() - 0.5) * 0.4;
+        const len = R * (0.85 + rng.next() * 0.35);
+        const dy = -Math.sin(sp.droop) * len;
+        const dx = Math.cos(a) * len, dz = Math.sin(a) * len;
+        centre.set(dx * 0.55, y + dy * 0.55, dz * 0.55);
+        // card lies along the branch; "up" runs outward+down, "right" is horizontal across it
+        up.set(dx, dy, dz).multiplyScalar(0.55);
+        right.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(len * 0.5);
+        nrm.set(Math.cos(a) * 0.45, 0.9, Math.sin(a) * 0.45).normalize();
+        mb.quad(centre, right, up, nrm, folUv);
+        if (lod === 0 && rng.next() < 0.55) {
+          // second card rolled about the branch axis so the whorl has volume, not a flat disc
+          centre.set(dx * 0.5, y + dy * 0.5 + len * 0.12, dz * 0.5);
+          right.set(-Math.sin(a), 0.85, Math.cos(a)).normalize().multiplyScalar(len * 0.42);
+          mb.quad(centre, right, up, nrm, folUv);
+        }
+      }
+    }
+    // leader: two crossed cards at the apex
+    const tipH = H * 0.16;
+    for (const roll of [0, Math.PI / 2]) {
+      centre.set(0, H - tipH * 0.5, 0);
+      right.set(Math.cos(roll), 0, Math.sin(roll)).multiplyScalar(Rmax * 0.3);
+      up.set(0, tipH * 0.5, 0);
+      nrm.set(Math.cos(roll + Math.PI / 2), 0.3, Math.sin(roll + Math.PI / 2)).normalize();
+      mb.quad(centre, right, up, nrm, folUv);
+    }
+  }
+  return mb.geometry();
+}
+
+const geoCache = new Map<string, BufferGeometry>();
+
+/** `lod` 0 = full, 1 = reduced. A handful of variants per species are reused across all instances. */
+export function buildTreeGeometry(kind: TreeKind, rng: Rng, lod: 0 | 1 = 0): BufferGeometry {
+  const variant = Math.floor(rng.next() * 5);
+  const key = `${kind}:${lod}:${variant}`;
   const hit = geoCache.get(key);
   if (hit) return hit;
-  let g: any;
-  if (kind === 'spruce') g = conifer('spruce', rng);
-  else if (kind === 'fir') g = conifer('fir', rng);
-  else if (kind === 'larch') g = larch(rng);
-  else g = beech(rng);
+  const g = buildTree(kind, rng, lod);
   geoCache.set(key, g);
   return g;
 }
@@ -111,84 +182,86 @@ export function buildTreeGeometry(kind: TreeKind, rng: Rng): any {
 let sharedMaterial: MeshStandardMaterial | null = null;
 export function treeMaterial(): MeshStandardMaterial {
   if (sharedMaterial) return sharedMaterial;
-  sharedMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, alphaTest: 0.5 });
+  sharedMaterial = new MeshStandardMaterial({
+    map: treeAtlasTexture(), alphaTest: 0.45, side: DoubleSide, roughness: 0.92, metalness: 0,
+  });
+  sharedMaterial.fog = false;
+  sharedMaterial.onBeforeCompile = (shader) => applyAerialFog(shader as any);
+  registerCsmMaterial(sharedMaterial);
   return sharedMaterial;
 }
 
-/** Billboard texture (2 crossed quads' worth of alpha-tested canopy) for far-LOD impostors. A real
- * layered spruce silhouette at 256px (not a single flat 64px triangle) so LOD3 mountainsides read as
- * forest instead of a smear of identical green wedges (critic issue 5). */
-let impostorTex: CanvasTexture | null = null;
-export function treeImpostorTexture(): CanvasTexture {
-  if (impostorTex) return impostorTex;
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.clearRect(0, 0, size, size);
-  const cx = size / 2;
-  // trunk
-  ctx.fillStyle = '#3a2a1c';
-  ctx.fillRect(cx - 4, size * 0.86, 8, size * 0.13);
-  // 5 tapering, slightly irregular tiers (a spruce's silhouette is layered, not one solid triangle)
-  const tiers = [
-    { yTop: 0.03, yBot: 0.28, halfW: 0.16 },
-    { yTop: 0.2, yBot: 0.42, halfW: 0.22 },
-    { yTop: 0.36, yBot: 0.58, halfW: 0.28 },
-    { yTop: 0.52, yBot: 0.72, halfW: 0.34 },
-    { yTop: 0.66, yBot: 0.87, halfW: 0.4 },
-  ];
-  for (let i = 0; i < tiers.length; i++) {
-    const t = tiers[i];
-    const shade = 0.55 + (i / (tiers.length - 1)) * 0.25; // darker near the top, lighter toward the base
-    ctx.fillStyle = `rgb(${Math.round(20 * shade)}, ${Math.round(58 * shade)}, ${Math.round(30 * shade)})`;
-    ctx.beginPath();
-    ctx.moveTo(cx, size * t.yTop);
-    ctx.lineTo(cx - size * t.halfW, size * t.yBot);
-    ctx.lineTo(cx - size * t.halfW * 0.35, size * (t.yBot - (t.yBot - t.yTop) * 0.22));
-    ctx.lineTo(cx, size * (t.yTop + (t.yBot - t.yTop) * 0.08));
-    ctx.lineTo(cx + size * t.halfW * 0.35, size * (t.yBot - (t.yBot - t.yTop) * 0.22));
-    ctx.lineTo(cx + size * t.halfW, size * t.yBot);
-    ctx.closePath();
-    ctx.fill();
-  }
-  const tex = new CanvasTexture(canvas);
-  impostorTex = tex;
-  return tex;
+let impostorMat: MeshStandardMaterial | null = null;
+function impostorMaterial(): MeshStandardMaterial {
+  if (impostorMat) return impostorMat;
+  impostorMat = new MeshStandardMaterial({
+    map: treeImpostorAtlas(), alphaTest: 0.4, side: DoubleSide, roughness: 1, metalness: 0,
+  });
+  impostorMat.fog = false;
+  impostorMat.onBeforeCompile = (shader) => applyAerialFog(shader as any);
+  registerCsmMaterial(impostorMat);
+  return impostorMat;
 }
 
-/** Static cross-quad impostor (two perpendicular alpha-tested planes) — reads reasonably from any
- * horizontal angle without needing per-instance camera-facing shader math. Used beyond the full-mesh LOD. */
-let impostorGeo: BufferGeometry | null = null;
-let impostorMat: MeshStandardMaterial | null = null;
-export function treeImpostor(): { geometry: BufferGeometry; material: MeshStandardMaterial } {
-  if (impostorGeo && impostorMat) return { geometry: impostorGeo, material: impostorMat };
-  const w = 4.2, h = 9.5;
-  const quad = (nx: number, nz: number): number[] => [
-    -w / 2 * nz, 0, -w / 2 * nx, w / 2 * nz, 0, w / 2 * nx, w / 2 * nz, h, w / 2 * nx,
-    -w / 2 * nz, 0, -w / 2 * nx, w / 2 * nz, h, w / 2 * nx, -w / 2 * nz, h, -w / 2 * nx,
-  ];
-  const pos = new Float32Array([...quad(1, 0), ...quad(0, 1)]);
-  const uv = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
-  const geo = new BufferGeometry();
-  geo.setAttribute('position', new Float32BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new Float32BufferAttribute(uv, 2));
-  geo.computeVertexNormals();
-  const mat = new MeshStandardMaterial({ map: treeImpostorTexture(), alphaTest: 0.4, side: DoubleSide, roughness: 1 });
-  impostorGeo = geo; impostorMat = mat;
-  return { geometry: geo, material: mat };
+const impostorGeos = new Map<string, BufferGeometry>();
+
+/** Cross-quad billboard for distant trees: reads from any horizontal angle without per-instance math. */
+export function treeImpostor(kind: TreeKind): { geometry: BufferGeometry; material: MeshStandardMaterial } {
+  const cell = kind === 'pine' ? 'fir' : kind;
+  const hit = impostorGeos.get(cell);
+  if (hit) return { geometry: hit, material: impostorMaterial() };
+  const h = kind === 'pine' ? 4.5 : 13;
+  const w = h * 0.42;
+  const uvRect = impostorCellUv(cell);
+  const mb = new MeshBuilder();
+  for (const roll of [0, Math.PI / 2]) {
+    mb.quad(
+      new Vector3(0, h / 2, 0),
+      new Vector3(Math.cos(roll) * w / 2, 0, Math.sin(roll) * w / 2),
+      new Vector3(0, h / 2, 0),
+      new Vector3(Math.cos(roll + Math.PI / 2), 0.35, Math.sin(roll + Math.PI / 2)).normalize(),
+      uvRect,
+    );
+  }
+  const g = mb.geometry();
+  impostorGeos.set(cell, g);
+  return { geometry: g, material: impostorMaterial() };
+}
+
+let grassGeo: BufferGeometry | null = null;
+let grassMat: MeshStandardMaterial | null = null;
+
+/** Three crossed alpha-tested blades; instanced within 80 m of the camera on grass/meadow. */
+export function grassTuft(): { geometry: BufferGeometry; material: MeshStandardMaterial } {
+  if (grassGeo && grassMat) return { geometry: grassGeo, material: grassMat };
+  const mb = new MeshBuilder();
+  const h = 0.55, w = 0.62;
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI;
+    mb.quad(
+      new Vector3(0, h / 2, 0),
+      new Vector3(Math.cos(a) * w / 2, 0, Math.sin(a) * w / 2),
+      new Vector3(0, h / 2, 0),
+      new Vector3(0, 1, 0),
+      [0, 0, 1, 1],
+    );
+  }
+  grassGeo = mb.geometry();
+  grassMat = new MeshStandardMaterial({ map: grassTuftTexture(), alphaTest: 0.35, side: DoubleSide, roughness: 1 });
+  grassMat.fog = false;
+  grassMat.onBeforeCompile = (shader) => applyAerialFog(shader as any);
+  return { geometry: grassGeo, material: grassMat };
 }
 
 export function disposeTreeGeometry(): void {
-  impostorGeo?.dispose();
-  impostorMat?.dispose();
-  impostorGeo = null; impostorMat = null;
   for (const g of geoCache.values()) g.dispose();
   geoCache.clear();
-  sharedMaterial?.dispose();
-  sharedMaterial = null;
-  impostorTex?.dispose();
-  impostorTex = null;
+  for (const g of impostorGeos.values()) g.dispose();
+  impostorGeos.clear();
+  sharedMaterial?.dispose(); sharedMaterial = null;
+  impostorMat?.dispose(); impostorMat = null;
+  grassGeo?.dispose(); grassGeo = null;
+  grassMat?.dispose(); grassMat = null;
 }
 
 export type { Mesh };

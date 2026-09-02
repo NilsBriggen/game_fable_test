@@ -85,15 +85,21 @@ function emptyMask(): DataTexture {
 }
 
 /** Bake the mask from a surface-id sampler (vegetation.ts calls this once the CPU grid exists). */
-export function buildSplatMask(surfaceIdAt: (gx: number, gz: number) => number, gridW: number, gridH: number): void {
+export function buildSplatMask(surfaceIdAt: (x: number, z: number) => number, gridW: number, gridH: number): void {
   if (maskBuilt) return;
   maskBuilt = true;
   const n = gridW * gridH;
   const a = new Uint8Array(new ArrayBuffer(n * 4));
   const b = new Uint8Array(new ArrayBuffer(n * 4));
-  for (let i = 0; i < n; i++) {
-    const slot = SURFACE_TO_MASK[surfaceIdAt(i % gridW, (i / gridW) | 0)] ?? SURFACE_TO_MASK[0];
-    (slot[0] === 0 ? a : b)[i * 4 + slot[1]] = 255;
+  const sx = (MAP_BOUNDS.maxX - MAP_BOUNDS.minX) / (gridW - 1);
+  const sz = (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) / (gridH - 1);
+  for (let gz = 0; gz < gridH; gz++) {
+    const wz = MAP_BOUNDS.minZ + gz * sz;
+    for (let gx = 0; gx < gridW; gx++) {
+      const i = gz * gridW + gx;
+      const slot = SURFACE_TO_MASK[surfaceIdAt(MAP_BOUNDS.minX + gx * sx, wz)] ?? SURFACE_TO_MASK[0];
+      (slot[0] === 0 ? a : b)[i * 4 + slot[1]] = 255;
+    }
   }
   const mk = (data: Uint8Array<ArrayBuffer>): DataTexture => {
     const t = new DataTexture(data, gridW, gridH, RGBAFormat, UnsignedByteType);
