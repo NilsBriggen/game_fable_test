@@ -444,14 +444,20 @@ export class CombatEngineImpl implements CombatService {
     const budget = u.speedMBase * 2; // "flees toward own edge at Dash speed"
     if (!this.grid) return;
     const dist = dijkstra(u.q, u.r, budget, u.side, { cols: this.grid.cols, rows: this.grid.rows, cellM: this.grid.cellM, cells: this.cells }, this.occupants(u.id), u.mounted);
-    const targetR = u.side === 'player' ? this.grid.rows - 1 : 0;
+    // Round-3 minor fix: a routed unit used to head for a fixed row (its "own" edge — r=0 for enemy, rows-1
+    // for player) regardless of what's actually there. At Brunnen that row IS the lake, so routed units waded
+    // straight into the water they should have been fleeing from. Now it's the nearest reachable non-water
+    // cell to ANY map edge — genuinely "away from the fight," never "into the lake."
+    const { cols, rows } = this.grid;
+    const edgeDist = (q: number, r: number) => Math.min(r, rows - 1 - r, q, cols - 1 - q);
     let best: CellKey | null = null;
     let bestScore = -Infinity;
     for (const [key, v] of dist) {
       if (v.cost === 0) continue;
       const [q, r] = key.split(',').map(Number);
       if (this.occupantAt(q, r, u.id)) continue;
-      const score = -Math.abs(r - targetR);
+      if (this.cellAt(q, r)?.surface === 'water') continue;
+      const score = -edgeDist(q, r);
       if (score > bestScore) { bestScore = score; best = { q, r }; }
     }
     if (best) { u.q = best.q; u.r = best.r; this.pushLog('move', `${u.name} flees.`, u.id, { cell: best }); }
@@ -768,6 +774,11 @@ export class CombatEngineImpl implements CombatService {
     if (u.leadershipLevel >= 10) out.push('ability.rally');
     if (isPolearm(u.weapon)) out.push('ability.brace');
     if (u.mounted && u.weapon) out.push('ability.charge');
+    // Round-3 critic issue 1: a unit standing on a ready cache never had `ability.roll-boulders` in its own
+    // offered list — the engine accepted the command when the AI (or a debug script) fired it directly, but
+    // the Wave-3 HUD binds to `abilitiesFor`'s list, so a real player could never see or use it.
+    const standingCell = this.cellAt(u.q, u.r);
+    if (standingCell?.feature === 'boulder-cache' || standingCell?.feature === 'trunk-cache') out.push('ability.roll-boulders');
     for (const abilityId of GRANTED_ABILITY_IDS) {
       // ability.riposte is an automatic substitute for an opportunity attack (see resolveOpportunityAttack),
       // never something a unit selects on its own turn — keep it out of the offered list.
@@ -1058,7 +1069,10 @@ export class CombatEngineImpl implements CombatService {
    *  front unit of a Haufen pulls the Brace reaction from every adjacent facing polearm unit in it. */
   private computeBraceTriggers(mover: Unit, path: CellKey[]): Unit[] {
     if (path.length < 2) return [];
-    if (!(mover.chargeCells >= 2 || mover.mounted)) return [];
+    // Round-3 critic issue 3: the trigger required only a 2-cell straight run while Charge itself needs 3 —
+    // any footman who walked two cells into a Haufen's reach drew a free Edge attack, over-generous to the
+    // defender and inconsistent with the Charge rule this reaction is supposed to answer.
+    if (!(mover.chargeCells >= 3 || mover.mounted)) return [];
     const startCell = path[0];
     const candidates = [...this.units.values()].filter((d) => d.side !== mover.side && !d.dead && !d.down && isPolearm(d.weapon) && (d.stance === 'braced' || d.formation.inHaufen) && d.ap.reaction);
     const primaries = candidates.filter((d) => {
@@ -1069,7 +1083,10 @@ export class CombatEngineImpl implements CombatService {
     });
     const extras = new Set<Unit>();
     for (const d of primaries) {
-      if (d.formation.inHaufen) {
+      // ARCHITECTURE §5.3: "a cavalry Charge into a front unit pulls the Brace reaction from every adjacent
+      // facing polearm unit" — infantry stepping into reach only ever draws its own primary defender(s), not
+      // the whole face of the Haufen.
+      if (d.formation.inHaufen && mover.mounted) {
         for (const o of candidates) {
           if (o.id === d.id || o.formation.haufenId !== d.formation.haufenId) continue;
           const reach = o.weapon?.reach ?? 1;
@@ -1494,38 +1511,55 @@ export class CombatEngineImpl implements CombatService {
     };
     const roll = rollAttack(inputs, this.host.rng);
     if (roll.fumble) addStatus(attacker, 'fumbled', 1); // issue 8: Burden on the next attack
-    // round-2 issue 4b: Shield Block — a shield-bearing defender with a reaction still available blocks part
-    // of a hit automatically ("AI accepts automatically" per the critic; there's no rational reason to ever
-    // decline pure damage reduction, so this doesn't need the full interactive reaction queue the movement-
-    // triggered reactions use — it resolves inline, same as every other roll-time modifier).
-    if (roll.hit && roll.damage > 0 && target.shield && target.ap.reaction) {
-      const blocked = rollDice('1d6', this.host.rng);
-      const before = roll.damage;
-      roll.damage = Math.max(0, roll.damage - blocked);
-      target.ap.reaction = false;
-      this.pushLog('reaction', `${target.name} blocks with the shield, reducing the blow by ${before - roll.damage}.`, target.id, { target: attacker.id });
-    }
-    this.pushLog('attack', `${attacker.name} attacks ${target.name}: ${roll.hit ? (roll.critical ? 'critical hit' : 'hit') : 'miss'}.`, attacker.id, { target: target.id, roll });
-    if (roll.hit) {
-      this.applyDamage(target, roll.damage, weapon.damageType, roll.soak);
-      if (roll.damage > 0) this.pushLog('damage', `${target.name} takes ${roll.damage} ${weapon.damageType} damage.`, target.id, { amount: roll.damage, target: target.id });
-      // issue 16: the ability's own effects[] beyond the base weapon hit — a 'damage' entry here is read as
-      // BONUS damage on top of the weapon hit (Charge's lance impact), never a replacement for it.
-      for (const effect of ability.effects) {
-        if ('damage' in effect) {
-          const bonusAttr = effect.damage.bonus === 'strength' ? modifier(attacker.attributes.strength) : effect.damage.bonus === 'agility' ? modifier(attacker.attributes.agility) : 0;
-          const extra = rollDice(effect.damage.dice, this.host.rng) + bonusAttr;
-          this.applyDamage(target, extra, effect.damage.type, 0);
-          if (extra > 0) this.pushLog('damage', `${target.name} takes ${extra} additional ${effect.damage.type} damage.`, target.id, { amount: extra, target: target.id });
-        } else {
-          this.applyEffect(attacker, target, effect);
+
+    // The rest of attack resolution (log, damage, effects, charge follow-up) is deferred behind Shield Block
+    // below when the defender is a human waiting to be asked — everything from here on reads `roll.damage`,
+    // which the block reaction may still lower first.
+    const finishAttack = (): void => {
+      this.pushLog('attack', `${attacker.name} attacks ${target.name}: ${roll.hit ? (roll.critical ? 'critical hit' : 'hit') : 'miss'}.`, attacker.id, { target: target.id, roll });
+      if (roll.hit) {
+        this.applyDamage(target, roll.damage, weapon.damageType, roll.soak);
+        if (roll.damage > 0) this.pushLog('damage', `${target.name} takes ${roll.damage} ${weapon.damageType} damage.`, target.id, { amount: roll.damage, target: target.id });
+        // issue 16: the ability's own effects[] beyond the base weapon hit — a 'damage' entry here is read as
+        // BONUS damage on top of the weapon hit (Charge's lance impact), never a replacement for it.
+        for (const effect of ability.effects) {
+          if ('damage' in effect) {
+            const bonusAttr = effect.damage.bonus === 'strength' ? modifier(attacker.attributes.strength) : effect.damage.bonus === 'agility' ? modifier(attacker.attributes.agility) : 0;
+            const extra = rollDice(effect.damage.dice, this.host.rng) + bonusAttr;
+            this.applyDamage(target, extra, effect.damage.type, 0);
+            if (extra > 0) this.pushLog('damage', `${target.name} takes ${extra} additional ${effect.damage.type} damage.`, target.id, { amount: extra, target: target.id });
+          } else {
+            this.applyEffect(attacker, target, effect);
+          }
+        }
+        if (ability.id === 'ability.charge') {
+          attacker.chargeCells = 0; // spent the run-up (issue 2)
+          this.tryMoraleTrigger(target, 'charge', 12); // ARCHITECTURE §5.3: a charge forces a morale check
         }
       }
-      if (ability.id === 'ability.charge') {
-        attacker.chargeCells = 0; // spent the run-up (issue 2)
-        this.tryMoraleTrigger(target, 'charge', 12); // ARCHITECTURE §5.3: a charge forces a morale check
-      }
+    };
+
+    // Round-3 critic issue 4: Shield Block now goes through the same reaction queue as Brace/Cover Fire for a
+    // player-controlled defender — it was previously spending a human's reaction (and thus pre-empting a
+    // Brace/OA that reaction could otherwise have bought) without ever asking. AI still auto-accepts inline
+    // (there's no rational reason for the AI to ever decline pure damage reduction).
+    if (roll.hit && roll.damage > 0 && target.shield && target.ap.reaction) {
+      const resolveBlock = (accept: boolean) => {
+        target.ap.reaction = false;
+        if (accept) {
+          const blocked = rollDice('1d6', this.host.rng);
+          const before = roll.damage;
+          roll.damage = Math.max(0, roll.damage - blocked);
+          this.pushLog('reaction', `${target.name} blocks with the shield, reducing the blow by ${before - roll.damage}.`, target.id, { target: attacker.id });
+        }
+        finishAttack();
+      };
+      const autoResolve = this.forceAiAll || !target.isPlayerControlled;
+      if (autoResolve) { resolveBlock(true); return; }
+      this.reactionQueue.push({ unitId: target.id, ability: 'ability.shield-block', trigger: 'hit', targetId: attacker.id, resolve: resolveBlock });
+      return;
     }
+    finishAttack();
   }
 
   private resolveShove(attacker: Unit, target: Unit): void {

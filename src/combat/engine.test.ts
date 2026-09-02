@@ -143,6 +143,10 @@ describe('opportunity attacks and Disengage', () => {
     startManual(engine, 'enc.test', enc);
     const mover = engine.getState()!.units.find((u) => u.side === 'player')!;
     step(engine, mover.id, { type: 'move', unit: mover.id, to: { q: 6, r: 6 } });
+    // Round-3 issue 4: the moving militia-spear carries a buckler, so its own Shield Block now queues (it's
+    // player-controlled) instead of resolving inline — answer it before checking the log, same as any other
+    // reaction a player-controlled unit is asked about.
+    acceptAllReactions(engine);
     const log = engine.getState()!.log.map((l) => l.text).join('\n');
     expect(log).toMatch(/attacks/);
   });

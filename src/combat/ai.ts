@@ -146,6 +146,15 @@ function knightAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng
 
 function footmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
   tryShoveIntoHazard(engine, u, enemies); // bonus action — doesn't cost the attack below
+  // Round-3 critic issue 2: generic footmen (this doctrine covers the Habsburg column's own spearmen, not
+  // just the Confederate `waldstaetteAct`) never used Brace even though they carry the same brace-property
+  // Spiess — a mounted charge into the column drew nothing back, which is why a reckless human who charged
+  // down on round 1 beat a disciplined one (the column was never resilient enough to punish indiscipline).
+  if (u.weapon?.properties.includes('brace') && u.stance !== 'braced' && u.ap.bonus) {
+    const cellM = engine.gridInfo()?.cellM ?? 1.5;
+    const cavalryNear = enemies.some((e) => e.mounted && !e.routed && cellDistance(u.q, u.r, e.q, e.r) * cellM <= 2 * u.speedMBase);
+    if (cavalryNear) engine.aiAbility(u, 'ability.brace');
+  }
   const target = [...enemies].sort((a, b) => (a.hp / a.hpMax) - (b.hp / b.hpMax) || dist(u, a) - dist(u, b))[0];
   if (!target) return;
   if (tryAttack(engine, u, target)) return;
@@ -256,9 +265,30 @@ function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
 }
 
 function sergeantAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], rng: Rng): void {
-  const needsRally = engine.unitList().some((o) => o.side === u.side && o.id !== u.id && !o.dead && (hasStatus(o, 'shaken') || o.routed) && dist(u, o) <= 3);
-  if (needsRally && u.ap.action) { engine.aiAbility(u, 'ability.rally'); return; }
+  // Round-3 critic issue 2: Rally's own 3-cell radius was fine, but the AI only ever checked "is someone
+  // already standing next to me" — on a column strung across up to 24 rows, that meant the sergeant almost
+  // never actually reached anyone. Now it closes the distance to the nearest shaken/routed ally in its own
+  // side first, so Rally's radius reaches the column instead of just whoever happens to be adjacent.
+  const inTrouble = engine.unitList().filter((o) => o.side === u.side && o.id !== u.id && !o.dead && (hasStatus(o, 'shaken') || o.routed));
+  const nearestTrouble = [...inTrouble].sort((a, b) => dist(u, a) - dist(u, b))[0];
+  if (nearestTrouble && u.ap.action) {
+    if (dist(u, nearestTrouble) <= 3) { engine.aiAbility(u, 'ability.rally'); return; }
+    const cell = stepToward(engine, u, nearestTrouble, 2);
+    if (cell) engine.aiMove(u, cell);
+    if (dist(u, nearestTrouble) <= 3 && u.ap.action) { engine.aiAbility(u, 'ability.rally'); return; }
+  }
   footmanAct(engine, u, enemies, rng);
+}
+
+/** Test-only doctrine (never assigned by `doctrineFor`, only settable by a test overriding `u.doctrine`
+ *  directly): the "reckless human" comparison point from the round-3 critic review — runs at the nearest
+ *  enemy every turn, never Braces, never fires a cache, never holds a formation. Kept as a real doctrine
+ *  (not a one-off script) so the disciplined-vs-charger comparison can be re-run the same way the AI-vs-AI
+ *  sampler is, on demand. */
+function chargerAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
+  const target = [...enemies].sort((a, b) => dist(u, a) - dist(u, b))[0];
+  if (!target) return;
+  moveThenAttack(engine, u, target);
 }
 
 export function decideAndAct(engine: CombatEngineImpl, u: Unit, rng: Rng): void {
@@ -270,6 +300,7 @@ export function decideAndAct(engine: CombatEngineImpl, u: Unit, rng: Rng): void 
     case 'crossbowman': crossbowmanAct(engine, u, enemies, rng); break;
     case 'sergeant': sergeantAct(engine, u, enemies, rng); break;
     case 'waldstaette': waldstaetteAct(engine, u, enemies, rng); break;
+    case 'charger': chargerAct(engine, u, enemies, rng); break;
     default: footmanAct(engine, u, enemies, rng); break;
   }
 }

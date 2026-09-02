@@ -363,3 +363,80 @@ describe('round-2 issue 6: reaction-before-attack ordering', () => {
     }
   });
 });
+
+describe('round-3 issue 1: abilitiesFor offers Roll Boulders on a cache', () => {
+  it('lists ability.roll-boulders for a unit standing on a boulder-cache or trunk-cache cell, not otherwise', () => {
+    const { engine } = makeEngine();
+    const enc = flatEncounter({
+      units: [
+        { archetype: 'militia-halberd', side: 'player', q: 2, r: 2 }, // on the cache
+        { archetype: 'militia-halberd', side: 'player', q: 5, r: 5 }, // not on any feature
+        { archetype: 'peasant', side: 'enemy', q: 9, r: 9 },
+      ],
+      terrainFeatures: [{ kind: 'trunk-cache', cells: [[2, 2]], affects: [[4, 4]] }],
+    });
+    startManual(engine, 'enc.test', enc);
+    const onCache = engine.getState()!.units.find((u) => u.q === 2 && u.r === 2)!;
+    const offCache = engine.getState()!.units.find((u) => u.q === 5 && u.r === 5)!;
+    expect(onCache.abilities).toContain('ability.roll-boulders');
+    expect(offCache.abilities).not.toContain('ability.roll-boulders');
+  });
+});
+
+describe('round-3 issue 3: Brace trigger threshold matches Charge (3 cells, not 2)', () => {
+  function haufenAndMover(startR: number) {
+    const { engine } = makeEngine(2);
+    const enc = flatEncounter({
+      units: [
+        { archetype: 'militia-spear', side: 'player', q: 5, r: 5 },
+        { archetype: 'militia-spear', side: 'player', q: 6, r: 5 },
+        { archetype: 'militia-spear', side: 'player', q: 5, r: 6 },
+        { archetype: 'militia-spear', side: 'player', q: 6, r: 6 },
+        { archetype: 'peasant', side: 'enemy', q: 5, r: startR },
+      ],
+    });
+    startManual(engine, 'enc.test', enc);
+    const mover = engine.getState()!.units.find((u) => u.side === 'enemy')!;
+    unitsOf(engine).get(mover.id)!.ap = { action: true, bonus: true, reaction: true, moveM: 9, moveMax: 9 };
+    return { engine, mover };
+  }
+
+  it('a 2-cell straight approach into reach (spear reach 2) does not pull Brace', () => {
+    // (5,1) -> (5,3): 2 straight cells, ends at distance 2 from (5,5) — newly in reach, but chargeCells=2.
+    const { engine, mover } = haufenAndMover(1);
+    const result = step(engine, mover.id, { type: 'move', unit: mover.id, to: { q: 5, r: 3 } });
+    expect(result.ok).toBe(true);
+    expect(engine.getState()!.pendingReaction).toBeUndefined();
+  });
+
+  it('a 3-cell straight approach into reach does pull Brace', () => {
+    // (5,0) -> (5,3): 3 straight cells, ends at distance 2 from (5,5) — newly in reach, chargeCells=3.
+    const { engine, mover } = haufenAndMover(0);
+    const result = step(engine, mover.id, { type: 'move', unit: mover.id, to: { q: 5, r: 3 } });
+    expect(result.ok).toBe(true);
+    expect(engine.getState()!.pendingReaction).toBeDefined();
+  });
+});
+
+describe('round-3 issue 4: Shield Block is a queued reaction for a player-controlled defender', () => {
+  it('does not auto-resolve inline when the defender is player-controlled and forceAiAll is off', () => {
+    const { engine } = makeEngine(6);
+    const enc = flatEncounter({
+      units: [
+        { archetype: 'habsburg-footman', side: 'player', q: 5, r: 5 }, // carries a heater-shield
+        { archetype: 'peasant', side: 'enemy', q: 6, r: 5 },
+      ],
+    });
+    startManual(engine, 'enc.test', enc);
+    const defender = engine.getState()!.units.find((u) => u.side === 'player')!;
+    const attacker = engine.getState()!.units.find((u) => u.side === 'enemy')!;
+    unitsOf(engine).get(attacker.id)!.ap = { action: true, bonus: true, reaction: true, moveM: 9, moveMax: 9 };
+    let queued = false;
+    for (let i = 0; i < 20 && !queued; i++) {
+      unitsOf(engine).get(defender.id)!.ap = { action: true, bonus: true, reaction: true, moveM: 9, moveMax: 9 };
+      step(engine, attacker.id, { type: 'ability', unit: attacker.id, ability: 'ability.attack', target: defender.id });
+      if (engine.getState()!.pendingReaction?.ability === 'ability.shield-block') queued = true;
+    }
+    expect(queued).toBe(true);
+  });
+});
