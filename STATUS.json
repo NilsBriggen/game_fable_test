@@ -55,12 +55,8 @@
       "status": "passed",
       "score": 9,
       "fixRounds": 1,
-      "openIssues": [
-        "season written but not restored (polish)",
-        "pendingAutosave should clear on load (polish)",
-        "load() from illegal state (polish)"
-      ],
-      "notes": "27 unit tests; critic 7\u21929; combat contract: isActive()/serialize() valid before request-state combat"
+      "openIssues": [],
+      "notes": "29 unit tests; critic 7\u21929; polish applied; combat contract: isActive()/serialize() valid before request-state combat"
     },
     "party": {
       "owner": "builder:party",
