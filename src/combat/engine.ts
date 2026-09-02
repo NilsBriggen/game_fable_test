@@ -137,9 +137,13 @@ export class CombatEngineImpl implements CombatService {
       // two more flags for this same read-at-setup pattern — a success ADDS something earned, symmetric with
       // `hunenberg-warning` above (which removes something when the warning was ignored).
       if (this.host.questService?.getFlag('morgarten.letzi-improved') === true) {
-        // One extra letzi-wall segment on the Confederate side, extending the existing north/south wall one
-        // row closer to each Haufen block's own gap — cover for the "hold the slope" opening turns.
-        enc = { ...enc, terrainFeatures: [...(enc.terrainFeatures ?? []), { kind: 'letzi-wall', cells: [[8, 3], [8, 19]] }] };
+        // One extra letzi-wall segment on the Confederate side: the original north/south segments (r=0-2,
+        // r=21-23) sit outside the rock chokepoint's passable gaps and so are already fully blocked to
+        // everyone — redundant with the terrain, not an actual improvement. This one instead narrows the
+        // two gaps that open onto the Haufen blocks (gap rows 4-8 and 14-18, `rules/grid.ts`) by one row
+        // each at their outer edge, so mounted units specifically have less room to pour through during the
+        // "hold the slope" opening turns — real cover, not a cosmetic duplicate.
+        enc = { ...enc, terrainFeatures: [...(enc.terrainFeatures ?? []), { kind: 'letzi-wall', cells: [[8, 4], [8, 18]] }] };
         questCaptions.push('The letzi stands higher than the old counts allowed.');
       }
       if (this.host.questService?.getFlag('morgarten.recruits-strong') === true) {

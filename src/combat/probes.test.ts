@@ -483,3 +483,55 @@ describe('cross-module: Hünenberg warning gates Morgarten cache count (requests
     }
   });
 });
+
+describe('cross-module: letzi-improved and recruits-strong flags at Morgarten (requests/quest-3.md)', () => {
+  function morgartenWithFlags(flags: Record<string, unknown>) {
+    const world = new World();
+    const content = makeTestContent();
+    const party = new FakePartyService(world, content);
+    const rng = new Rng(11);
+    const questService = { getFlag: (k: string) => flags[k] };
+    const host: CombatHost = { world, content, party, rng, questService };
+    return new CombatEngineImpl(host);
+  }
+
+  it('morgarten.letzi-improved true: adds the extra letzi-wall segment and logs its caption', async () => {
+    const engine = morgartenWithFlags({ 'morgarten.letzi-improved': true });
+    const resultPromise = engine.start('enc.morgarten', {});
+    const letziCellSets = (engine.encounterDef()?.terrainFeatures ?? []).filter((f) => f.kind === 'letzi-wall').map((f) => JSON.stringify(f.cells));
+    expect(letziCellSets).toContain(JSON.stringify([[8, 4], [8, 18]]));
+    const log = (engine.serialize()?.log ?? []) as { text: string }[];
+    expect(log.some((l) => l.text === 'The letzi stands higher than the old counts allowed.')).toBe(true);
+    engine.submit({ type: 'flee' });
+    await resultPromise;
+  });
+
+  it('morgarten.recruits-strong true: adds two militia-spear allies beside the Haufen blocks and logs its caption', async () => {
+    const engine = morgartenWithFlags({ 'morgarten.recruits-strong': true });
+    const resultPromise = engine.start('enc.morgarten', {});
+    const extras = engine.unitList().filter((u) => u.side === 'player' && (u.q === 9 && (u.r === 7 || u.r === 17)));
+    expect(extras.length).toBe(2);
+    expect(extras.some((u) => u.group === 'haufen-a')).toBe(true);
+    expect(extras.some((u) => u.group === 'haufen-b')).toBe(true);
+    const log = (engine.serialize()?.log ?? []) as { text: string }[];
+    expect(log.some((l) => l.text === 'The Schwyz contingent swelled past the old counts.')).toBe(true);
+    engine.submit({ type: 'flee' });
+    await resultPromise;
+  });
+
+  it('both flags false/unset: no extra letzi segment, no extra recruits, no captions', async () => {
+    for (const flags of [{ 'morgarten.letzi-improved': false, 'morgarten.recruits-strong': false }, {}]) {
+      const engine = morgartenWithFlags(flags);
+      const resultPromise = engine.start('enc.morgarten', {});
+      const letziCellSets = (engine.encounterDef()?.terrainFeatures ?? []).filter((f) => f.kind === 'letzi-wall').map((f) => JSON.stringify(f.cells));
+      expect(letziCellSets).not.toContain(JSON.stringify([[8, 4], [8, 18]]));
+      const extras = engine.unitList().filter((u) => u.side === 'player' && u.q === 9 && (u.r === 7 || u.r === 17));
+      expect(extras.length).toBe(0);
+      const log = (engine.serialize()?.log ?? []) as { text: string }[];
+      expect(log.some((l) => l.text === 'The letzi stands higher than the old counts allowed.')).toBe(false);
+      expect(log.some((l) => l.text === 'The Schwyz contingent swelled past the old counts.')).toBe(false);
+      engine.submit({ type: 'flee' });
+      await resultPromise;
+    }
+  });
+});
