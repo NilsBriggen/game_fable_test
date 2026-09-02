@@ -91,13 +91,10 @@
       "score": 8,
       "fixRounds": 2,
       "openIssues": [
-        "abilitiesFor omits roll-boulders (must land before UI)",
-        "indiscipline not punished at Morgarten (charger 92% vs disciplined 83%): Habsburg footmen never brace",
-        "brace trigger 2 cells vs charge 3; infantry gets every-facing brace",
-        "shield block silently spends player reaction",
-        "routed units flee into lake at Brunnen"
+        "AI no proactive Disengage/OA avoidance (minor)",
+        "quay preset water side cosmetic"
       ],
-      "notes": "74 tests; critic 5\u21927\u21928; Morgarten AI-vs-AI 83%, fights end by rout median 19 rounds"
+      "notes": "79 tests; critic 5\u21927\u21928; polish applied; Morgarten disciplined 75% vs charger 17%"
     },
     "quest": {
       "owner": "builder:quest",
