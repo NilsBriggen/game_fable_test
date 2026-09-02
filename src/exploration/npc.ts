@@ -38,6 +38,11 @@ export class NpcSystem {
   private readonly patrolLead = new Set<EntityId>();
   private lastTrigger = 0;
   private isHostileHabsburg = false;
+  /** Draw-call budget safety valve (coordinator alert: 5 295 draw calls at Altdorf; target <= 1 200):
+   *  even with the 300 m freeze radius, a single dense village can have more generic crowd than is
+   *  worth rendering at once. Named NPCs are exempt (there are only ever a handful near at a time). */
+  private readonly maxVisibleCrowd = 60;
+  private meshedCount = 0;
 
   constructor(
     private world: World,
@@ -63,6 +68,7 @@ export class NpcSystem {
     this.defIdOf.clear();
     this.patrols.clear();
     this.patrolLead.clear();
+    this.meshedCount = 0;
   }
 
   populate(chapter: string): void {
@@ -185,7 +191,8 @@ export class NpcSystem {
           const home = this.homeOf(id, npc);
           if (home) { analytic = analyticPosition(npc.schedule, hour, home, (poiId) => this.poiPos(poiId)); checkX = analytic.x; checkZ = analytic.z; }
         }
-        if (dist2(checkX, checkZ, playerPos.x, playerPos.z) <= NPC_SIM_RADIUS) this.reenter(id, npc, t, analytic);
+        if (dist2(checkX, checkZ, playerPos.x, playerPos.z) <= NPC_SIM_RADIUS
+          && (!npc.generic || this.meshedCount < this.maxVisibleCrowd)) this.reenter(id, npc, t, analytic);
         return;
       }
       const near = dist2(t.x, t.z, playerPos.x, playerPos.z) <= NPC_SIM_RADIUS;
@@ -222,6 +229,7 @@ export class NpcSystem {
     if (mesh?.object) {
       disposeObject3D(mesh.object as Object3D, this.dynamicRoot);
       this.world.remove(id, MeshRef);
+      this.meshedCount--;
     }
   }
 
@@ -235,6 +243,7 @@ export class NpcSystem {
     obj.rotation.y = t.yaw;
     this.dynamicRoot.add(obj);
     this.world.add(id, MeshRef, { object: obj, kind: 'npc' });
+    this.meshedCount++;
   }
 
   private syncMesh(id: EntityId, t: { x: number; y: number; z: number; yaw: number }): void {

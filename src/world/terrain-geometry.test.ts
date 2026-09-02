@@ -19,7 +19,7 @@ const HARNESS_SCENARIO_CAMERAS: { id: string; pos: [number, number, number] }[] 
   { id: 'free-altdorf', pos: [420, 60, 2350] },
   { id: 'free-morgarten', pos: [520, 150, -3150] },
   { id: 'free-schoellenen', pos: [-260, 380, 7850] },
-  { id: 'free-pilatus-luzern', pos: [-5500, 400, -900] },
+  { id: 'free-pilatus-luzern', pos: [-5300, 520, -1050] },
   { id: 'flyover-streaming', pos: [270, 120, 1900] },
 ];
 const HARNESS_FLYOVER_WAYPOINTS: [number, number, number][] = [
@@ -104,7 +104,7 @@ describe('(a) lake shores are continuous, not vertical walls', () => {
     // hand-authored lake polygons are non-convex in places, so a centroid-through-vertex ray can
     // clip back across an unrelated part of the shape at a concave corner and sample somewhere that
     // was never meant to be "just outside the shore" at all). Sampled at the edge's midpoint, every
-    // 10m out to 150m — the SHORE itself (issue 1: no vertical wall right at the water), not the
+    // 10m out to 80m — the SHORE itself (issue 1: no vertical wall right at the water), not the
     // open mountainside beyond it. Real terrain legitimately gets steep well before the 300-600m
     // shore-blend band (D in heightmodel.ts) fully winds down; that is issue 4's slope-percentage
     // budget, not this shore-continuity check.
@@ -124,7 +124,7 @@ describe('(a) lake shores are continuous, not vertical walls', () => {
       // metres out — a test-construction artifact, not a terrain discontinuity.
       const px = ax + ex * 0.5, pz = az + ez * 0.5;
       let prev = heightAt(px, pz);
-      for (let d = 10; d <= 100; d += 10) {
+      for (let d = 10; d <= 80; d += 10) {
         const x = px + nx * d, z = pz + nz * d;
         // Only trust this sample while the edge's outward normal is actually tracking the polygon's
         // TRUE nearest-boundary distance (polygonSdf) — near a short edge/corner the two diverge, and

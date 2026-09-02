@@ -62,7 +62,11 @@ function collectBaked(obj: Object3D, x: number, y: number, z: number, yaw: numbe
     if (!(mesh as { isMesh?: boolean }).isMesh) return;
     const mat = mesh.material as Material;
     if (Array.isArray(mat)) return; // none of world/models.ts's factories use multi-material meshes
-    const geo = mesh.geometry.clone().toNonIndexed(); // uniform format so mixed indexed/non-indexed geometry always merges
+    const cloned = mesh.geometry.clone();
+    // .toNonIndexed() warns loudly if the geometry has no index already (true for the roof-gable
+    // triangles in world/models.ts) — only call it when there's actually an index to strip, so every
+    // geometry still ends up in the same uniform (non-indexed) format for mergeGeometries below.
+    const geo = cloned.index ? cloned.toNonIndexed() : cloned;
     geo.applyMatrix4(mesh.matrixWorld);
     let list = byMat.get(mat);
     if (!list) { list = []; byMat.set(mat, list); }

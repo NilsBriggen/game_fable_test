@@ -10,9 +10,14 @@
  * .mergeGeometries` calls, landing at ≤ 3 draw calls per character (body, head, optional hat) with no
  * per-frame cost — these NPCs don't animate (only the player does; see `playerModel.ts`).
  *
- * Registered only for the archetype ids exploration's own content (`content/pois.ts` population tables,
- * `content/npcs.ts` named cast) actually uses — `habsburg-knight` (needs its mounted-horse silhouette)
- * and `raubritter` (a pure combat encounter archetype) are deliberately left to combat's own factory.
+ * Registered only for civilian/militia archetype ids — the ones that actually dominate a settlement's
+ * crowd (`content/pois.ts` population tables lean overwhelmingly civilian). Every Habsburg-coded archetype
+ * (`habsburg-*`, `bailiff-guard`, `abbey-man-at-arms`) and `raubritter` are deliberately left to combat's
+ * own `buildHumanoidModel`: those are combat's enemy-squad archetypes, and combat's version encodes real
+ * tactical-readability information mine doesn't reproduce — a white surcoat + red cross specifically for
+ * `habsburg-*`, a mounted horse for knights — so overriding them here would quietly reskin combat's own
+ * battle screens for a handful of individuals (a castle/monastery garrison, a couple of named companions)
+ * to save single-digit draw calls nowhere near the budget. Not worth that trade.
  */
 import {
   BufferGeometry, CapsuleGeometry, ConeGeometry, CylinderGeometry, Group, Mesh,
@@ -23,20 +28,18 @@ import type { WorldService } from '@core/services';
 
 interface Palette { cloth: number; trim: number; metal: number; skin: number }
 
-/** Mirrors `combat/render.ts`'s `paletteFor` closely enough that a crowd reads the same way it would
- *  under combat's own renderer (peasant tan, militia green, Habsburg white/red, monk black, merchant
- *  brown) — visual continuity across the two renderers matters more than an exact colour match. */
+/** Mirrors the civilian/militia entries of `combat/render.ts`'s `paletteFor` closely enough that a crowd
+ *  reads the same way it would under combat's own renderer (peasant tan, militia green, monk black,
+ *  merchant brown) — visual continuity across the two renderers matters more than an exact colour match. */
 const PALETTES: Record<string, Palette> = {
   peasant: { cloth: 0xb8a074, trim: 0x8a7550, metal: 0x777777, skin: 0xd9b088 },
   militia: { cloth: 0x5a6b4a, trim: 0x3d4a30, metal: 0x9a9a9a, skin: 0xd9b088 },
-  habsburg: { cloth: 0xffffff, trim: 0xb01e2c, metal: 0xb7bcc2, skin: 0xd9b088 },
   monk: { cloth: 0x33302b, trim: 0x1c1a17, metal: 0x555555, skin: 0xd9b088 },
   merchant: { cloth: 0x6a4a30, trim: 0x8a6b40, metal: 0x666666, skin: 0xd9b088 },
 };
 
 function paletteFor(archetypeId: string): Palette {
-  if (archetypeId.startsWith('habsburg') || archetypeId === 'bailiff-guard') return PALETTES.habsburg;
-  if (archetypeId.startsWith('militia') || archetypeId === 'saeumer' || archetypeId === 'herder' || archetypeId === 'abbey-man-at-arms') return PALETTES.militia;
+  if (archetypeId.startsWith('militia') || archetypeId === 'saeumer' || archetypeId === 'herder') return PALETTES.militia;
   if (archetypeId === 'monk') return PALETTES.monk;
   if (archetypeId === 'merchant' || archetypeId === 'innkeeper' || archetypeId === 'boatman' || archetypeId === 'toll-collector') return PALETTES.merchant;
   return PALETTES.peasant;
@@ -101,8 +104,6 @@ function buildMergedHumanoid(archetypeId: string): Object3D {
 const EXPLORATION_ARCHETYPES = [
   'peasant', 'herder', 'fisher', 'saeumer', 'militia-spear', 'militia-halberd', 'militia-crossbow',
   'elder', 'monk', 'merchant', 'innkeeper', 'boatman', 'child', 'woman-peasant', 'toll-collector',
-  'habsburg-footman', 'habsburg-crossbowman', 'habsburg-sergeant', 'habsburg-squire', 'bailiff-guard',
-  'abbey-man-at-arms',
 ];
 
 export function registerExplorationHumanoids(world: WorldService): void {

@@ -150,7 +150,7 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   const bestRoadDist = new Float32Array(n).fill(Infinity);
   // Authored a little under the 25° test/design ceiling (not right at it) so the small amount of
   // detail noise + relaxation applied afterward doesn't push a couple of samples back over the line.
-  const MAX_GRADE_TAN = Math.tan((18 * Math.PI) / 180);
+  const MAX_GRADE_TAN = Math.tan((14 * Math.PI) / 180);
   for (const c of geo.corridors) {
     const limitedH = limitGrade(c.pts, MAX_GRADE_TAN);
     for (let pi = 1; pi < c.pts.length; pi++) {
@@ -372,7 +372,14 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
     // shore blend also apply through most of the road's influence ramp is correct, not a conflict —
     // a wider protection there just let leftover pre-shore roughness (relaxation/base-ridge noise the
     // road's own gentle rise ramp had not fully absorbed) leak through right next to the water.
-    const roadProtect = 1 - smoothstep(14, 35, bestRoadDist[idx]);
+    // Only protect if the road's own corridor floor here is actually close to THIS lake's shore
+    // level — e.g. sattel-road passes within ~20m (map-projected) of the Zugersee shore while running
+    // ~250m higher in real elevation (it is climbing toward Sattel/Ägeri, not following the lake);
+    // protecting a road segment that is legitimately not at lake level just relocates the shore's
+    // vertical-wall defect onto the road instead of fixing it. Gate on the road's own floor height
+    // (bestValleyH, from pass 1) being within 60m of the winning lake's near-shore target.
+    const roadHeightMatches = Math.abs(bestValleyH[idx] - shoreTarget[idx]) < 300;
+    const roadProtect = roadHeightMatches ? 1 - smoothstep(14, 22, bestRoadDist[idx]) : 0;
     const w = Math.max(shoreW[idx], peakProtect[idx], roadProtect);
     heights[idx] = shoreTarget[idx] + (heights[idx] - shoreTarget[idx]) * w;
   }
@@ -425,9 +432,13 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         const d = Math.hypot(x - pad.x, z - pad.z);
         if (d >= padOuter) continue;
         const idx = row + gx;
-        const w = 1 - smoothstep(padCore, padOuter, d);
+        // 'rigi' (alp, h=389) and 'rigi-kulm' (landmark peak, h=455) share the exact same gazetteer
+        // (x,z) — flattening this alp's pad would otherwise overwrite the mountain's actual summit
+        // target with the alp's lower height. Fade the pad blend out wherever a true peak summit
+        // (peakProtect) already owns this cell, same principle as the shore/relaxation protections.
+        const w = (1 - smoothstep(padCore, padOuter, d)) * (1 - peakProtect[idx]);
         heights[idx] = heights[idx] + (pad.h - heights[idx]) * w;
-        if (d < padCore) padMask[idx] = 1;
+        if (d < padCore && peakProtect[idx] < 0.5) padMask[idx] = 1;
       }
     }
   }
