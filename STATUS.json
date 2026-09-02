@@ -75,7 +75,7 @@
     },
     "combat": {
       "owner": "builder:combat",
-      "status": "fix-round",
+      "status": "critic-round-2",
       "score": 5,
       "fixRounds": 1,
       "openIssues": [
@@ -96,7 +96,7 @@
         "AI doctrines incomplete",
         "DSL not interpreted"
       ],
-      "notes": "55 tests; harness morgarten 369 calls/1.87M tris, quay 121 calls; gaps: directional cover, deploy phase auto, riposte/wall-of-iron/disarm/cover-fire not consumed; awaiting critic"
+      "notes": "70 tests; fix round 1 applied; Morgarten AI-vs-AI 29%; harness 2/2 pass (527/167 calls)"
     },
     "quest": {
       "owner": "builder:quest",
