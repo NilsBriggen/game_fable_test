@@ -136,12 +136,15 @@ export function buildWorldGeo(): WorldGeo {
     corridors.push({ id: r.id, kind: 'road', pts, length: pts[pts.length - 1].s, surface: 'road' });
   }
 
-  // Peaks: landmark-kind gazetteer places with real elevation, radius sized per massif (real base-to-
-  // summit run compressed 1:4.5 horizontally, so radius roughly scales with height: a peak's slope
-  // should read as a mountain, never a cliff, from anywhere outside its own footprint).
+  // Peaks: landmark-kind gazetteer places with real elevation. Radius must stay modest — several of
+  // these summits sit only ~700-1500m (game units) from a lake shore or a scenario camera, and a
+  // radius bigger than that reaches the *viewer*, not just the mountain (an earlier, larger radius set
+  // put the Seelisberg camera directly inside Fronalpstock's own flank). Kept deliberately smaller
+  // than a literal 1:4.5 real-footprint conversion would suggest; shoreDamp() and the smoothstep shape
+  // in peakBump() do the rest of the "reads as a mountain, not a cliff" work.
   const peakRadius: Record<string, number> = {
-    pilatus: 1700, 'rigi-kulm': 1650, rigi: 1650, buergenstock: 900, stanserhorn: 1150,
-    fronalpstock: 1150, urirotstock: 1500, 'grosser-mythen': 650, rossberg: 1150, bristen: 1500,
+    pilatus: 1500, 'rigi-kulm': 1550, rigi: 1550, buergenstock: 700, stanserhorn: 900,
+    fronalpstock: 620, urirotstock: 1250, 'grosser-mythen': 480, rossberg: 950, bristen: 1300,
   };
   // sharp > 1 only for the genuinely spire-like summits (the Mythen); everything else stays close to
   // 1 (the smoothstep base shape in peakBump() already gives a natural broad-massif silhouette).
@@ -152,7 +155,7 @@ export function buildWorldGeo(): WorldGeo {
     if (p.kind !== 'landmark' || p.h < 150) continue;
     if (seenPeak.has(`${p.x}|${p.z}`)) continue; // rigi & rigi-kulm share coords
     seenPeak.add(`${p.x}|${p.z}`);
-    peaks.push({ id: p.id, x: p.x, z: p.z, h: p.h, radius: peakRadius[p.id] ?? 1000, sharp: peakSharp[p.id] ?? 1.0 });
+    peaks.push({ id: p.id, x: p.x, z: p.z, h: p.h, radius: peakRadius[p.id] ?? 800, sharp: peakSharp[p.id] ?? 1.0 });
   }
   // Kleiner Mythen: a smaller unnamed twin beside the Grosser Mythen (visual silhouette only, no gazetteer entry needed).
   const gm = PLACES['grosser-mythen'];

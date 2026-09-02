@@ -158,13 +158,15 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     (sky.material as any).uniforms.mieDirectionalG.value = 0.8;
 
     csm.lightDirection.copy(dir).multiplyScalar(-1);
-    const intensity = (night ? 0.18 : Math.max(0.08, Math.sin(elevation)) * 2.4) * w.sunMul;
+    // CSM only reads `lightIntensity` once, at construction (createLights()) — assigning it later is a
+    // no-op, so the per-frame day/night/weather brightness has to be pushed onto the actual lights.
+    const intensity = (night ? 0.35 : Math.max(0.35, Math.sin(elevation)) * 3.2) * w.sunMul;
     csm.lightIntensity = intensity;
     const color = night ? new Color(0x6f85c9) : new Color(0xfff3da).lerp(new Color(0xffffff), Math.min(1, Math.sin(Math.max(0, elevation)) * 1.5));
-    for (const l of csm.lights) l.color.copy(color);
+    for (const l of csm.lights) { l.color.copy(color); l.intensity = intensity; }
     csm.updateFrustums();
 
-    hemi.intensity = night ? 0.18 : 0.35 + Math.max(0, Math.sin(elevation)) * 0.35;
+    hemi.intensity = night ? 0.25 : 0.55 + Math.max(0, Math.sin(elevation)) * 0.4;
     hemi.color.copy(night ? new Color(0x24304a) : new Color(0xbcd6e8)).lerp(w.skyTint, 0.3);
 
     stars.visible = night;

@@ -10,7 +10,7 @@ import { CHUNK_SIZE, LOD_SPACING } from './chunkmesh';
 import { loadCachedGrid, saveCachedGrid } from './idbcache';
 import { getTerrainMaterial } from './terrainMaterial';
 
-export const GEOGRAPHY_VERSION = 6;
+export const GEOGRAPHY_VERSION = 7;
 const UPLOAD_PER_FRAME = 2;
 const VIEW_RADIUS = 3000; // metres; chunks beyond this are unloaded — big enough for the Seelisberg/Pilatus vistas
 const LOD_DIST = [180, 420, 900]; // switch points between LOD0/1/2/3; keeps the triangle budget sane at VIEW_RADIUS
