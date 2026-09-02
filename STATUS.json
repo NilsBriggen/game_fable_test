@@ -88,13 +88,17 @@
     },
     "exploration": {
       "owner": "integrator (fixes)",
-      "status": "critic-round-2",
-      "score": 7,
+      "status": "passed",
+      "score": 8,
       "fixRounds": 1,
       "openIssues": [
-        "not re-verified by screenshot: night/rain, winter, gorge (queued)"
+        "Zug hamlet: world needs a dry pad (N3)",
+        "named minors move only metres (N2)",
+        "port hut/camp siting, two POI centres on steep slopes (N3b)",
+        "overlapping discover discs (N4)",
+        "crowd should drive CharacterHandle.setSpeed once spawnCharacter is stable (N5)"
       ],
-      "notes": "58 tests + siting test on real grid; integrator fixed all 14 critic issues in code"
+      "notes": "62 tests + 41 critic probes; critic 7\u21928"
     },
     "combat": {
       "owner": "builder:combat",

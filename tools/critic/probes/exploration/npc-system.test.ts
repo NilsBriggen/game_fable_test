@@ -172,6 +172,28 @@ describe('round 2 — life, boats, load rebinding', () => {
     for (let i = 0; i < 600; i++) sys.update(1, { x: fl.x, z: fl.z }, 15); // 15:00 → schedule says Altdorf market
     const d = Math.hypot(t.x - start.x, t.z - start.z);
     console.log(`companion Jost after 10 min at 15:00 with the player standing at Flüelen: moved ${d.toFixed(0)} m toward ${world.get(jost, Npc)!.targetPoi}`);
+    // round 2b: follow. Player walks 400 m east at 4 m/s; companion must stay within 6 m and never freeze.
+    let px = fl.x, pz = fl.z, worst = 0;
+    for (let i = 0; i < 100; i++) { px += 4; sys.update(1, { x: px, z: pz }, 15); worst = Math.max(worst, Math.hypot(t.x - px, t.z - pz)); }
+    const finalD = Math.hypot(t.x - px, t.z - pz);
+    console.log(`companion follow: after a 400 m walk distance to player ${finalD.toFixed(1)} m (worst ${worst.toFixed(1)} m), frozen=${world.get(jost, Npc)!.frozen}, mesh=${world.has(jost, MeshRef)}`);
+    expect(finalD).toBeLessThan(6);
+    expect(world.get(jost, Npc)!.frozen).toBe(false);
+  });
+
+  it('named minor NPCs: how far do their market/sleep spots lie from their work spot after withDefaultOffset?', () => {
+    const { world, sys } = makeSystem();
+    sys.populate('prologue-1291');
+    let named = 0, market3 = 0, sleep3 = 0;
+    world.each(Npc, (_id, n) => {
+      if (n.generic || n.activity === 'patrol' || !n.defId.startsWith('npc.')) return;
+      const w = n.schedule.find((e) => e.activity === 'work')?.offset; const m = n.schedule.find((e) => e.activity === 'market')?.offset; const sl = n.schedule.find((e) => e.activity === 'sleep')?.offset;
+      if (!w) return;
+      named++;
+      if (m && Math.hypot(w[0] - m[0], w[1] - m[1]) > 3) market3++;
+      if (sl && Math.hypot(w[0] - sl[0], w[1] - sl[1]) > 3) sleep3++;
+    });
+    console.log(`named NPCs with a work entry: ${named}; market spot > 3 m from work: ${market3}; sleep spot > 3 m from work: ${sleep3}`);
   });
 
   it('rebindPatrols(): a fresh NpcSystem over restored patrol entities regains 10 patrols and 3 leads', () => {
