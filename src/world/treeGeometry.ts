@@ -115,24 +115,43 @@ export function treeMaterial(): MeshStandardMaterial {
   return sharedMaterial;
 }
 
-/** A simple billboard texture (2 crossed quads' worth of alpha-tested canopy) for far-LOD impostors. */
+/** Billboard texture (2 crossed quads' worth of alpha-tested canopy) for far-LOD impostors. A real
+ * layered spruce silhouette at 256px (not a single flat 64px triangle) so LOD3 mountainsides read as
+ * forest instead of a smear of identical green wedges (critic issue 5). */
 let impostorTex: CanvasTexture | null = null;
 export function treeImpostorTexture(): CanvasTexture {
   if (impostorTex) return impostorTex;
-  const size = 64;
+  const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, size, size);
-  ctx.fillStyle = '#4a3323';
-  ctx.fillRect(size / 2 - 2, size * 0.7, 4, size * 0.3);
-  ctx.fillStyle = '#2c4a2e';
-  ctx.beginPath();
-  ctx.moveTo(size / 2, 2);
-  ctx.lineTo(size * 0.15, size * 0.78);
-  ctx.lineTo(size * 0.85, size * 0.78);
-  ctx.closePath();
-  ctx.fill();
+  const cx = size / 2;
+  // trunk
+  ctx.fillStyle = '#3a2a1c';
+  ctx.fillRect(cx - 4, size * 0.86, 8, size * 0.13);
+  // 5 tapering, slightly irregular tiers (a spruce's silhouette is layered, not one solid triangle)
+  const tiers = [
+    { yTop: 0.03, yBot: 0.28, halfW: 0.16 },
+    { yTop: 0.2, yBot: 0.42, halfW: 0.22 },
+    { yTop: 0.36, yBot: 0.58, halfW: 0.28 },
+    { yTop: 0.52, yBot: 0.72, halfW: 0.34 },
+    { yTop: 0.66, yBot: 0.87, halfW: 0.4 },
+  ];
+  for (let i = 0; i < tiers.length; i++) {
+    const t = tiers[i];
+    const shade = 0.55 + (i / (tiers.length - 1)) * 0.25; // darker near the top, lighter toward the base
+    ctx.fillStyle = `rgb(${Math.round(20 * shade)}, ${Math.round(58 * shade)}, ${Math.round(30 * shade)})`;
+    ctx.beginPath();
+    ctx.moveTo(cx, size * t.yTop);
+    ctx.lineTo(cx - size * t.halfW, size * t.yBot);
+    ctx.lineTo(cx - size * t.halfW * 0.35, size * (t.yBot - (t.yBot - t.yTop) * 0.22));
+    ctx.lineTo(cx, size * (t.yTop + (t.yBot - t.yTop) * 0.08));
+    ctx.lineTo(cx + size * t.halfW * 0.35, size * (t.yBot - (t.yBot - t.yTop) * 0.22));
+    ctx.lineTo(cx + size * t.halfW, size * t.yBot);
+    ctx.closePath();
+    ctx.fill();
+  }
   const tex = new CanvasTexture(canvas);
   impostorTex = tex;
   return tex;

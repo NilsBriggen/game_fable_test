@@ -98,7 +98,9 @@ export function getTerrainTexture(kind: TerrainSurfaceTex, size = 256): TextureP
       bumpStrength = 0.6;
       break;
     case 'forest':
-      map = makeDiffuse(size, seed, 0.08, [42, 46, 28], [74, 70, 42]);
+      // Darkened (critic issue 5): forested slopes must read as forest from a distance even where the
+      // instanced trees themselves haven't populated yet (e.g. a chunk just streamed in).
+      map = makeDiffuse(size, seed, 0.08, [26, 32, 18], [54, 54, 32]);
       bumpStrength = 1.2;
       break;
     case 'rock':

@@ -9,6 +9,8 @@ import type { InstanceHandle, SurfaceType, TransformLike, Weather, WorldService 
 import type { Rng } from '@core/rng';
 import type { RegionDef } from '@core/schemas';
 import { pointInPolygon } from '@core/math';
+import { PLACES } from '@content/gazetteer';
+import { PLACE_REGION_ID } from '@content/geography';
 
 import { TerrainManager } from './terrain';
 import { VegetationManager } from './vegetation';
@@ -17,6 +19,7 @@ import { buildSky, type SkyHandle } from './sky';
 import { ModelLibrary } from './models';
 import { renderMapImage, worldToMapUv } from './map';
 import { getTerrainMaterial } from './terrainMaterial';
+import { snowLineFor } from './heightmodel';
 
 const STREAM_CORE_RADIUS = 1100;
 
@@ -33,7 +36,7 @@ export async function register(ctx: GameContext): Promise<void> {
   const sky: SkyHandle = buildSky(scene, camera, renderer);
   scene.add(sky.group);
 
-  const terrain = new TerrainManager(ctx.seed);
+  const terrain = new TerrainManager(ctx.seed, (info) => ctx.events.emit('chunk-loaded', info));
   terrainRoot.add(terrain.group);
   await terrain.ready;
 
@@ -54,9 +57,10 @@ export async function register(ctx: GameContext): Promise<void> {
     sky.setTimeOfDay(curHour, cal.month, cal.day);
   }
 
-  const unsubClock = ctx.clock.onChange((_t, hour) => {
+  const unsubClock = ctx.clock.onChange((t, hour) => {
     curHour = hour;
     applyClockTime();
+    ctx.events.emit('time-changed', t, hour);
   });
   applyClockTime();
   sky.setSeason(season);
@@ -125,7 +129,20 @@ export async function register(ctx: GameContext): Promise<void> {
     return null;
   }
 
+  // Region polygons are hand-authored hulls and can legitimately overlap near a shared border
+  // (e.g. uri-gotthard sits wholly inside the alps-high backdrop). For a gazetteer place, the
+  // authored membership list (PLACE_REGION_ID) is the ground truth, not polygon containment order —
+  // this guarantees every gazetteer place resolves to exactly its own region regardless of overlap.
+  // Arbitrary (non-place) points fall back to first-match polygon containment.
   function regionAt(x: number, z: number): RegionDef | null {
+    for (const p of Object.values(PLACES)) {
+      if (Math.abs(p.x - x) < 0.5 && Math.abs(p.z - z) < 0.5) {
+        const rid = PLACE_REGION_ID[p.id];
+        const r = rid ? ctx.content.regions.get(rid) : undefined;
+        if (r) return r;
+        break;
+      }
+    }
     for (const r of ctx.content.regions.values()) {
       if (pointInPolygon(x, z, r.bounds as [number, number][])) return r;
     }
@@ -135,7 +152,14 @@ export async function register(ctx: GameContext): Promise<void> {
   const service: WorldService = {
     heightAt: (x, z) => terrain.heightAt(x, z),
     normalAt: (x, z) => terrain.normalAt(x, z),
-    surfaceAt: (x, z) => terrain.surfaceAt(x, z) as SurfaceType,
+    // Snow is never baked into the height/surface grid (the bake is season-independent) — it's a
+    // live override here so it always tracks the current season's snow line (§5.1's "Weather and
+    // seasons"), the way vegetation and the terrain shader's own live snow overlay already do.
+    surfaceAt: (x, z) => {
+      const base = terrain.surfaceAt(x, z) as SurfaceType;
+      if (base === 'water' || base === 'settlement' || base === 'road') return base;
+      return terrain.heightAt(x, z) > snowLineFor(season) ? 'snow' : base;
+    },
     isWater: (x, z) => terrain.isWater(x, z),
     slopeAt: (x, z) => terrain.slopeAt(x, z),
     raycast,
@@ -143,6 +167,7 @@ export async function register(ctx: GameContext): Promise<void> {
     setTimeOfDay(hour: number) {
       curHour = hour;
       applyClockTime();
+      ctx.events.emit('time-changed', ctx.elapsed, hour);
     },
     getTimeOfDay: () => curHour,
     setWeather(w: Weather) {

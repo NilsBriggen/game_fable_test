@@ -129,6 +129,18 @@ const REGION_SEEDS: RegionSeed[] = [
   },
 ];
 
+/** Direct place-id -> region-id lookup built from each region's authored membership list (the source
+ * of truth for "which region is this place in", not polygon containment — the hull/backdrop polygons
+ * are for arbitrary points and free-camera positions, and can legitimately overlap near a shared
+ * border; a gazetteer place's region must never depend on overlap-resolution order). Every place
+ * listed under some region's `places` array gets exactly one entry here. */
+export const PLACE_REGION_ID: Record<string, string> = {};
+for (const s of REGION_SEEDS) {
+  for (const pid of s.places) {
+    if (!(pid in PLACE_REGION_ID)) PLACE_REGION_ID[pid] = s.id;
+  }
+}
+
 export function register(c: ContentRegistry): void {
   const defs: RegionDef[] = REGION_SEEDS.map((s) => ({
     id: s.id,

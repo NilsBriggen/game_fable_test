@@ -566,6 +566,7 @@ export type ModelFactory = (opts: { variant?: string; scale?: number; rng: Rng }
 export class ModelLibrary {
   private factories = new Map<string, ModelFactory>();
   private spawnCount = 0;
+  private warnedUnknown = new Set<string>();
 
   constructor(private seed: number) {
     this.register('house.blockbau', (o) => houseBlockbau(o.rng, o.variant));
@@ -612,6 +613,10 @@ export class ModelLibrary {
     return [...this.factories.keys()];
   }
   spawn(id: string, opts?: { variant?: string; scale?: number }): Object3D {
+    if (!this.factories.has(id) && !this.warnedUnknown.has(id)) {
+      this.warnedUnknown.add(id);
+      console.warn(`[world] spawnModel: unknown model id "${id}", falling back to placeholder`);
+    }
     const factory = this.factories.get(id) ?? this.factories.get('placeholder')!;
     const salt = hashString(`${id}:${opts?.variant ?? ''}:${this.spawnCount++}`);
     const rng = new Rng((this.seed ^ salt) >>> 0);

@@ -46,11 +46,37 @@ export interface SettlementPad {
   kind: string;
 }
 
-/** Catmull-Rom through 4 points (p0..p3), t in [0,1] between p1 and p2. */
-function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+/** Centripetal Catmull-Rom (alpha=0.5) through 4 points (p0..p3), u in [0,1] between p1 and p2.
+ * NOT the simpler *uniform* Catmull-Rom formula (t,t2,t3 blended with fixed weights) that used to be
+ * here: uniform parameterisation loops and self-intersects whenever consecutive control points are
+ * very unevenly spaced with a sharp turn between them — exactly the shape of Uri's mountain road
+ * chains (e.g. Silenen -> Amsteg -> Göschenen bends hard west over a short stretch). That produced a
+ * road "centreline" that briefly crossed back over its own later/earlier arc-length, so the nearest-
+ * segment corridor pass (heightmodel.ts step 3) sometimes stamped a far-away segment's floor height
+ * onto a point that geometrically sits right next to a completely different part of the same road —
+ * a real, sharp, undocumented cliff in the middle of a "flat" valley floor. Centripetal
+ * parameterisation is the standard, well-known fix: it does not loop or self-intersect for any point
+ * configuration. See e.g. Yuksel et al. 2011 "On the Parameterization of Catmull-Rom Curves". */
+function centripetalCatmullRom(
+  p0: [number, number], p1: [number, number], p2: [number, number], p3: [number, number], u: number,
+): [number, number] {
+  const alpha = 0.5;
+  const dt = (a: [number, number], b: [number, number]) => Math.max(1e-3, Math.hypot(b[0] - a[0], b[1] - a[1]) ** alpha);
+  const t0 = 0;
+  const t1 = t0 + dt(p0, p1);
+  const t2 = t1 + dt(p1, p2);
+  const t3 = t2 + dt(p2, p3);
+  const t = t1 + (t2 - t1) * u;
+  const lerp2 = (a: [number, number], b: [number, number], ta: number, tb: number, tt: number): [number, number] => {
+    const w = (tt - ta) / (tb - ta);
+    return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w];
+  };
+  const A1 = lerp2(p0, p1, t0, t1, t);
+  const A2 = lerp2(p1, p2, t1, t2, t);
+  const A3 = lerp2(p2, p3, t2, t3, t);
+  const B1 = lerp2(A1, A2, t0, t2, t);
+  const B2 = lerp2(A2, A3, t1, t3, t);
+  return lerp2(B1, B2, t1, t2, t);
 }
 
 /** Build a smooth, densely-sampled spline through a chain of gazetteer place ids. Each sample carries
@@ -72,8 +98,7 @@ function buildSpline(via: string[], samplesPerSeg: number, paramsFor: (aId: stri
     for (let j = 0; j <= samplesPerSeg; j++) {
       if (i > 0 && j === 0) continue; // avoid duplicate join point
       const t = j / samplesPerSeg;
-      const x = catmullRom(p0.x, p1.x, p2.x, p3.x, t);
-      const z = catmullRom(p0.z, p1.z, p2.z, p3.z, t);
+      const [x, z] = centripetalCatmullRom([p0.x, p0.z], [p1.x, p1.z], [p2.x, p2.z], [p3.x, p3.z], t);
       const h = p1.h + (p2.h - p1.h) * t; // linear height along the segment (monotone, no overshoot)
       s += Math.hypot(x - prevX, z - prevZ);
       pts.push({ x, z, h, s, ...seg });
@@ -146,14 +171,14 @@ export function buildWorldGeo(): WorldGeo {
   // these summits sit only ~700-1500m (game units) from a lake shore or a scenario camera, and a
   // radius bigger than that reaches the *viewer*, not just the mountain (an earlier, larger radius set
   // put the Seelisberg camera directly inside Fronalpstock's own flank). Kept deliberately smaller
-  // than a literal 1:4.5 real-footprint conversion would suggest; shoreDamp() and the smoothstep shape
-  // in peakBump() do the rest of the "reads as a mountain, not a cliff" work.
+  // than a literal 1:4.5 real-footprint conversion would suggest; shoreDampNear() and the smoothstep shape
+  // in peakShape() do the rest of the "reads as a mountain, not a cliff" work.
   const peakRadius: Record<string, number> = {
     pilatus: 1500, 'rigi-kulm': 1550, rigi: 1550, buergenstock: 700, stanserhorn: 900,
     fronalpstock: 620, urirotstock: 1250, 'grosser-mythen': 480, rossberg: 950, bristen: 1300,
   };
   // sharp > 1 only for the genuinely spire-like summits (the Mythen); everything else stays close to
-  // 1 (the smoothstep base shape in peakBump() already gives a natural broad-massif silhouette).
+  // 1 (the smoothstep base shape in peakShape() already gives a natural broad-massif silhouette).
   const peakSharp: Record<string, number> = { 'grosser-mythen': 1.4 };
   const peaks: Peak[] = [];
   const seenPeak = new Set<string>();
@@ -206,7 +231,13 @@ export function valleyProfile(dist: number, floorH: number, p: SegParams): numbe
   return floorH + p.riseRate * t;
 }
 
-export function peakBump(dist: number, p: Peak): number {
+/** Normalised (0..1) footprint shape of a peak at `dist` from its summit: 1 at the summit, 0 at the
+ * falloff radius. Callers turn this into an absolute *target* height themselves (`heightmodel.ts`):
+ * `target = baseHere + (p.h - baseAtSummit) * peakShape(dist, p)`, then `max()`-blend that target
+ * into the running heightfield. peakShape never knows about (and must never be multiplied by) `p.h`
+ * itself — that used to be added *on top of* the base ridge field, double-counting the base and
+ * overshooting every gazetteer summit height (Pilatus rendered 691m against a gazetteer 565m). */
+export function peakShape(dist: number, p: Peak): number {
   const r = p.radius * 1.6;
   if (dist >= r) return 0;
   const t = clamp(1 - dist / r, 0, 1);
@@ -216,7 +247,55 @@ export function peakBump(dist: number, p: Peak): number {
   // all of the relief into the last ~15% of the radius, which reads as a sheer wall, not a mountain —
   // that was a real bug here (Fronalpstock rendered as a cliff blocking the Seelisberg lake view).
   const s = t * t * (3 - 2 * t);
-  return p.h * Math.pow(s, p.sharp);
+  return Math.pow(s, p.sharp);
+}
+
+/** Distance from a point to a line segment, plus the interpolation parameter t (0 at a, 1 at b),
+ * clamped to the segment. Local to geodata.ts (not `@core/math`, which this module may not edit) so
+ * `buildHeightGrid`'s corridor pass can rasterise distance-to-*segment* (continuous along the whole
+ * spline) instead of distance-to-nearest-*sample-point* (which left 100-300m gaps between samples
+ * that the old code filled with whatever the peak/base field put there — 85° "roads"). */
+export function segmentDistT(px: number, pz: number, ax: number, az: number, bx: number, bz: number): { dist: number; t: number } {
+  const abx = bx - ax, abz = bz - az;
+  const l2 = abx * abx + abz * abz;
+  let t = l2 === 0 ? 0 : ((px - ax) * abx + (pz - az) * abz) / l2;
+  t = clamp(t, 0, 1);
+  const dx = px - (ax + abx * t), dz = pz - (az + abz * t);
+  return { dist: Math.hypot(dx, dz), t };
+}
+
+/** Forward+backward max-grade clamp over a corridor's arc-length height profile (`pts[].s`, `.h`),
+ * so no two consecutive samples imply a slope steeper than `maxTan` (tan of the limit angle). The
+ * gazetteer's real place-to-place grades are already gentle (checked: worst chain segment ~12°), so
+ * this is mostly a safety net against any future data changes — but it is what actually guarantees
+ * "the pass points keep their gazetteer height and the road between them never exceeds this grade". */
+export function limitGrade(pts: SplinePoint[], maxTan: number): number[] {
+  const n = pts.length;
+  const h = pts.map((p) => p.h);
+  if (n < 2) return h;
+  const fwd = h.slice();
+  for (let i = 1; i < n; i++) {
+    const ds = Math.max(1e-3, pts[i].s - pts[i - 1].s);
+    const maxDelta = ds * maxTan;
+    fwd[i] = clamp(h[i], fwd[i - 1] - maxDelta, fwd[i - 1] + maxDelta);
+  }
+  const out = fwd.slice();
+  for (let i = n - 2; i >= 0; i--) {
+    const ds = Math.max(1e-3, pts[i + 1].s - pts[i].s);
+    const maxDelta = ds * maxTan;
+    out[i] = clamp(fwd[i], out[i + 1] - maxDelta, out[i + 1] + maxDelta);
+  }
+  return out;
+}
+
+/** Shore-blend profile: treats a lake polygon's boundary as a corridor whose floor is the water
+ * level, blending the terrain outside the polygon down to lake height near the shore and back up to
+ * whatever the mountain/valley field already put there by `D` metres out (issue 1 in the critic sheet:
+ * shores must never be vertical-walled trenches). `steep` gives the real Axen cliff (Urnersee east
+ * shore) a faster rise while staying continuous — never a step. */
+export function shoreProfile(dist: number, levelH: number, D: number, steep: boolean): number {
+  const params: SegParams = { shape: 'wideU', halfWidth: 25, influence: D, riseRate: steep ? 250 : 120, corridorWidthM: 0 };
+  return valleyProfile(dist, levelH, params);
 }
 
 export function lakeShelf(x: number, z: number, lake: LakePoly): number | null {

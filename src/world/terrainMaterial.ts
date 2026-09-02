@@ -6,6 +6,7 @@
  */
 import { Color, DoubleSide, MeshStandardMaterial } from 'three';
 import { getTerrainTexture } from './textures';
+import { registerCsmMaterial } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
 
 export interface TerrainMaterialHandle {
@@ -24,15 +25,17 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
   const path = getTerrainTexture('road');
 
   const material = new MeshStandardMaterial({ color: new Color(0xffffff), roughness: 1, metalness: 0, side: DoubleSide });
-  // Note: only the *.normalMap textures are generated but intentionally left unbound in the shader
-  // below — per-fragment normal-map blending was cut for SwiftShader (software) frame-time headroom;
-  // geometric vertex normals (already slope-aware from the heightmap) carry the shading instead.
   const uniforms: Record<string, { value: unknown }> = {
     tGrass: { value: grass.map },
     tForest: { value: forest.map },
     tRock: { value: rock.map },
     tSnow: { value: snow.map },
     tPath: { value: path.map },
+    tGrassN: { value: grass.normalMap },
+    tForestN: { value: forest.normalMap },
+    tRockN: { value: rock.normalMap },
+    tSnowN: { value: snow.normalMap },
+    tPathN: { value: path.normalMap },
     uSnowLine: { value: 900 },
     uGrassTint: { value: new Color(0x9fb862) },
     uFogColor: { value: new Color(0xbfd2e0) },
@@ -55,6 +58,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         '#include <common>',
         `
         uniform sampler2D tGrass, tForest, tRock, tSnow, tPath;
+        uniform sampler2D tGrassN, tForestN, tRockN, tSnowN, tPathN;
         uniform float uSnowLine;
         uniform vec3 uGrassTint;
         uniform vec3 uFogColor;
@@ -62,6 +66,36 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         varying float vSurfaceId;
         varying vec3 vWorldPos;
         float tent(float x, float c) { return clamp(1.0 - abs(x - c), 0.0, 1.0); }
+        // Triplanar blend weights from the geometric normal (rock/scree only — see map_fragment below):
+        // a single xz projection is what produced the vertical streaking on every cliff face in every
+        // scenario screenshot; blending the xz/xy/zy projections by |normal| fixes vertical surfaces.
+        vec3 triplanarWeights(vec3 n) {
+          vec3 a = pow(abs(n), vec3(4.0));
+          return a / max(1e-5, a.x + a.y + a.z);
+        }
+        vec4 sampleTriplanar(sampler2D tex, vec3 wp, vec3 n, float scale) {
+          vec3 w = triplanarWeights(n);
+          vec4 cx = texture2D(tex, wp.zy * scale);
+          vec4 cy = texture2D(tex, wp.xz * scale);
+          vec4 cz = texture2D(tex, wp.xy * scale);
+          return cx * w.x + cy * w.y + cz * w.z;
+        }
+        // Standard tangent-space normal-map perturbation from screen-space derivatives (three.js's own
+        // perturbNormal2Arb technique) — lets a single planar UV carry a bound normal map without a
+        // precomputed tangent attribute, which the terrain geometry (chunkmesh.ts) doesn't bake.
+        vec3 perturbNormalFromMap(vec3 eyePos, vec3 surfNormal, vec2 uv, vec3 mapN) {
+          vec3 q0 = dFdx(eyePos), q1 = dFdy(eyePos);
+          vec2 st0 = dFdx(uv), st1 = dFdy(uv);
+          vec3 N = surfNormal;
+          vec3 q1perp = cross(q1, N), q0perp = cross(N, q0);
+          vec3 T = q1perp * st0.x + q0perp * st1.x;
+          vec3 B = q1perp * st0.y + q0perp * st1.y;
+          float det = max(dot(T, T), dot(B, B));
+          float scale = det == 0.0 ? 0.0 : inversesqrt(det);
+          return normalize(T * (mapN.x * scale) + B * (mapN.y * scale) + N * mapN.z);
+        }
+        vec2 gTerrainUv;
+        vec3 gTerrainMapN;
         #include <common>
         `,
       )
@@ -81,25 +115,32 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           wGrass /= sum; wForest /= sum; wRock /= sum; wPath /= sum;
 
           vec2 uvY = vWorldPos.xz / 40.0;
+          gTerrainUv = uvY;
+          vec3 nrm = normalize(vNormal);
           vec4 texel = vec4(0.0);
-          if (wGrass > 0.001) texel += texture2D(tGrass, uvY) * vec4(uGrassTint, 1.0) * wGrass;
-          if (wForest > 0.001) texel += texture2D(tForest, uvY) * wForest;
-          if (wRock > 0.001) texel += texture2D(tRock, uvY) * wRock;
-          if (wPath > 0.001) texel += texture2D(tPath, uvY) * wPath;
+          vec3 mapN = vec3(0.0);
+          if (wGrass > 0.001) { texel += texture2D(tGrass, uvY) * vec4(uGrassTint, 1.0) * wGrass; mapN += (texture2D(tGrassN, uvY).xyz * 2.0 - 1.0) * wGrass; }
+          if (wForest > 0.001) { texel += texture2D(tForest, uvY) * wForest; mapN += (texture2D(tForestN, uvY).xyz * 2.0 - 1.0) * wForest; }
+          if (wRock > 0.001) { texel += sampleTriplanar(tRock, vWorldPos, nrm, 1.0 / 40.0) * wRock; mapN += (texture2D(tRockN, uvY).xyz * 2.0 - 1.0) * wRock; }
+          if (wPath > 0.001) { texel += texture2D(tPath, uvY) * wPath; mapN += (texture2D(tPathN, uvY).xyz * 2.0 - 1.0) * wPath; }
 
           float snowAmt = clamp(smoothstep(uSnowLine - 50.0, uSnowLine + 30.0, vWorldPos.y) * (1.0 - 0.5 * wRock), 0.0, 1.0);
-          if (snowAmt > 0.01) texel = mix(texel, texture2D(tSnow, uvY), snowAmt);
-
-          // Defensive floor: some (still-unexplained on this software rasteriser) combination of steep
-          // slope + close range very occasionally starved every branch above of a sample, leaving texel
-          // at (0,0,0,*) and the whole frame black — seen at the Schöllenen gorge scenario camera. The
-          // opaque canvas textures always carry alpha=1, so it's the RGB that must be checked, not alpha.
-          // Never let terrain render fully unlit; fall back to a neutral rock-grey rather than black.
-          if (texel.r + texel.g + texel.b < 0.05) texel = vec4(0.42, 0.4, 0.36, 1.0);
+          if (snowAmt > 0.01) {
+            texel = mix(texel, texture2D(tSnow, uvY), snowAmt);
+            mapN = mix(mapN, texture2D(tSnowN, uvY).xyz * 2.0 - 1.0, snowAmt);
+          }
+          gTerrainMapN = length(mapN) > 1e-4 ? normalize(mapN) : vec3(0.0, 0.0, 1.0);
 
           diffuseColor *= texel;
         }
         #include <map_fragment>
+        `,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `
+        #include <normal_fragment_maps>
+        normal = perturbNormalFromMap(-vViewPosition, normal, gTerrainUv, gTerrainMapN);
         `,
       )
       .replace(
@@ -116,12 +157,10 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       );
   };
 
-  // NOT registered with CSM (registerCsmMaterial is deliberately not called here): with USE_CSM
-  // defined — even with mesh.receiveShadow=false, verified that alone is not enough — close-range
-  // steep terrain rendered fully black on this software rasteriser, reproducible with the renderer's
-  // whole shadow map disabled, so it's the CSM cascade-selection shader path itself. Terrain is still
-  // lit correctly by the plain (real) DirectionalLight + HemisphereLight CSM creates; it just doesn't
-  // get cascade-aware shadow receiving.
+  // Terrain now participates in CSM shadow receiving (see terrain.ts's mesh.receiveShadow=true): the
+  // earlier "always renders black" symptom that led to opting out was a camera-inside-mountain bug
+  // (heightmodel.ts peak fix), not a CSM shader-path bug.
+  registerCsmMaterial(material);
   handle = { material, uniforms };
   return handle;
 }

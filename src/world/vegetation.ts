@@ -13,6 +13,8 @@ import { boulderGeometry, rockMaterial } from './propGeometry';
 
 const FULL_SPACING = 11;
 const IMPOSTOR_SPACING = 26;
+const IMPOSTOR_SPACING_FAR = 46; // LOD3 (>900m): sparser, count-capped impostors so distant slopes read
+// as forest instead of bald grey domes (critic issue 5) without blowing the triangle/instance budget.
 const TREE_SPECIES: { kind: TreeKind; weight: number }[] = [
   { kind: 'spruce', weight: 0.52 }, { kind: 'fir', weight: 0.2 }, { kind: 'larch', weight: 0.14 }, { kind: 'beech', weight: 0.14 },
 ];
@@ -65,7 +67,7 @@ export class VegetationManager {
 
   private treePool(kind: TreeKind, tier: 'full' | 'impostor'): Pool {
     if (tier === 'full') return this.poolFor(`tree.${kind}.full`, 3200, () => ({ geometry: buildTreeGeometry(kind, new Rng(1)), material: treeMaterial() }));
-    return this.poolFor(`tree.${kind}.impostor`, 6000, () => treeImpostor());
+    return this.poolFor(`tree.${kind}.impostor`, 9000, () => treeImpostor());
   }
   private rockPool(size: 'large' | 'small'): Pool {
     return this.poolFor(`rock.${size}`, 1200, () => ({ geometry: boulderGeometry(size === 'large' ? 1.7 : 0.55), material: rockMaterial() }));
@@ -97,12 +99,14 @@ export class VegetationManager {
       if (!activeKeys.has(key)) this.freeChunk(key);
     }
     for (const c of active) {
-      const tier: 'full' | 'impostor' | 'none' = c.lod <= 1 ? 'full' : c.lod === 2 ? 'impostor' : 'none';
+      // LOD0/1 (near): full geometry. LOD2/3 (far, incl. distant mountainsides): impostors — kept all
+      // the way to LOD3 so distant flanks never go bald; LOD3 just uses a much wider, capped spacing.
+      const tier: 'full' | 'impostor' = c.lod <= 1 ? 'full' : 'impostor';
       const prevTier = this.chunkTier.get(c.key);
       if (prevTier === tier) continue;
       this.freeChunk(c.key);
       this.chunkTier.set(c.key, tier);
-      if (tier !== 'none') this.populateChunk(c.key, c.cx, c.cz, c.originX, c.originZ, tier);
+      this.populateChunk(c.key, c.cx, c.cz, c.originX, c.originZ, tier, c.lod);
     }
     for (const p of this.dirtyPools) {
       p.mesh.count = p.highWater;
@@ -131,9 +135,9 @@ export class VegetationManager {
     this.chunkTier.delete(key);
   }
 
-  private populateChunk(key: string, cx: number, cz: number, originX: number, originZ: number, tier: 'full' | 'impostor'): void {
+  private populateChunk(key: string, cx: number, cz: number, originX: number, originZ: number, tier: 'full' | 'impostor', lod: number): void {
     const rng = new Rng((hashString(`${this.seed}:veg:${cx}:${cz}`) >>> 0));
-    const spacing = tier === 'full' ? FULL_SPACING : IMPOSTOR_SPACING;
+    const spacing = tier === 'full' ? FULL_SPACING : lod >= 3 ? IMPOSTOR_SPACING_FAR : IMPOSTOR_SPACING;
     const size = 500;
     const allocs: { poolKey: string; index: number }[] = [];
     for (let gz = 0; gz < size; gz += spacing) {

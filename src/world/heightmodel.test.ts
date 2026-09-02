@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildHeightGrid, surfaceNameOf, TEXEL_M, FOREST_MAX_H } from './heightmodel';
-import { buildWorldGeo, valleyProfile, peakBump, lakeShelf, nearestOnSpline } from './geodata';
+import { buildWorldGeo, valleyProfile, peakShape, lakeShelf, nearestOnSpline } from './geodata';
 import { MAP_BOUNDS, PLACES, gameHeightFromAsl } from '@content/gazetteer';
 
 function sampleBilinear(grid: ReturnType<typeof buildHeightGrid>, x: number, z: number): number {
@@ -47,12 +47,12 @@ describe('geodata helpers', () => {
     expect(v).toBeGreaterThan(u);
   });
 
-  it('peakBump decays to 0 at the falloff radius and peaks at the summit', () => {
+  it('peakShape (0..1 footprint, NOT scaled by p.h) decays to 0 at the falloff radius and is 1 at the summit', () => {
     const p = { id: 'x', x: 0, z: 0, h: 500, radius: 1000, sharp: 1.3 };
-    expect(peakBump(0, p)).toBeCloseTo(500, 0);
-    expect(peakBump(2000, p)).toBe(0);
-    expect(peakBump(500, p)).toBeGreaterThan(0);
-    expect(peakBump(500, p)).toBeLessThan(500);
+    expect(peakShape(0, p)).toBeCloseTo(1, 5);
+    expect(peakShape(2000, p)).toBe(0);
+    expect(peakShape(500, p)).toBeGreaterThan(0);
+    expect(peakShape(500, p)).toBeLessThan(1);
   });
 
   it('lakeShelf is below lake level everywhere inside the polygon and null outside', () => {

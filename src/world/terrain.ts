@@ -10,7 +10,7 @@ import { CHUNK_SIZE, LOD_SPACING } from './chunkmesh';
 import { loadCachedGrid, saveCachedGrid } from './idbcache';
 import { getTerrainMaterial } from './terrainMaterial';
 
-export const GEOGRAPHY_VERSION = 8;
+export const GEOGRAPHY_VERSION = 9; // bumped: fix-round-1 height-model rewrite (peaks/corridors/shores/relaxation)
 const UPLOAD_PER_FRAME = 2;
 const VIEW_RADIUS = 3000; // metres; chunks beyond this are unloaded — big enough for the Seelisberg/Pilatus vistas
 const LOD_DIST = [180, 420, 900]; // switch points between LOD0/1/2/3; keeps the triangle budget sane at VIEW_RADIUS
@@ -60,7 +60,7 @@ export class TerrainManager {
   private frameBudgetUsed = 0;
   chunksBuilt = 0;
 
-  constructor(private seed: number) {
+  constructor(private seed: number, private onChunkLoaded?: (info: { cx: number; cz: number; lod: number; allWater: boolean }) => void) {
     this.worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<WorkerMsg>) => this.onMessage(e.data);
     this.ready = new Promise((res) => { this.resolveReady = res; });
@@ -235,7 +235,7 @@ export class TerrainManager {
     if (e.mesh) { this.group.remove(e.mesh); e.mesh.geometry.dispose(); e.mesh = null; }
     e.pendingLod = null;
     e.currentLod = msg.lod;
-    if (msg.allWater) return; // fully submerged chunk: the lake mesh covers it, skip the draw call
+    if (msg.allWater) { this.onChunkLoaded?.({ cx: msg.cx, cz: msg.cz, lod: msg.lod, allWater: true }); return; } // fully submerged chunk: the lake mesh covers it, skip the draw call
     const geom = new BufferGeometry();
     geom.setAttribute('position', new BufferAttribute(msg.positions, 3));
     geom.setAttribute('normal', new BufferAttribute(msg.normals, 3));
@@ -245,14 +245,12 @@ export class TerrainManager {
     geom.computeBoundingSphere();
     const { material } = getTerrainMaterial();
     const mesh = new Mesh(geom, material);
-    // Shadow *receiving* on this mesh is deliberately off: with CSM registered and receiveShadow=true,
-    // close-range steep terrain (e.g. the Schöllenen gorge) rendered fully black — reproducible even
-    // with the renderer's shadowMap disabled, so it's the shadow-sampling shader path itself, not a
-    // depth-bias/acne tuning issue reachable in the time available. Terrain still *casts* shadows
-    // (onto vegetation, props, itself as seen by other objects) via castShadow below; it just doesn't
-    // darken itself from shadow maps. A real loss of self-shadowed slope detail, traded for never
-    // rendering a broken black frame.
-    mesh.receiveShadow = false;
+    // Shadow receiving was previously forced off everywhere: the "black frame" that motivated it was
+    // the harness camera sitting *inside* the mountain (peaks overshot the gazetteer by up to +133m —
+    // see heightmodel.ts step 2's fix), rendering unlit back-faces, not a CSM/shadow-shader bug. With
+    // peaks now clamped to the gazetteer target height and cameras genuinely above ground, terrain
+    // receives its own shadows again.
+    mesh.receiveShadow = true;
     // CSM's cascades only cover ~0-600m (ARCHITECTURE.md §5.1); LOD3 chunks start at 900m so they can
     // never appear in a shadow pass — skipping castShadow there is a big win under software rendering.
     mesh.castShadow = msg.lod <= 2;
@@ -260,6 +258,7 @@ export class TerrainManager {
     e.mesh = mesh;
     this.group.add(mesh);
     this.chunksBuilt++;
+    this.onChunkLoaded?.({ cx: msg.cx, cz: msg.cz, lod: msg.lod, allWater: false });
   }
 
   /** Prioritise streaming around an arbitrary point (teleport/load) without moving the camera. */
