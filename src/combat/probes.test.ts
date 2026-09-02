@@ -440,3 +440,46 @@ describe('round-3 issue 4: Shield Block is a queued reaction for a player-contro
     expect(queued).toBe(true);
   });
 });
+
+describe('cross-module: Hünenberg warning gates Morgarten cache count (requests/quest-2.md §2)', () => {
+  function morgartenWithFlag(flag: unknown) {
+    const world = new World();
+    const content = makeTestContent();
+    const party = new FakePartyService(world, content);
+    const rng = new Rng(9);
+    const questService = { getFlag: (k: string) => (k === 'hunenberg-warning' ? flag : undefined) };
+    const host: CombatHost = { world, content, party, rng, questService };
+    return new CombatEngineImpl(host);
+  }
+
+  it('flag exactly false: drops the two caches farthest from the Haufen blocks and logs the caption', async () => {
+    const engine = morgartenWithFlag(false);
+    const resultPromise = engine.start('enc.morgarten', {});
+    const kinds = engine.encounterDef()?.terrainFeatures?.map((f) => `${f.kind}@${f.cells[0][0]},${f.cells[0][1]}`) ?? [];
+    expect(kinds).not.toContain('boulder-cache@10,11');
+    expect(kinds).not.toContain('trunk-cache@13,9');
+    // The two nearest the Haufen blocks (one boulder + one trunk cache per block) are untouched.
+    expect(kinds).toContain('boulder-cache@9,5');
+    expect(kinds).toContain('trunk-cache@10,5');
+    expect(kinds).toContain('boulder-cache@9,15');
+    expect(kinds).toContain('trunk-cache@10,15');
+    const log = (engine.serialize()?.log ?? []) as { text: string }[];
+    expect(log.some((l) => l.text === 'Without the warning, fewer stones were laid.')).toBe(true);
+    engine.submit({ type: 'flee' });
+    await resultPromise;
+  });
+
+  it('flag true or unset: all caches present, no caption', async () => {
+    for (const flag of [true, undefined]) {
+      const engine = morgartenWithFlag(flag);
+      const resultPromise = engine.start('enc.morgarten', {});
+      const kinds = engine.encounterDef()?.terrainFeatures?.map((f) => `${f.kind}@${f.cells[0][0]},${f.cells[0][1]}`) ?? [];
+      expect(kinds).toContain('boulder-cache@10,11');
+      expect(kinds).toContain('trunk-cache@13,9');
+      const log = (engine.serialize()?.log ?? []) as { text: string }[];
+      expect(log.some((l) => l.text === 'Without the warning, fewer stones were laid.')).toBe(false);
+      engine.submit({ type: 'flee' });
+      await resultPromise;
+    }
+  });
+});

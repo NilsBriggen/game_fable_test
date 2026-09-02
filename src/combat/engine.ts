@@ -48,6 +48,10 @@ export interface CombatHost {
   rng: Rng;
   worldService?: WorldService;
   events?: { emit(event: string, ...args: unknown[]): void };
+  // Cross-module request (requests/quest-2.md §2, LORE §6 step 11): read-only access to the quest module's
+  // global flags, e.g. `hunenberg-warning`. Structural (not the full `QuestService`) so combat doesn't need
+  // to know about quests beyond this one read.
+  questService?: { getFlag(k: string): unknown };
 }
 
 const DOCTRINE_BY_ARCHETYPE: Record<string, string> = {
@@ -111,8 +115,25 @@ export class CombatEngineImpl implements CombatService {
   // ---------------- lifecycle ----------------
 
   async start(encounterId: string, opts?: { ambush?: 'player' | 'enemy'; encounterOverride?: EncounterDef }): Promise<CombatResult> {
-    const enc = opts?.encounterOverride ?? this.host.content.encounters.get(encounterId);
+    let enc = opts?.encounterOverride ?? this.host.content.encounters.get(encounterId);
     if (!enc) throw new Error(`combat: unknown encounter "${encounterId}"`);
+    let hunenbergCaption: string | null = null;
+    if (enc.id === 'enc.morgarten') {
+      // Cross-module request (requests/quest-2.md §2, LORE §6 step 11): ignoring Heinrich von Hünenberg's
+      // warning means fewer boulder caches were readied before the ambush. `getFlag` returns `unknown` (it
+      // may be unset entirely, e.g. the quest never ran) — only an EXPLICIT `false` (warning heard and
+      // ignored) nerfs the caches; `undefined`/`true` leave the encounter as authored.
+      const heeded = this.host.questService?.getFlag('hunenberg-warning');
+      if (heeded === false) {
+        // The two caches nearest the Haufen blocks (co-located on each block's own cells) stay; drop the two
+        // farther-flung ones (up-column, and the one by the Schwyz relief's arrival point) — fewer stones
+        // laid without warning enough in advance to work the whole slope.
+        const dropCells = new Set(['10,11', '13,9']);
+        const trimmed = (enc.terrainFeatures ?? []).filter((f) => !dropCells.has(`${f.cells[0][0]},${f.cells[0][1]}`));
+        enc = { ...enc, terrainFeatures: trimmed };
+        hunenbergCaption = 'Without the warning, fewer stones were laid.';
+      }
+    }
     this.resetState();
     this.enc = enc;
     // issue: `enc.ambush` (schema field) was ignored — an explicit opts.ambush still wins, but the encounter's
@@ -135,6 +156,7 @@ export class CombatEngineImpl implements CombatService {
       for (const u of this.units.values()) if (u.side === 'enemy' && isPolearm(u.weapon)) u.stance = 'braced';
     }
     this.ended = false;
+    if (hunenbergCaption) this.pushLog('caption', hunenbergCaption);
     // Real deploy phase (issue 9): only when a human party exists to place — the harness/standalone fallback
     // squad has no one to hand deployment to, so it auto-deploys and rolls initiative immediately as before.
     const realPartyPresent = this.host.party.getParty().length > 0;

@@ -14,6 +14,7 @@ export async function register(ctx: GameContext): Promise<void> {
     party: ctx.services.get('party'),
     rng: ctx.rng.combat,
     worldService: ctx.services.tryGet('world'),
+    questService: ctx.services.tryGet('quest'),
     events: { emit: (event, ...args) => ctx.events.emit(event as never, ...(args as never[])) },
   };
   const engine = new CombatEngineImpl(host);
