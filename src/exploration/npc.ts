@@ -11,7 +11,7 @@ import { Object3D } from 'three';
 import type { World, EntityId } from '@core/ecs';
 import { Transform, Renderable, Interactable, Npc, MeshRef, type NpcC } from '@core/components';
 import type { ContentRegistry } from '@core/content';
-import type { NpcDef } from '@core/schemas';
+import type { NpcDef, ScheduleEntry } from '@core/schemas';
 import type { PartyService, WorldService } from '@core/services';
 import { Rng, hashString } from '@core/rng';
 import { dist2 } from '@core/math';
@@ -100,6 +100,10 @@ export class NpcSystem {
     // proximity check, so we don't pay a spawn cost for NPCs the player never gets near this session.
     const npc = this.world.get(id, Npc)!;
     npc.frozen = true;
+    // Any schedule entry with no offset of its own (i.e. most minor NPCs' plain daySchedule()) settles
+    // at this same spawn jitter rather than drifting onto the POI's exact centre once simulated — see
+    // withDefaultOffset's doc comment.
+    npc.schedule = withDefaultOffset(npc.schedule, [jitter.x, jitter.z]);
     this.defIdOf.set(id, def.id);
     return id;
   }
@@ -113,9 +117,10 @@ export class NpcSystem {
     const jitter = jitterFor(`${homePoi}:${archId}:${salt}`, 14);
     let jx = x + jitter.x, jz = z + jitter.z;
     if (this.worldService.isWater(jx, jz)) { jx = x; jz = z; } // fall back to POI centre rather than the lake
+    const offset: [number, number] = [jx - x, jz - z]; // the *actual* jitter used, post water-fallback
     const genericDef: NpcDef = {
       ...arch, id: `${homePoi}.${archId}.${salt}`, home: homePoi, role: 'generic',
-      schedule: [{ hour: 6, poi: 'home', activity: 'work' }, { hour: 20, poi: 'home', activity: 'sleep' }],
+      schedule: [{ hour: 6, poi: 'home', activity: 'work', offset }, { hour: 20, poi: 'home', activity: 'sleep', offset }],
     };
     const id = this.party.createCharacter(genericDef);
     const t = this.world.get(id, Transform)!;
@@ -258,8 +263,13 @@ export class NpcSystem {
     const home = this.homeOf(id, npc);
     if (!home) return;
     const active = resolveSchedule(npc.schedule, hour, home);
-    const dest = this.poiPos(active.poiId) ?? this.poiPos(home);
-    if (!dest) return;
+    const base = this.poiPos(active.poiId) ?? this.poiPos(home);
+    if (!base) return;
+    // Apply the entry's local offset (same as analyticPosition/reenter) so a walking-and-arrived NPC
+    // settles at its spread-out gathering spot instead of drifting back onto the POI's exact centre —
+    // where the player often stands too (e.g. a scripted gathering at the Rütli).
+    const [ox, oz] = active.offset ?? [0, 0];
+    const dest = { x: base.x + ox, z: base.z + oz };
     npc.targetPoi = active.poiId;
     npc.activity = active.activity;
     walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService);
@@ -307,6 +317,16 @@ function jitterFor(seed: string, radius: number): { x: number; z: number } {
   const a = rng.next() * Math.PI * 2;
   const r = rng.next() * radius;
   return { x: Math.cos(a) * r, z: Math.sin(a) * r };
+}
+
+/** Gives every schedule entry that doesn't already carry its own `offset` this NPC's spawn jitter, so
+ *  `stepSchedule`/`analyticPosition` settle it back at the same spread-out spot it was jittered to at
+ *  spawn — not the POI's exact centre (where the player, and every other NPC with no offset of its own,
+ *  would otherwise also converge; see the Rütli-gathering `offset`s in `content/npcs.ts` for the case
+ *  where a bespoke offset per entry is wanted instead). Returns a fresh array — never mutates the
+ *  original `NpcDef.schedule`, which content may share across spawns/tests. */
+function withDefaultOffset(schedule: ScheduleEntry[], fallback: [number, number]): ScheduleEntry[] {
+  return schedule.map((e) => (e.offset ? e : { ...e, offset: fallback }));
 }
 
 /** Straight-line walk toward `dest`, terrain-following via `heightAt`, refusing to step into water.

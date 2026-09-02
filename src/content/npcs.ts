@@ -86,7 +86,7 @@ const historicalCast: NpcDef[] = [
     modelId: 'char.elder', dialogueRoot: 'dlg.werner-stauffacher',
     chapters: ALL_CHAPTERS,
     schedule: [
-      { hour: 3, poi: 'poi.ruetli', activity: 'idle' }, // the oath-gathering (LORE.md §6 Prologue step 4)
+      { hour: 3, poi: 'poi.ruetli', activity: 'idle', offset: [4, -3] }, // the oath-gathering (LORE.md §6 Prologue step 4)
       { hour: 8, poi: 'poi.steinen', activity: 'work' },
       { hour: 11, poi: 'poi.schwyz', activity: 'market' },
       { hour: 19, poi: 'poi.steinen', activity: 'tavern' },
@@ -104,7 +104,7 @@ const historicalCast: NpcDef[] = [
     modelId: 'char.elder', dialogueRoot: 'dlg.walter-fuerst',
     chapters: ALL_CHAPTERS,
     schedule: [
-      { hour: 3, poi: 'poi.ruetli', activity: 'idle' }, // the oath-gathering (LORE.md §6 Prologue step 4)
+      { hour: 3, poi: 'poi.ruetli', activity: 'idle', offset: [-4, -2] }, // the oath-gathering (LORE.md §6 Prologue step 4)
       { hour: 8, poi: 'poi.altdorf', activity: 'work' },
       { hour: 12, poi: 'poi.altdorf', activity: 'market' },
       { hour: 20, poi: 'poi.altdorf', activity: 'sleep' },
@@ -123,7 +123,7 @@ const historicalCast: NpcDef[] = [
     // so he (like Stauffacher and Fürst below) has to exist from `prologue-1291`, not just Chapter 1 on.
     chapters: ALL_CHAPTERS,
     schedule: [
-      { hour: 3, poi: 'poi.ruetli', activity: 'idle' }, // the oath-gathering (LORE.md §6 Prologue step 4)
+      { hour: 3, poi: 'poi.ruetli', activity: 'idle', offset: [0, 5] }, // the oath-gathering (LORE.md §6 Prologue step 4)
       { hour: 8, poi: 'poi.melchtal', activity: 'work' },
       { hour: 13, poi: 'poi.sarnen', activity: 'market' },
       { hour: 21, poi: 'poi.melchtal', activity: 'sleep' },
