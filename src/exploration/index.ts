@@ -56,8 +56,11 @@ class ExplorationServiceImpl implements ExplorationService {
     this.poiSystem = new PoiSystem(ctx.world, ctx.content, ctx.services, this.bus);
     this.interactSystem = new InteractSystem(ctx.world, ctx.content, ctx.services, this.bus);
     this.npcSystem = new NpcSystem(ctx.world, ctx.content, ctx.services.get('party'), world, roots.dynamic, (encId) => {
+      // Unlike the (now removed, requests/quest-2.md) Act-1 scripted encounters, a Habsburg patrol catching
+      // a hostile player is exploration's own mechanic — no quest stage owns or independently fires it — so
+      // this always starts combat itself, whether or not a quest service exists.
       this.bus.emit('encounter-trigger', encId, -1);
-      if (!ctx.services.tryGet('quest')) ctx.services.tryGet('combat')?.start(encId).catch((err) => console.error('[exploration] patrol combat.start failed', err));
+      ctx.services.tryGet('combat')?.start(encId).catch((err) => console.error('[exploration] patrol combat.start failed', err));
     });
 
     ctx.events.on('state-changed', (from, to) => {

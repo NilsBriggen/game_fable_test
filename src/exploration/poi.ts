@@ -1,9 +1,19 @@
 /**
- * POI discovery, fast travel, region tracking, and the five Act-1 `EncounterTrigger` sites (task spec).
+ * POI discovery, fast travel, region tracking, and the generic `EncounterTrigger` mechanism.
  * Discovery is plain proximity → `Poi.discovered` (persistent) + `poi-discovered` event + a toast if a UI
  * service exists. Encounter triggers are edge-triggered (fire only when the player *crosses into* the
- * radius, not merely "is inside") so spawning/teleporting the player directly onto a trigger — which is
- * exactly what `spawnAt: 'poi.altdorf'` does in the harness — never ambushes them on arrival.
+ * radius, not merely "is inside") so spawning/teleporting the player directly onto one never ambushes
+ * them on arrival.
+ *
+ * The five Act-1 `EncounterTrigger` sites this file originally hard-coded (`enc.brunnen-quay`,
+ * `enc.altdorf-square`, `enc.hohle-gasse`, `enc.einsiedeln-gate`, `enc.morgarten`) are deliberately gone:
+ * per `requests/quest-2.md` (fix round 1, critic issue 10), the quest module now fires every one of those
+ * encounters itself, directly, via `{encounter: id}` effects on the owning quest stage's `onEnter` — a
+ * proximity trigger covering the same encounter id here would double-invoke `CombatService.start()`.
+ * `addEncounterTrigger()` below is the generic mechanism kept for any future trigger (a purely visual/
+ * camera cue, say) that is gated on `condition` and never calls `combat.start` itself when a quest service
+ * exists — see that method's doc comment. The Habsburg patrol trigger (`npc.ts`) is unrelated: it is not
+ * an `EncounterTrigger` entity at all, and stays as the coordinator confirmed.
  */
 import type { World, EntityId } from '@core/ecs';
 import { Transform, Poi, EncounterTrigger, Name } from '@core/components';
@@ -14,19 +24,6 @@ import type { ServiceRegistry } from '@core/services';
 import type { EventBus } from '@core/events';
 import { dist2 } from '@core/math';
 import type { ExplorationEvents } from '@core/services';
-
-interface TriggerSeed { encounterId: string; poiId: string; condition: QuestCondition; ambush?: 'player' | 'enemy' }
-
-/** LORE.md §6 chapter titles used as placeholder quest-stage gates (task spec: "condition placeholders
- *  so quests can enable them"); the quest builder's Wave-3 `content/quests/act1/*` is expected to define
- *  matching stage ids — these are not authoritative quest ids, just consistent, readable placeholders. */
-const TRIGGER_SEEDS: TriggerSeed[] = [
-  { encounterId: 'enc.brunnen-quay', poiId: 'poi.brunnen', condition: { questStage: ['quest.der-eid', 'escort-brunnen'] } },
-  { encounterId: 'enc.altdorf-square', poiId: 'poi.altdorf', condition: { questStage: ['quest.der-hut-auf-der-stange', 'square-confrontation'] } },
-  { encounterId: 'enc.hohle-gasse', poiId: 'poi.hohle-gasse', condition: { questStage: ['quest.der-hut-auf-der-stange', 'hohle-gasse-ambush'] } },
-  { encounterId: 'enc.einsiedeln-gate', poiId: 'poi.einsiedeln', condition: { questStage: ['quest.marchenstreit', 'abbey-gate'] } },
-  { encounterId: 'enc.morgarten', poiId: 'poi.morgarten', condition: { questStage: ['quest.morgarten', 'battle'] } },
-];
 
 export class PoiSystem {
   private lastRegion: string | null = null;
@@ -39,8 +36,10 @@ export class PoiSystem {
     private events: EventBus<ExplorationEvents>,
   ) {}
 
-  /** Rebuilds every `Poi`/`EncounterTrigger` entity — called once from `populate()`. Existing discovered
-   *  state is passed back in by the caller via `setDiscovered()` after this (e.g. on load). */
+  /** Rebuilds every `Poi` entity, and clears any previously-added `EncounterTrigger` entities (so a
+   *  repeat `populate()` — a second `newGame()` in the same page — never doubles them up). Called once
+   *  from `populate()`. Existing discovered state is passed back in by the caller via `setDiscovered()`
+   *  after this (e.g. on load). */
   spawnPoiEntities(): void {
     for (const id of this.world.query(Poi)) this.world.destroy(id);
     for (const id of this.world.query(EncounterTrigger)) this.world.destroy(id);
@@ -50,14 +49,17 @@ export class PoiSystem {
       this.world.add(id, Poi, { poiId: def.id, kind: def.kind, radius: def.discoverRadius, discovered: false, fastTravel: def.fastTravel });
       this.world.add(id, Name, { id: def.id, display: def.name });
     }
-    for (const seed of TRIGGER_SEEDS) {
-      const poiDef = this.content.pois.get(seed.poiId);
-      const enc = this.content.encounters.get(seed.encounterId);
-      const loc = enc?.location ?? (poiDef ? { x: poiDef.x, z: poiDef.z } : { x: 0, z: 0 });
-      const id = this.world.create(`trigger.${seed.encounterId}`);
-      this.world.add(id, Transform, { x: loc.x, y: 0, z: loc.z, yaw: 0 });
-      this.world.add(id, EncounterTrigger, { encounterId: seed.encounterId, radius: 14, once: true, fired: false, condition: seed.condition, ambush: seed.ambush });
-    }
+  }
+
+  /** Generic `EncounterTrigger` mechanism (see file header). `condition` should be the exact
+   *  `{questStage: [questId, stageId]}` the owning quest stage uses, and — because the quest module
+   *  already calls `combat.start()` itself for every encounter it owns — a caller wiring up a *visual*
+   *  cue trigger here must not also start combat from its own `encounter-trigger` listener. */
+  addEncounterTrigger(encounterId: string, x: number, z: number, opts: { radius?: number; once?: boolean; condition?: QuestCondition; ambush?: 'player' | 'enemy' } = {}): EntityId {
+    const id = this.world.create(`trigger.${encounterId}`);
+    this.world.add(id, Transform, { x, y: 0, z, yaw: 0 });
+    this.world.add(id, EncounterTrigger, { encounterId, radius: opts.radius ?? 14, once: opts.once ?? true, fired: false, condition: opts.condition, ambush: opts.ambush });
+    return id;
   }
 
   discoveredIds(): string[] {
