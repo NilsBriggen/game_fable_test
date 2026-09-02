@@ -142,6 +142,13 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   const bestDist = new Float32Array(n).fill(Infinity);
   const bestValleyH = new Float32Array(n);
   const bestWeight = new Float32Array(n);
+  // Road-only nearest-wins tracking (separate from bestDist/bestWeight above, which also include
+  // rivers): used ONLY to protect a shore-hugging ROAD from the lake-shore blend pass. Rivers must
+  // NOT protect that pass — a river meeting the lake is naturally at lake level already, and a wide
+  // river corridor (halfWidth up to 220m) "protecting" cells near its mouth from being pulled to lake
+  // level was itself producing an 80m+ step right at the water's edge (the Reuss/Flüelen delta).
+  const bestRoadDist = new Float32Array(n).fill(Infinity);
+  const bestRoadWeight = new Float32Array(n);
   // Authored a little under the 25° test/design ceiling (not right at it) so the small amount of
   // detail noise + relaxation applied afterward doesn't push a couple of samples back over the line.
   const MAX_GRADE_TAN = Math.tan((18 * Math.PI) / 180);
@@ -171,6 +178,10 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
             const floorH = ha + (hb - ha) * t;
             bestValleyH[idx] = valleyProfile(d, floorH, b);
             bestWeight[idx] = 1 - smoothstep(halfWidth, influence, d);
+          }
+          if (c.kind === 'road' && d < bestRoadDist[idx]) {
+            bestRoadDist[idx] = d;
+            bestRoadWeight[idx] = 1 - smoothstep(halfWidth, influence, d);
           }
           // surface band (road bed / river mud strip), stamped from the same segment pass so it is
           // continuous too — this is what gets 'road' onto ≥95% of centreline samples instead of the
@@ -301,6 +312,15 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // a vertical-walled trench. Also fixes basins whose surrounding terrain sat below or far above the
   // lake (Ägerisee: -26m outside the polygon; Vierwaldstättersee shores: +80-93m).
   const MAJOR_LAKES = new Set(['urnersee', 'gersau-basin', 'luzern-basin', 'kuessnachtersee', 'alpnachersee']);
+  // NEAREST-WINS across lakes: two basins' D-bands can overlap (e.g. a point near the Urnersee's
+  // southern tip can also sit within the Gersau basin's 600m band), and applying each lake's blend
+  // in turn used to let a FARTHER lake's pass (small w, so mostly "target") overwrite a nearer lake's
+  // already-correct near-shore-level result — an 18m+ step appearing right at the true shoreline.
+  // Track the winning (nearest, i.e. smallest d) lake's target/weight per cell and apply it once.
+  const shoreDist = new Float32Array(n).fill(Infinity);
+  const shoreTarget = new Float32Array(n);
+  const shoreW = new Float32Array(n);
+  const shoreTouched = new Uint8Array(n);
   for (const lake of geo.lakes) {
     const D = MAJOR_LAKES.has(lake.id) ? 600 : 300;
     let cx = 0, cz = 0;
@@ -327,24 +347,30 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         // this pass touches gets overwritten again by the interior drop (step 7, runs after), so
         // covering a bit of the interior here too is harmless.
         if (d > D) continue;
+        const idx = row + gx;
+        const ad = Math.abs(d);
+        if (ad >= shoreDist[idx]) continue; // a nearer lake already claimed this cell
+        shoreDist[idx] = ad;
+        shoreTouched[idx] = 1;
         // real Axen cliff: the Urnersee's east shore rises faster, but still continuously — restricted
         // to the actual Axen stretch (roughly Sisikon/Tellsplatte, z<1000) so the flat Flüelen/Reuss
         // delta at the lake's south end (z>1000, same x>cx side) doesn't also get force-steepened.
         const steep = lake.id === 'urnersee' && x > cx && z < 1000;
-        const target = shoreProfile(d, lake.levelGameH, D, steep);
-        const idx = row + gx;
-        let w = smoothstep(0, D, d); // 0 at the shoreline (full target), 1 at D (fully back to existing terrain)
-        // A shore-hugging road/river (the Axen path, the lake-shore stretches of several ROADS chains)
-        // must not get pulled down to the generic shore profile — its own corridor floor (bestWeight,
-        // computed above) already IS the correct, authored height right at the water's edge.
-        // Also protect a true peak summit that merely happens to sit within D of some lake in map
-        // (x,z) terms (e.g. Fronalpstock, a few hundred game-metres from the Urnersee) — it must not
-        // get partially pulled toward lake level just because it is geographically "close" to the
-        // shore while being several hundred metres higher in elevation.
-        w = Math.max(w, bestWeight[idx], peakProtect[idx]);
-        heights[idx] = target + (heights[idx] - target) * w;
+        shoreTarget[idx] = shoreProfile(d, lake.levelGameH, D, steep);
+        shoreW[idx] = smoothstep(0, D, d); // 0 at the shoreline (full target), 1 at D (fully back to existing terrain)
       }
     }
+  }
+  for (let idx = 0; idx < n; idx++) {
+    if (!shoreTouched[idx]) continue;
+    // Protect (a) a true peak summit that merely happens to sit within D of some lake in map (x,z)
+    // terms (e.g. Fronalpstock) — it must not get pulled toward lake level just because it is
+    // geographically "close" to the shore while being hundreds of metres higher in elevation; and
+    // (b) a shore-hugging ROAD's own authored height (bestRoadWeight — roads only, NOT rivers: a
+    // river meeting the lake is already naturally at lake level, so protecting cells near a wide
+    // river's mouth from this pass reintroduced an 80m+ step right at the water).
+    const w = Math.max(shoreW[idx], peakProtect[idx], bestRoadWeight[idx]);
+    heights[idx] = shoreTarget[idx] + (heights[idx] - shoreTarget[idx]) * w;
   }
 
   // 5b. short relaxation top-up so the new shore transition blends into its neighbours too (still

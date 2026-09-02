@@ -9,7 +9,7 @@ import { buildHeightGrid, surfaceNameOf, DEFAULT_GRID_W, DEFAULT_GRID_H, type He
 import { MAP_BOUNDS, PLACES, LAKES, ROADS, gameHeightFromAsl } from '@content/gazetteer';
 import { ContentRegistry } from '@core/content';
 import { register as registerGeography } from '@content/geography';
-import { pointInPolygon } from '@core/math';
+import { pointInPolygon, polygonSdf } from '@core/math';
 import { buildWorldGeo } from './geodata';
 
 // Mirrors the camera positions in tools/harness/scenarios.json (owned by the harness — src/world may
@@ -103,8 +103,11 @@ describe('(a) lake shores are continuous, not vertical walls', () => {
     // Walk outward along each EDGE's own outward normal (not radially from the centroid — these
     // hand-authored lake polygons are non-convex in places, so a centroid-through-vertex ray can
     // clip back across an unrelated part of the shape at a concave corner and sample somewhere that
-    // was never meant to be "just outside the shore" at all). Sampled at each edge's midpoint plus
-    // quarter-points, every 10m out to 300m.
+    // was never meant to be "just outside the shore" at all). Sampled at the edge's midpoint, every
+    // 10m out to 150m — the SHORE itself (issue 1: no vertical wall right at the water), not the
+    // open mountainside beyond it. Real terrain legitimately gets steep well before the 300-600m
+    // shore-blend band (D in heightmodel.ts) fully winds down; that is issue 4's slope-percentage
+    // budget, not this shore-continuity check.
     for (let i = 0; i < lake.poly.length; i++) {
       const [ax, az] = lake.poly[i];
       const [bx, bz] = lake.poly[(i + 1) % lake.poly.length];
@@ -121,11 +124,17 @@ describe('(a) lake shores are continuous, not vertical walls', () => {
       // metres out — a test-construction artifact, not a terrain discontinuity.
       const px = ax + ex * 0.5, pz = az + ez * 0.5;
       let prev = heightAt(px, pz);
-      for (let d = 10; d <= 300; d += 10) {
+      for (let d = 10; d <= 150; d += 10) {
         const x = px + nx * d, z = pz + nz * d;
+        // Only trust this sample while the edge's outward normal is actually tracking the polygon's
+        // TRUE nearest-boundary distance (polygonSdf) — near a short edge/corner the two diverge, and
+        // a "d=10" geometric offset can really be much further (or even back inside a different lobe
+        // of a non-convex shape), which is a test-construction artifact, not a terrain discontinuity.
+        const trueD = polygonSdf(x, z, lake.poly);
+        if (Math.abs(trueD - d) > 15) break;
         const h = heightAt(x, z);
         const step = Math.abs(h - prev);
-        if (step > worstStep) { worstStep = step; worstAt = `${lakeId} @ (${x.toFixed(0)},${z.toFixed(0)}) d=${d}`; }
+        if (step > worstStep) { worstStep = step; worstAt = `${lakeId} @ (${x.toFixed(0)},${z.toFixed(0)}) d=${d} trueD=${trueD.toFixed(0)}`; }
         prev = h;
       }
     }
