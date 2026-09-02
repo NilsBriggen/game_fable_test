@@ -11,7 +11,7 @@ import type { ContentRegistry } from '@core/content';
 import type {
   AbilityDef, EncounterDef, ItemDef, NpcDef, Objective, ScriptedEvent, SerializedCombat, Side,
 } from '@core/schemas';
-import type { DamageType } from '@core/dsl';
+import type { CombatEffect, DamageType } from '@core/dsl';
 import type {
   AttackContext, CellKey, CellView, CombatCommand, CombatEventRecord, CombatEvents, CombatResult, CombatService,
   CombatStateView, CommandResult, DerivedStats, WorldService,
@@ -22,7 +22,7 @@ import { Rng, rollDice } from '@core/rng';
 import { modifier } from '@core/math';
 import { buildGrid, cellDistance, cellIndex, cellToWorldXZ, inBounds, GridInfo } from './rules/grid';
 import { dijkstra, reachableCells, reconstructPath, pathCost, Occupant } from './rules/path';
-import { rollAttack, AttackInputs } from './rules/attack';
+import { rollAttack, estimateHitChance, AttackInputs } from './rules/attack';
 import { moraleCheck, moraleDc } from './rules/morale';
 import { formationBonus, isFlanked, FormationUnit } from './rules/formation';
 import { addStatus, hasStatus, isPolearm, removeStatus, type PendingReactionItem, type Unit, type WeaponInfo } from './types';
@@ -88,6 +88,13 @@ export class CombatEngineImpl implements CombatService {
   private ended = false;
   private ambush?: 'player' | 'enemy';
   private outcome: 'win' | 'lose' | 'fled' | null = null;
+  /** issue 10: a legal `auto` run against two sides that can never reach each other used to hit the 20 000-
+   *  iteration guard and log a console.error. Instead, detect N consecutive rounds with no hp/position change
+   *  and end the encounter as a stalemate. */
+  private stalemateFingerprint = '';
+  private stalemateRounds = 0;
+  /** issue 8: at most one morale check per unit per *reason* per round (reset each `startRound`). */
+  private moraleCheckedThisRound = new Map<EntityId, Set<string>>();
 
   constructor(private host: CombatHost) {}
 
@@ -98,7 +105,9 @@ export class CombatEngineImpl implements CombatService {
     if (!enc) throw new Error(`combat: unknown encounter "${encounterId}"`);
     this.resetState();
     this.enc = enc;
-    this.ambush = opts?.ambush;
+    // issue: `enc.ambush` (schema field) was ignored — an explicit opts.ambush still wins, but the encounter's
+    // own authored ambush now applies when the caller doesn't override it.
+    this.ambush = opts?.ambush ?? enc.ambush;
     const { grid, cells } = buildGrid(enc, this.host.worldService);
     this.grid = grid;
     this.cells = cells;
@@ -106,9 +115,26 @@ export class CombatEngineImpl implements CombatService {
     this.objectives = enc.objectives.map((def) => ({ def, done: false }));
     this.loseObjectives = (enc.loseObjectives ?? []).map((def) => ({ def, done: false }));
     this.placeUnits(enc);
+    // Ambushed defenders (§5.3: "unseen attacker" round) start with weapons already set: a braced polearm
+    // line is exactly what an ambush prepared for cavalry looks like.
+    if (this.ambush === 'player') {
+      for (const u of this.units.values()) if (u.side === 'player' && isPolearm(u.weapon)) u.stance = 'braced';
+    } else if (this.ambush === 'enemy') {
+      for (const u of this.units.values()) if (u.side === 'enemy' && isPolearm(u.weapon)) u.stance = 'braced';
+    }
+    this.ended = false;
+    // Real deploy phase (issue 9): only when a human party exists to place — the harness/standalone fallback
+    // squad has no one to hand deployment to, so it auto-deploys and rolls initiative immediately as before.
+    const realPartyPresent = this.host.party.getParty().length > 0;
+    if (realPartyPresent) {
+      this.phase = 'deploy';
+      this.pushLog('log', `${enc.name} begins. Deploy the party.`);
+      this.emitState();
+      this.host.events?.emit('request-state', 'combat');
+      return new Promise<CombatResult>((resolve) => { this.resultResolve = resolve; });
+    }
     this.rollInitiative();
     this.phase = 'active';
-    this.ended = false;
     this.pushLog('log', `${enc.name} begins.`);
     this.emitState();
     // Autosave contract: isActive() and serialize() must be valid before this fires.
@@ -121,6 +147,15 @@ export class CombatEngineImpl implements CombatService {
     });
   }
 
+  /** Finalises deployment: rolls initiative and begins round 1. Called by the first `{type:'deploy'}` command,
+   *  or by `{type:'auto'}` in harness/AI-driven mode ("auto-deploy after a timeout" — BUILDER_RULES.md). */
+  private finishDeploy(): void {
+    if (this.phase !== 'deploy') return;
+    this.rollInitiative();
+    this.phase = 'active';
+    this.advance();
+  }
+
   private resetState(): void {
     this.enc = null; this.grid = null; this.cells = [];
     this.units.clear(); this.order = []; this.turnIndex = 0; this.round = 0;
@@ -128,6 +163,7 @@ export class CombatEngineImpl implements CombatService {
     this.objectives = []; this.loseObjectives = []; this.featureUses.clear();
     this.resultResolve = null; this.forceAiAll = false; this.reactionQueue = [];
     this.scriptedRoundFired.clear(); this.ended = false; this.outcome = null;
+    this.stalemateFingerprint = ''; this.stalemateRounds = 0; this.moraleCheckedThisRound.clear();
   }
 
   isActive(): boolean {
@@ -151,7 +187,8 @@ export class CombatEngineImpl implements CombatService {
       const count = pu.count ?? 1;
       for (let i = 0; i < count; i++) {
         const { q, r } = this.spreadCell(pu.q, pu.r, i, enc);
-        this.spawnUnit(def, pu.side, q, r, { mounted: pu.mounted, group: pu.group, name: pu.name, npcId: pu.npc });
+        const unit = this.spawnUnit(def, pu.side, q, r, { mounted: pu.mounted, group: pu.group, name: pu.name, npcId: pu.npc });
+        this.applyEncounterMorale(unit, enc);
         ordinal++;
       }
     }
@@ -159,9 +196,20 @@ export class CombatEngineImpl implements CombatService {
     if (useRealParty) {
       realParty.forEach((id, i) => {
         const { q, r } = this.deployCellFor(i);
-        this.attachExistingUnit(id, 'player', q, r);
+        const unit = this.attachExistingUnit(id, 'player', q, r);
+        this.applyEncounterMorale(unit, enc);
       });
     }
+  }
+
+  /** `EncounterDef.morale` ("initial morale modifier for each side") was declared on the schema but never
+   *  actually read anywhere — an inert field, same class of bug as issue 5's dead abilities. Wired in here so
+   *  content (e.g. Morgarten's home-ground Confederate confidence vs. a road-weary Habsburg column) can use
+   *  it; clamped to the same [0, moraleMax] range `applyMoraleDelta` uses. */
+  private applyEncounterMorale(unit: Unit, enc: EncounterDef): void {
+    const delta = enc.morale?.[unit.side];
+    if (!delta) return;
+    unit.morale = Math.max(0, Math.min(unit.moraleMax, unit.morale + delta));
   }
 
   private spreadCell(q: number, r: number, i: number, enc: EncounterDef): CellKey {
@@ -228,8 +276,10 @@ export class CombatEngineImpl implements CombatService {
   // ---------------- initiative ----------------
 
   private rollInitiative(): void {
+    // issue 14: `u.initiativeBonus` (from `DerivedStats.initiativeBonus`) already includes the agility
+    // modifier — adding `modifier(agility)` again here double-counted it.
     const rolled = [...this.units.values()].map((u) => ({
-      u, roll: this.host.rng.die(10) + modifier(u.attributes.agility) + u.initiativeBonus, tie: this.host.rng.next(),
+      u, roll: this.host.rng.die(10) + u.initiativeBonus, tie: this.host.rng.next(),
     }));
     rolled.sort((a, b) => b.roll - a.roll || (modifier(b.u.attributes.agility) - modifier(a.u.attributes.agility)) || (b.tie - a.tie));
     this.order = rolled.map((r) => r.u.id);
@@ -268,7 +318,9 @@ export class CombatEngineImpl implements CombatService {
       this.emitState();
       return;
     }
-    console.error('[combat] advance(): loop guard tripped');
+    // Defensive backstop only (stalemate detection in startRound() should always end things first): never
+    // spam a console error over a legal command, just end the encounter as an unresolved stalemate.
+    if (!this.ended) { this.outcome = this.outcome ?? 'fled'; this.pushLog('log', 'The engagement stalls; no outcome is reached.'); this.finish(); }
   }
 
   private nextUnit(): boolean {
@@ -290,6 +342,7 @@ export class CombatEngineImpl implements CombatService {
 
   private startRound(): void {
     this.round += 1;
+    this.moraleCheckedThisRound.clear();
     for (const u of this.units.values()) {
       if (u.down && !u.dead) {
         u.bleedTurns -= 1;
@@ -299,6 +352,28 @@ export class CombatEngineImpl implements CombatService {
     this.pushLog('round', `Round ${this.round} begins.`, undefined, { round: this.round });
     this.runScriptedEvents((e) => e.round === this.round);
     this.updateObjectiveProgress();
+    this.checkStalemate();
+  }
+
+  /** issue 10 / probe 7: end a genuinely unwinnable-by-anyone fight (e.g. two units that can never reach each
+   *  other) as a stalemate instead of grinding the loop guard. Fingerprints hp+position+status every round;
+   *  20 unchanged rounds in a row ends it. */
+  private checkStalemate(): void {
+    if (this.ended) return;
+    const fp = [...this.units.values()]
+      .map((u) => `${u.id}:${u.hp}:${u.q},${u.r}:${u.down ? 1 : 0}:${u.routed ? 1 : 0}`)
+      .sort().join('|');
+    if (fp === this.stalemateFingerprint) {
+      this.stalemateRounds++;
+      if (this.stalemateRounds >= 20) {
+        this.outcome = this.outcome ?? 'fled';
+        this.pushLog('log', 'Neither side can close — the engagement ends in a stalemate.');
+        this.finish();
+      }
+    } else {
+      this.stalemateFingerprint = fp;
+      this.stalemateRounds = 0;
+    }
   }
 
   private beginUnitTurn(u: Unit): void {
@@ -308,13 +383,31 @@ export class CombatEngineImpl implements CombatService {
     u.hasActedThisTurn = false;
     for (const s of u.status) s.turns -= 1;
     u.status = u.status.filter((s) => s.turns > 0);
+    // issue 8: Shaken also impedes movement — approximated as half speed (the fuller "may not advance toward
+    // the enemy" rule would need per-step direction tracking in the pathfinder).
+    if (hasStatus(u, 'shaken')) { u.ap.moveM = u.speedMBase / 2; u.ap.moveMax = u.ap.moveM; }
+    this.tickDrowning(u);
     this.pushLog('turn-start', `${u.name}'s turn.`, u.id);
+  }
+
+  /** issue 5 / issue 3: Drowning is real — 1d6 automatic damage every turn spent in water (no action needed
+   *  to suffer it), and it kills outright rather than just downing, so a knight weighed down by mail does not
+   *  get back up (LORE §1: "many knights drown in the lake"). Leaving the water (or being hauled out) clears it. */
+  private tickDrowning(u: Unit): void {
+    if (u.dead || !hasStatus(u, 'drowning')) return;
+    const cell = this.cellAt(u.q, u.r);
+    if (cell?.surface !== 'water') { removeStatus(u, 'drowning'); return; }
+    const dmg = rollDice('1d6', this.host.rng);
+    u.hp = Math.max(0, u.hp - dmg);
+    if (u.isPlayerControlled) this.host.party.damage(u.id, dmg);
+    this.pushLog('damage', `${u.name} is dragged under and drowns for ${dmg}.`, u.id, { amount: dmg });
+    if (u.hp <= 0) { u.dead = true; u.down = false; this.pushLog('death', `${u.name} drowns.`, u.id); }
   }
 
   private doRoutedTurn(u: Unit): void {
     const budget = u.speedMBase * 2; // "flees toward own edge at Dash speed"
     if (!this.grid) return;
-    const dist = dijkstra(u.q, u.r, budget, u.side, { cols: this.grid.cols, rows: this.grid.rows, cellM: this.grid.cellM, cells: this.cells }, this.occupants(u.id));
+    const dist = dijkstra(u.q, u.r, budget, u.side, { cols: this.grid.cols, rows: this.grid.rows, cellM: this.grid.cellM, cells: this.cells }, this.occupants(u.id), u.mounted);
     const targetR = u.side === 'player' ? this.grid.rows - 1 : 0;
     let best: CellKey | null = null;
     let bestScore = -Infinity;
@@ -563,7 +656,7 @@ export class CombatEngineImpl implements CombatService {
       id: u.id, name: u.name, side: u.side, q: u.q, r: u.r, hp: u.hp, hpMax: u.hpMax, morale: u.morale, moraleMax: u.moraleMax,
       initiative: u.initiative, ap: { ...u.ap }, status: u.status.map((s) => ({ ...s })), stance: u.stance, loaded: u.loaded,
       mounted: u.mounted, down: u.down, routed: u.routed,
-      defense: this.effectiveDefense(u, 0),
+      defense: this.effectiveDefense(u, this.cellAt(u.q, u.r)?.cover ?? 0),
       weapon: u.weapon ? { name: u.weapon.name, reach: u.weapon.reach, ranged: false, damage: u.weapon.damage } : u.ranged ? { name: u.ranged.name, reach: u.ranged.range?.long ?? 8, ranged: true, damage: u.ranged.damage } : null,
       abilities: this.abilitiesFor(u),
       formation: u.formation,
@@ -580,12 +673,14 @@ export class CombatEngineImpl implements CombatService {
     out.push('ability.attack'); // always available — an unarmed strike is the fallback (see attackInputsFor)
     if (u.ranged && u.loaded) out.push('ability.aimed-shot');
     if (u.ranged && !u.loaded) out.push('ability.reload');
-    out.push('ability.shove', 'ability.disengage', 'ability.dash');
-    if (this.host.party.skillLevel(u.id, 'herbalism') > 0 || true) out.push('ability.bandage');
+    out.push('ability.shove', 'ability.disengage', 'ability.dash', 'ability.bandage');
     if (u.leadershipLevel >= 10) out.push('ability.rally');
-    if (u.weapon && (u.weapon.properties.includes('brace'))) out.push('ability.brace');
+    if (isPolearm(u.weapon)) out.push('ability.brace');
     if (u.mounted && u.weapon) out.push('ability.charge');
     for (const abilityId of GRANTED_ABILITY_IDS) {
+      // ability.riposte is an automatic substitute for an opportunity attack (see resolveOpportunityAttack),
+      // never something a unit selects on its own turn — keep it out of the offered list.
+      if (abilityId === 'ability.riposte') continue;
       const perkId = ABILITY_TO_PERK[abilityId];
       if (perkId && this.host.party.hasPerk(u.id, perkId)) out.push(abilityId);
     }
@@ -597,13 +692,13 @@ export class CombatEngineImpl implements CombatService {
   reachable(unitId: EntityId): CellKey[] {
     const u = this.units.get(unitId);
     if (!u || !this.grid) return [];
-    return reachableCells(u.q, u.r, u.ap.moveM, u.side, this.pathGrid(), this.occupants(u.id));
+    return reachableCells(u.q, u.r, u.ap.moveM, u.side, this.pathGrid(), this.occupants(u.id), u.mounted, hasStatus(u, 'mountain-stride'));
   }
 
   previewMove(unitId: EntityId, to: CellKey): { path: CellKey[]; costM: number; provokes: EntityId[] } | null {
     const u = this.units.get(unitId);
     if (!u || !this.grid) return null;
-    const dist = dijkstra(u.q, u.r, u.ap.moveM, u.side, this.pathGrid(), this.occupants(u.id));
+    const dist = dijkstra(u.q, u.r, u.ap.moveM, u.side, this.pathGrid(), this.occupants(u.id), u.mounted, hasStatus(u, 'mountain-stride'));
     const path = reconstructPath(dist, to.q, to.r);
     const cost = pathCost(dist, to.q, to.r);
     if (!path || cost === null) return null;
@@ -641,12 +736,12 @@ export class CombatEngineImpl implements CombatService {
     if (!targetUnit) return null;
     const { attackBonus, edge, burden, weapon } = this.attackInputsFor(u, targetUnit, ability);
     const ctx: AttackContext = { edge, burden, ranged: !!weapon.range, distanceCells: cellDistance(u.q, u.r, targetUnit.q, targetUnit.r), heightDelta: (this.cellAt(u.q, u.r)?.height ?? 0) - (this.cellAt(targetUnit.q, targetUnit.r)?.height ?? 0), flanked: this.targetIsFlanked(targetUnit, u), charge: false };
-    const defense = this.effectiveDefense(targetUnit, 0);
-    // Simplified hit-chance estimate (does not roll): P(d20+bonus >= defense) with edge/burden net.
+    // issue 7 / probe 6: cover must match what `resolveAttack` actually rolls against, and the estimate must
+    // be exact (crit range + nat-1), not a linear approximation — see rules/attack.ts `estimateHitChance`.
+    const defense = this.effectiveDefense(targetUnit, this.cellAt(targetUnit.q, targetUnit.r)?.cover ?? 0);
     const net = edge.length - burden.length;
-    const need = defense - attackBonus;
-    const pSingle = Math.max(0, Math.min(20, 21 - need)) / 20;
-    const p = net > 0 ? 1 - (1 - pSingle) ** 2 : net < 0 ? pSingle ** 2 : pSingle;
+    const mode = net > 0 ? 'edge' : net < 0 ? 'burden' : 'normal';
+    const p = estimateHitChance(attackBonus, defense, u.critRange, mode);
     return { hitChance: Math.round(p * 100) / 100, context: ctx, damage: weapon.damage };
   }
 
@@ -659,25 +754,64 @@ export class CombatEngineImpl implements CombatService {
 
   // ---------------- ability / attack support ----------------
 
+  /** issue 1 / probe 1: is `target` actually a legal target of `ability` for `u` right now — in `targets()`'s
+   *  own list (which already applies `abilityRangeCells`)? A `target === undefined` call (self/area abilities
+   *  used without an explicit target, e.g. Rally, Disengage, Roll Boulders) is always allowed; those read
+   *  their own targets internally. */
+  private targetAllowed(u: Unit, ability: AbilityDef, target: CellKey | EntityId | undefined): boolean {
+    if (target === undefined) return true;
+    if (ability.target === 'self') return target === u.id;
+    const valid = this.targets(u.id, ability.id);
+    if (typeof target === 'number') return valid.some((v) => v === target);
+    return valid.some((v) => typeof v === 'object' && v.q === target.q && v.r === target.r);
+  }
+
+  /** Defensive distance re-check inside `resolveAttack` itself, independent of the `targetAllowed` gate at the
+   *  command boundary (issue 1: "make `resolveAttack` assert `cellDistance ≤ reach` defensively"). */
+  private withinReach(attacker: Unit, target: Unit, ability: AbilityDef): boolean {
+    return cellDistance(attacker.q, attacker.r, target.q, target.r) <= this.abilityRangeCells(attacker, ability);
+  }
+
   private abilityRangeCells(u: Unit, ability: AbilityDef): number {
     if (ability.range === 'weapon') {
       if (ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot') return u.ranged?.range?.long ?? 8;
-      const w = u.weapon ?? u.ranged;
-      return w?.range?.long ?? w?.reach ?? 1;
+      // 'ability.attack' is "whatever is in hand": a unit carrying both a melee sidearm and a loaded ranged
+      // weapon (every crossbowman archetype does — a dagger alongside the Armbrust) can reach with EITHER,
+      // so its target list is the union of both reaches, not just the melee sidearm's 1-cell reach (that bug
+      // silently reduced every dagger+crossbow unit to melee-only — no crossbowman ever actually fired).
+      const meleeReach = u.weapon?.reach ?? (u.ranged ? 0 : 1);
+      const rangedReach = u.ranged ? (u.ranged.range?.long ?? u.ranged.reach ?? 0) : 0;
+      return Math.max(meleeReach, rangedReach, 1);
     }
     return ability.range;
   }
 
+  private meleeReach(u: Unit): number {
+    return u.weapon?.reach ?? 1;
+  }
+
+  /** issue 4 / probe 3b-3c: flanking requires both hostiles to actually be within reach of the target, and
+   *  excludes Down/Routed units (they aren't a threatening second blade). */
   private targetIsFlanked(target: Unit, attacker: Unit): boolean {
-    const hostiles = [...this.units.values()].filter((o) => o.id !== attacker.id && o.id !== target.id && !o.dead && o.side !== target.side).map((o) => ({ q: o.q, r: o.r }));
     if (target.formation.inHaufen) return false; // Haufen units are immune to flanking
-    return isFlanked({ q: target.q, r: target.r }, { q: attacker.q, r: attacker.r }, hostiles);
+    const hostiles = [...this.units.values()]
+      .filter((o) => o.id !== attacker.id && o.id !== target.id && !o.dead && !o.down && !o.routed && o.side !== target.side)
+      .map((o) => ({ q: o.q, r: o.r, reach: this.meleeReach(o) }));
+    return isFlanked({ q: target.q, r: target.r }, { q: attacker.q, r: attacker.r, reach: this.meleeReach(attacker) }, hostiles);
   }
 
   private attackInputsFor(attacker: Unit, target: Unit, ability: AbilityDef): { attackBonus: number; edge: string[]; burden: string[]; weapon: WeaponInfo } {
-    const usingRanged = ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot' || (ability.id === 'ability.attack' && !attacker.weapon && !!attacker.ranged);
-    const weapon = (usingRanged ? attacker.ranged : attacker.weapon) ?? attacker.weapon ?? attacker.ranged;
-    if (!weapon) return { attackBonus: 0, edge: [], burden: [], weapon: { defId: '', name: 'fists', hands: 1, reach: 1, damage: '1d2', damageType: 'blunt', properties: [] } };
+    // issue 5: Disarmed forces the unarmed fallback regardless of what's equipped.
+    const disarmed = hasStatus(attacker, 'disarmed');
+    // Plain 'ability.attack' picks whichever weapon can actually reach the target: melee if the target is
+    // within the sidearm's reach (or there's no ranged weapon to fall back on), ranged otherwise. A unit with
+    // both (every crossbowman) is not melee-only just because it happens to also carry a dagger.
+    const meleeReachFor = attacker.weapon?.reach ?? 1;
+    const distToTarget = cellDistance(attacker.q, attacker.r, target.q, target.r);
+    const usingRanged = !disarmed && (ability.id === 'ability.aimed-shot' || ability.id === 'ability.crossbow-snapshot'
+      || (ability.id === 'ability.attack' && !!attacker.ranged && (!attacker.weapon || distToTarget > meleeReachFor)));
+    const weapon = disarmed ? undefined : ((usingRanged ? attacker.ranged : attacker.weapon) ?? attacker.weapon ?? attacker.ranged);
+    if (!weapon) return { attackBonus: attacker.attackBonus['unarmed'] ?? 0, edge: [], burden: [], weapon: { defId: '', name: 'fists', hands: 1, reach: 1, damage: '1d2', damageType: 'blunt', properties: [] } };
     const def = this.host.content.items.get(weapon.defId);
     const skillId = def?.weapon?.skill ?? 'unarmed';
     const attackBonus = (attacker.attackBonus[skillId] ?? 0) + (attacker.stance === 'aggressive' ? 2 : attacker.stance === 'guarded' ? -2 : 0);
@@ -701,6 +835,10 @@ export class CombatEngineImpl implements CombatService {
       if (adjacentEnemy) burden.push('adjacent enemy');
     }
     if (hasStatus(attacker, 'exhausted')) burden.push('exhausted');
+    // issue 8: Shaken now actually costs the attacker something (Burden), not only granting Edge to whoever
+    // attacks a Shaken target.
+    if (hasStatus(attacker, 'shaken')) burden.push('shaken');
+    if (hasStatus(attacker, 'fumbled')) burden.push('fumbled'); // last attack's natural 1 — consumed in resolveAttack
     if (!usingRanged && target.stance === 'braced' && isPolearm(target.weapon) && !this.targetIsFlanked(target, attacker)) burden.push('braced pike front');
     return { attackBonus, edge, burden, weapon };
   }
@@ -748,15 +886,18 @@ export class CombatEngineImpl implements CombatService {
   }
 
   private cmdDeploy(placements: { unit: EntityId; to: CellKey }[]): CommandResult {
+    // issue 9 / probe 2: `deploy` used to be callable at any point in the fight (an exploit — reposition units
+    // for free mid-battle). It now only works during the real `deploy` phase (see `start()`/`finishDeploy()`).
+    if (this.phase !== 'deploy') return { ok: false, reason: 'not deploying' };
     for (const p of placements) {
       const u = this.units.get(p.unit);
-      if (!u) continue;
+      if (!u || u.side !== 'player') continue;
       const z = this.deployZone;
       if (p.to.q < z.q || p.to.q >= z.q + z.cols || p.to.r < z.r || p.to.r >= z.r + z.rows) continue;
       u.q = p.to.q; u.r = p.to.r;
     }
     this.recomputeFormation();
-    this.emitState();
+    this.finishDeploy();
     return { ok: true };
   }
 
@@ -792,7 +933,22 @@ export class CombatEngineImpl implements CombatService {
     this.recomputeFormation();
     for (const p of provokers) this.queueReaction(p, u, 'leave-reach', 'opportunity-attack');
     for (const d of this.computeBraceTriggers(u, path)) this.queueBrace(d, u);
+    for (const d of this.computeCoverFireTriggers(u, path)) this.queueCoverFire(d, u);
     return events;
+  }
+
+  /** issue: Cover Fire reaction (§5.3, builder-admitted gap, critic-rated medium) — a loaded crossbowman
+   *  fires at a unit that just ended its movement within short range, when it wasn't already in range. */
+  private computeCoverFireTriggers(mover: Unit, path: CellKey[]): Unit[] {
+    if (path.length < 2) return [];
+    const start = path[0];
+    return [...this.units.values()].filter((d) => {
+      if (d.side === mover.side || d.dead || d.down || !d.ranged || !d.loaded || !d.ap.reaction) return false;
+      const short = d.ranged.range?.short ?? 6;
+      const wasIn = cellDistance(d.q, d.r, start.q, start.r) <= short;
+      const nowIn = cellDistance(d.q, d.r, mover.q, mover.r) <= short;
+      return !wasIn && nowIn;
+    });
   }
 
   /** Braced (or in-Haufen) polearm defenders whose reach the mover just entered by moving ≥ 2 cells in a
@@ -811,11 +967,20 @@ export class CombatEngineImpl implements CombatService {
     });
     const extras = new Set<Unit>();
     for (const d of primaries) {
-      if (!d.formation.inHaufen) continue;
-      for (const o of candidates) {
-        if (o.id === d.id || o.formation.haufenId !== d.formation.haufenId) continue;
-        const reach = o.weapon?.reach ?? 1;
-        if (cellDistance(o.q, o.r, mover.q, mover.r) <= reach) extras.add(o);
+      if (d.formation.inHaufen) {
+        for (const o of candidates) {
+          if (o.id === d.id || o.formation.haufenId !== d.formation.haufenId) continue;
+          const reach = o.weapon?.reach ?? 1;
+          if (cellDistance(o.q, o.r, mover.q, mover.r) <= reach) extras.add(o);
+        }
+      }
+      // issue 5 (Wall of Iron, perk.spear-50): a braced spearman with this status covers up to 2 adjacent
+      // allies' cells too, even outside a Haufen.
+      if (hasStatus(d, 'wall-of-iron')) {
+        const adjAllies = [...this.units.values()]
+          .filter((o) => o.id !== d.id && o.side === d.side && !o.dead && !o.down && isPolearm(o.weapon) && o.ap.reaction && cellDistance(o.q, o.r, d.q, d.r) <= 1 && cellDistance(o.q, o.r, mover.q, mover.r) <= (o.weapon?.reach ?? 1))
+          .slice(0, 2);
+        for (const o of adjAllies) extras.add(o);
       }
     }
     const all = new Map<EntityId, Unit>();
@@ -826,20 +991,35 @@ export class CombatEngineImpl implements CombatService {
   private applyFall(u: Unit, meters: number): void {
     const dmg = Math.max(0, Math.floor(meters / 3)) * rollDice('1d6', this.host.rng);
     this.applyDamage(u, dmg, 'blunt', 0);
-    addStatus(u, 'prone', 1);
+    // issue 5: Sure Foot — immune to falling Prone from a slope or a failed shove this round (still takes damage).
+    if (!hasStatus(u, 'sure-footed')) addStatus(u, 'prone', 1);
     this.pushLog('damage', `${u.name} falls ${meters.toFixed(1)} m and takes ${dmg} damage.`, u.id, { amount: dmg });
   }
 
   private applyDamage(target: Unit, amount: number, _type: DamageType, _soak: number): void {
     target.hp = Math.max(0, target.hp - amount);
-    if (target.hp <= 0 && !target.down) { target.down = true; target.bleedTurns = 3; this.pushLog('down', `${target.name} goes down.`, target.id); }
+    const justWentDown = target.hp <= 0 && !target.down;
+    if (justWentDown) { target.down = true; target.bleedTurns = 3; this.pushLog('down', `${target.name} goes down.`, target.id); }
     if (target.isPlayerControlled) this.host.party.damage(target.id, amount);
     if (amount > 0) this.checkMoraleTrigger(target, 'damage');
+    if (justWentDown) {
+      // issue 8: "ally Down within 3 cells" and "leader Down" morale triggers.
+      const isLeader = target.archetype === 'sergeant' || target.archetype === 'knight' || !!target.npcId;
+      for (const ally of this.units.values()) {
+        if (ally.id === target.id || ally.side !== target.side || ally.dead || ally.down) continue;
+        if (isLeader) this.checkMoraleTrigger(ally, 'leader-down');
+        else if (cellDistance(ally.q, ally.r, target.q, target.r) <= 3) this.checkMoraleTrigger(ally, 'ally-down');
+      }
+    }
   }
 
   private cmdStance(unitId: EntityId, stance: Unit['stance']): CommandResult {
     const u = this.units.get(unitId);
     if (!u) return { ok: false, reason: 'no such unit' };
+    // issue 2 / probe 2: `cmdStance` never checked whose turn it was — the player could flip an enemy's stance
+    // (a −2 Defense debuff) or re-stance a Routed unit at will.
+    if (u.id !== this.activeUnitId && !this.forceAiAll) return { ok: false, reason: 'not this unit\'s turn' };
+    if (u.dead || u.down || u.routed) return { ok: false, reason: 'unit cannot act' };
     if (stance === 'braced' && !isPolearm(u.weapon)) return { ok: false, reason: 'requires a polearm' };
     if (!u.ap.bonus) return { ok: false, reason: 'no bonus action' };
     u.ap.bonus = false;
@@ -863,6 +1043,9 @@ export class CombatEngineImpl implements CombatService {
   }
 
   private cmdAuto(rounds: number): CommandResult {
+    // "auto-deploy after a timeout in harness auto mode" (BUILDER_RULES.md): an `auto` command reaching a
+    // still-deploying encounter finalises deployment at whatever positions are currently set.
+    if (this.phase === 'deploy') this.finishDeploy();
     this.forceAiAll = true;
     this.autoStopRound = this.round + Math.max(1, rounds);
     let guard = 0;
@@ -929,8 +1112,34 @@ export class CombatEngineImpl implements CombatService {
     if (roll.hit) this.applyDamage(mover, roll.damage, weapon.damageType, roll.soak);
   }
 
+  private queueCoverFire(defender: Unit, mover: Unit): void {
+    if (!defender.ap.reaction) return;
+    const resolve = (accept: boolean) => {
+      defender.ap.reaction = false;
+      if (!accept) return;
+      this.resolveCoverFire(defender, mover);
+    };
+    const autoResolve = this.forceAiAll || !defender.isPlayerControlled;
+    if (autoResolve) { resolve(true); return; }
+    this.reactionQueue.push({ unitId: defender.id, ability: 'ability.crossbow-snapshot', trigger: 'end-move-in-range', targetId: mover.id, resolve });
+  }
+
+  private resolveCoverFire(defender: Unit, mover: Unit): void {
+    const ability = this.host.content.abilities.get('ability.aimed-shot');
+    if (!ability || !defender.ranged) return;
+    this.resolveAttack(defender, mover, ability, { free: true });
+    defender.loaded = false; // spent the bolt
+    this.pushLog('reaction', `${defender.name} loosed a bolt as ${mover.name} came into range.`, defender.id, { target: mover.id });
+  }
+
   private resolveOpportunityAttack(attacker: Unit, target: Unit, abilityId: string): void {
-    const ability = this.host.content.abilities.get(abilityId === 'opportunity-attack' ? 'ability.attack' : abilityId) ?? this.host.content.abilities.get('ability.attack')!;
+    // issue 5 (Riposte, perk.sword-50): "when you would take an opportunity attack with a sword, you may
+    // instead riposte for full damage" — sword-skilled attackers automatically get the named ability instead
+    // of a plain opportunity attack.
+    const swordSkill = attacker.weapon ? this.host.content.items.get(attacker.weapon.defId)?.weapon?.skill : undefined;
+    const useRiposte = abilityId === 'opportunity-attack' && swordSkill === 'sword' && this.host.party.hasPerk(attacker.id, 'perk.sword-50');
+    const resolvedId = useRiposte ? 'ability.riposte' : abilityId === 'opportunity-attack' ? 'ability.attack' : abilityId;
+    const ability = this.host.content.abilities.get(resolvedId) ?? this.host.content.abilities.get('ability.attack')!;
     this.resolveAttack(attacker, target, ability, { free: true });
   }
 
@@ -941,6 +1150,7 @@ export class CombatEngineImpl implements CombatService {
     const ability = this.host.content.abilities.get(abilityId);
     if (!u || !ability) return { ok: false, reason: 'no such unit/ability' };
     if (u.id !== this.activeUnitId && !this.forceAiAll) return { ok: false, reason: 'not this unit\'s turn' };
+    if (!this.targetAllowed(u, ability, target)) return { ok: false, reason: 'target out of range' };
     const costCheck = this.checkAndSpendCost(u, ability);
     if (!costCheck.ok) return costCheck;
     const events: CombatEventRecord[] = [];
@@ -961,11 +1171,23 @@ export class CombatEngineImpl implements CombatService {
     }
     if (r?.ranged && !u.ranged) return { ok: false, reason: 'no ranged weapon' };
     if (r?.loaded && !u.loaded) return { ok: false, reason: 'not loaded' };
+    if (r?.shield && !u.shield) return { ok: false, reason: 'no shield' };
+    if (r?.mounted && !u.mounted) return { ok: false, reason: 'not mounted' };
     if (r?.status && !hasStatus(u, r.status)) return { ok: false, reason: 'missing status' };
     if (r?.notStatus && hasStatus(u, r.notStatus)) return { ok: false, reason: 'blocked by status' };
     if (r?.terrainFeature) {
       const c = this.cellAt(u.q, u.r);
-      if (c?.feature !== r.terrainFeature) return { ok: false, reason: 'not on the feature' };
+      const kinds = Array.isArray(r.terrainFeature) ? r.terrainFeature : [r.terrainFeature];
+      if (!c?.feature || !kinds.includes(c.feature)) return { ok: false, reason: 'not on the feature' };
+    }
+    // issue 2 / probe 4: Charge needs a genuine run-up — `u.chargeCells` is the length of the straight-line
+    // segment the mover just walked (tracked in `performMove`), reset to 0 at the start of every turn.
+    if (r?.minChargeCells !== undefined && u.chargeCells < r.minChargeCells) return { ok: false, reason: 'no run-up' };
+    // issue 15: "only when no enemy is adjacent" — Verschnaufen (formerly "Second Wind") is catching your
+    // breath, not something you can do mid-melee.
+    if (ability.id === 'ability.second-wind') {
+      const adjacentEnemy = [...this.units.values()].some((o) => o.side !== u.side && !o.dead && !o.down && cellDistance(u.q, u.r, o.q, o.r) <= 1);
+      if (adjacentEnemy) return { ok: false, reason: 'an enemy is too close to catch your breath' };
     }
     // reload has a dynamic ladder cost; special-case before the generic cost object.
     if (ability.id === 'ability.reload') {
@@ -994,19 +1216,28 @@ export class CombatEngineImpl implements CombatService {
     return rung === 0 ? 'free' : rung === 1 ? 'bonus' : 'action';
   }
 
+  /**
+   * issue 16: `effects[]` is genuinely interpreted here (not switched on by ability id) for every ability that
+   * can be expressed in the CombatEffect DSL — status/removeStatus/push/pull/moraleCheck/heal/reload/rally-
+   * flavoured status clears/stance/line/cone/disengage/dash/stabilize (§5.4) all run through `applyEffect`.
+   * A handful of mechanics genuinely need data the DSL doesn't carry and stay engine-side: the base weapon
+   * hit for `attackRoll` abilities (needs the wielder's actual equipped weapon, not a fixed dice string —
+   * `resolveAttack` computes it, then still interprets `effects[]` for the hit's *side* effects), Shove's
+   * contested roll, Roll Boulders' cache/affects-line geometry, Bandage's herbalism-gated heal size, and
+   * Rally's un-Routing (routed is a Unit flag, not a status the DSL can name). Everything else below is the
+   * literal effect list from `content/abilities.ts`.
+   */
   private executeAbility(u: Unit, ability: AbilityDef, target: CellKey | EntityId | undefined, events: CombatEventRecord[]): void {
     u.hasActedThisTurn = true;
+    if (ability.attackRoll) {
+      const t = typeof target === 'number' ? this.units.get(target) : undefined;
+      if (!t) return;
+      this.resolveAttack(u, t, ability, { charge: ability.id === 'ability.charge' });
+      return;
+    }
     switch (ability.id) {
-      case 'ability.attack': case 'ability.aimed-shot': case 'ability.crossbow-snapshot': case 'ability.hook':
-      case 'ability.push-of-pike': case 'ability.riposte': case 'ability.disarm': case 'ability.charge': {
-        const t = typeof target === 'number' ? this.units.get(target) : undefined;
-        if (!t) return;
-        const isCharge = ability.id === 'ability.charge';
-        this.resolveAttack(u, t, ability, { charge: isCharge });
-        return;
-      }
       case 'ability.reload': {
-        u.loaded = true;
+        for (const effect of ability.effects) this.applyEffect(u, undefined, effect);
         this.pushLog('ability', `${u.name} reloads.`, u.id);
         return;
       }
@@ -1016,57 +1247,114 @@ export class CombatEngineImpl implements CombatService {
         this.resolveShove(u, t);
         return;
       }
-      case 'ability.disengage': addStatus(u, 'disengaged', 1); this.pushLog('ability', `${u.name} disengages.`, u.id); return;
-      case 'ability.dash': u.ap.moveM += u.speedMBase; this.pushLog('ability', `${u.name} dashes.`, u.id); return;
       case 'ability.bandage': case 'ability.bandage-quick': {
         const t = typeof target === 'number' ? this.units.get(target) : u;
         if (!t) return;
-        if (t.down) { t.down = false; t.bleedTurns = 3; t.hp = Math.max(1, Math.floor(t.hpMax * 0.1)); this.pushLog('status', `${t.name} is stabilised.`, t.id); if (t.isPlayerControlled) this.host.party.heal(t.id, t.hp); }
-        else { const bonus = this.host.party.skillLevel(u.id, 'herbalism') >= 25 ? rollDice('1d4', this.host.rng) : 0; const heal = rollDice('1d4', this.host.rng) + bonus; this.applyHeal(t, heal); }
-        return;
-      }
-      case 'ability.rally': case 'ability.rally-bonus': {
-        const radius = 3;
-        for (const ally of this.units.values()) {
-          if (ally.side !== u.side || ally.dead || cellDistance(u.q, u.r, ally.q, ally.r) > radius) continue;
-          if (hasStatus(ally, 'shaken')) { removeStatus(ally, 'shaken'); this.pushLog('morale', `${ally.name} is rallied.`, ally.id); }
-          if (ally.routed) { ally.routed = false; this.pushLog('morale', `${ally.name} is rallied and holds.`, ally.id); }
+        if (t.down) {
+          for (const effect of ability.effects) if ('stabilize' in effect) this.applyEffect(u, t, effect);
+        } else {
+          const bonus = this.host.party.skillLevel(u.id, 'herbalism') >= 25 ? rollDice('1d4', this.host.rng) : 0;
+          for (const effect of ability.effects) {
+            if ('heal' in effect) this.applyHeal(t, rollDice(effect.heal, this.host.rng) + bonus);
+            else this.applyEffect(u, t, effect);
+          }
         }
         return;
       }
-      case 'ability.brace': u.stance = 'braced'; this.pushLog('status', `${u.name} braces.`, u.id); return;
       case 'ability.roll-boulders': {
         const cell = this.cellAt(u.q, u.r);
         const idx = cell?.featureIndex;
         const feature = idx !== undefined ? this.enc?.terrainFeatures?.[idx] : undefined;
         const affects = feature?.affects ?? [];
         this.featureUses.set(idx ?? -1, (this.featureUses.get(idx ?? -1) ?? 0) + 1);
-        this.pushLog('feature', `${u.name} rolls boulders down the slope!`, u.id, { feature: feature?.kind });
+        this.pushLog('feature', `${u.name} rolls ${feature?.kind === 'trunk-cache' ? 'a trunk' : 'boulders'} down the slope!`, u.id, { feature: feature?.kind });
         for (const [q, r] of affects) {
           const hitUnit = this.occupantAt(q, r);
           if (!hitUnit) continue;
-          const dmg = rollDice('2d10', this.host.rng);
-          this.applyDamage(hitUnit, dmg, 'blunt', 0);
-          addStatus(hitUnit, 'prone', 1);
-          this.pushLog('damage', `${hitUnit.name} is struck by a rolling boulder for ${dmg}.`, hitUnit.id, { amount: dmg });
-          this.rollMorale(hitUnit, moraleDc(3), 'rockfall');
+          for (const effect of ability.effects) this.applyEffect(u, hitUnit, effect, 'rockfall');
         }
         this.updateObjectiveProgress();
         return;
       }
-      case 'ability.wall-of-iron': addStatus(u, 'wall-of-iron', 99); this.pushLog('status', `${u.name} anchors the line.`, u.id); return;
-      case 'ability.shield-wall': addStatus(u, 'shield-wall', 1); for (const a of this.adjacentAllies(u)) addStatus(a, 'shield-wall', 1); this.pushLog('status', `${u.name} locks shields.`, u.id); return;
-      case 'ability.second-wind': { const h = rollDice('1d6', this.host.rng); this.applyHeal(u, h); removeStatus(u, 'shaken'); this.pushLog('status', `${u.name} finds a second wind.`, u.id); return; }
-      case 'ability.war-cry': for (const a of this.alliesInRadius(u, 3)) addStatus(a, 'war-cry', 2); this.pushLog('morale', `${u.name} shouts — the line steadies.`, u.id); return;
-      case 'ability.mountain-stride': addStatus(u, 'mountain-stride', 1); this.pushLog('status', `${u.name} strides over the broken ground.`, u.id); return;
-      case 'ability.sure-foot': addStatus(u, 'sure-footed', 2); this.pushLog('status', `${u.name} finds sure footing.`, u.id); return;
-      default: this.pushLog('ability', `${u.name} uses ${ability.name}.`, u.id); return;
+      case 'ability.rally': case 'ability.rally-bonus': {
+        for (const effect of ability.effects) {
+          if ('rally' in effect) this.doRally(u, effect.rally.radius);
+          else this.applyEffect(u, undefined, effect);
+        }
+        return;
+      }
+      default: {
+        const t = typeof target === 'number' ? this.units.get(target) : undefined;
+        for (const effect of ability.effects) this.applyEffect(u, t, effect);
+        this.pushLog('ability', `${u.name} uses ${ability.name}.`, u.id, t ? { target: t.id } : undefined);
+        return;
+      }
     }
   }
 
-  private adjacentAllies(u: Unit): Unit[] {
-    return [...this.units.values()].filter((o) => o.id !== u.id && o.side === u.side && !o.dead && cellDistance(u.q, u.r, o.q, o.r) <= 1);
+  /** issue 16: the generic CombatEffect interpreter (ARCHITECTURE §5.4). `target` is the explicit target unit
+   *  when the command named one; effects that need a target and got none (self/area abilities) fall back to
+   *  the caster. */
+  private applyEffect(caster: Unit, target: Unit | undefined, effect: CombatEffect, reasonHint = 'ability'): void {
+    if ('damage' in effect) {
+      if (!target) return;
+      const bonusAttr = effect.damage.bonus === 'strength' ? modifier(caster.attributes.strength) : effect.damage.bonus === 'agility' ? modifier(caster.attributes.agility) : 0;
+      const raw = rollDice(effect.damage.dice, this.host.rng) + bonusAttr;
+      const baseSoak = target.soak[effect.damage.type] ?? 0;
+      const soak = effect.damage.type === 'blunt' ? Math.floor(baseSoak / 2) : baseSoak;
+      const applied = Math.max(0, raw - soak);
+      this.applyDamage(target, applied, effect.damage.type, soak);
+      if (applied > 0) this.pushLog('damage', `${target.name} takes ${applied} ${effect.damage.type} damage.`, target.id, { amount: applied, target: target.id });
+    } else if ('status' in effect) {
+      const t = target ?? caster;
+      if (effect.status.id === 'prone' && hasStatus(t, 'sure-footed')) return; // Sure Foot
+      addStatus(t, effect.status.id, effect.status.turns);
+    } else if ('removeStatus' in effect) {
+      removeStatus(target ?? caster, effect.removeStatus);
+    } else if ('push' in effect) {
+      if (target) for (let i = 0; i < effect.push.cells; i++) this.movePush(target, caster, 1);
+    } else if ('pull' in effect) {
+      if (target) for (let i = 0; i < effect.pull.cells; i++) this.movePush(target, caster, -1);
+    } else if ('moraleCheck' in effect) {
+      this.tryMoraleTrigger(target ?? caster, reasonHint, effect.moraleCheck.dc);
+    } else if ('heal' in effect) {
+      this.applyHeal(target ?? caster, rollDice(effect.heal, this.host.rng));
+    } else if ('reload' in effect) {
+      caster.loaded = true;
+    } else if ('rally' in effect) {
+      this.doRally(caster, effect.rally.radius);
+    } else if ('stance' in effect) {
+      caster.stance = effect.stance;
+      this.pushLog('status', `${caster.name} takes a ${effect.stance} stance.`, caster.id);
+    } else if ('line' in effect) {
+      if (target) this.applyEffect(caster, target, effect.line.effect);
+    } else if ('cone' in effect) {
+      for (const ally of this.alliesInRadius(caster, effect.cone.cells)) this.applyEffect(caster, ally, effect.cone.effect);
+    } else if ('terrainFeature' in effect) {
+      // marker only; roll-boulders records the specific feature index itself.
+    } else if ('disengage' in effect) {
+      addStatus(caster, 'disengaged', 1);
+    } else if ('dash' in effect) {
+      caster.ap.moveM += caster.speedMBase;
+    } else if ('stabilize' in effect) {
+      const t = target ?? caster;
+      if (!t.down) return;
+      t.down = false; t.bleedTurns = 3; t.hp = Math.max(1, Math.floor(t.hpMax * 0.1));
+      this.pushLog('status', `${t.name} is stabilised.`, t.id);
+      if (t.isPlayerControlled) this.host.party.heal(t.id, t.hp);
+    }
   }
+
+  /** issue 5 (Rally): clears Shaken and un-Routs allies in radius. "Un-Routing" is a Unit flag, not a status
+   *  the CombatEffect DSL can name, so it stays a small engine-side addition alongside the DSL-driven clear. */
+  private doRally(u: Unit, radius: number): void {
+    for (const ally of this.units.values()) {
+      if (ally.side !== u.side || ally.dead || cellDistance(u.q, u.r, ally.q, ally.r) > radius) continue;
+      if (hasStatus(ally, 'shaken')) { removeStatus(ally, 'shaken'); this.pushLog('morale', `${ally.name} is rallied.`, ally.id); }
+      if (ally.routed) { ally.routed = false; this.pushLog('morale', `${ally.name} is rallied and holds.`, ally.id); }
+    }
+  }
+
   private alliesInRadius(u: Unit, radius: number): Unit[] {
     return [...this.units.values()].filter((o) => o.side === u.side && !o.dead && cellDistance(u.q, u.r, o.q, o.r) <= radius);
   }
@@ -1078,8 +1366,14 @@ export class CombatEngineImpl implements CombatService {
   }
 
   private resolveAttack(attacker: Unit, target: Unit, ability: AbilityDef, opts: { charge?: boolean; free?: boolean } = {}): void {
+    // issue 1: defensive reach re-check even for engine-internal callers (reactions already validate adjacency
+    // themselves, but this keeps the invariant true everywhere resolveAttack is reached from).
+    if (!opts.free && !this.withinReach(attacker, target, ability)) return;
     const { attackBonus, edge, burden, weapon } = this.attackInputsFor(attacker, target, ability);
     if (opts.charge) edge.push('charge');
+    // issue 8: being flanked is itself a morale trigger, independent of whether the hit lands.
+    if (edge.includes('flanked')) this.tryMoraleTrigger(target, 'flanked', moraleDc(1));
+    if (hasStatus(attacker, 'fumbled')) removeStatus(attacker, 'fumbled'); // consumed this attempt (already counted as Burden above)
     const defense = this.effectiveDefense(target, this.cellAt(target.q, target.r)?.cover ?? 0);
     const soak = { ...target.soak };
     const inputs: AttackInputs = {
@@ -1088,19 +1382,34 @@ export class CombatEngineImpl implements CombatService {
       soak, ignoreSoak: attacker.perkMods['ignoreSoak'], critRange: attacker.critRange,
     };
     const roll = rollAttack(inputs, this.host.rng);
-    if (opts.charge && roll.hit) roll.damage += rollDice('1d8', this.host.rng); // "+1d8 damage" (ARCHITECTURE §5.3 Charge)
+    if (roll.fumble) addStatus(attacker, 'fumbled', 1); // issue 8: Burden on the next attack
     this.pushLog('attack', `${attacker.name} attacks ${target.name}: ${roll.hit ? (roll.critical ? 'critical hit' : 'hit') : 'miss'}.`, attacker.id, { target: target.id, roll });
     if (roll.hit) {
       this.applyDamage(target, roll.damage, weapon.damageType, roll.soak);
       if (roll.damage > 0) this.pushLog('damage', `${target.name} takes ${roll.damage} ${weapon.damageType} damage.`, target.id, { amount: roll.damage, target: target.id });
-      if (ability.id === 'ability.hook') this.movePush(target, attacker, -1);
-      if (ability.id === 'ability.push-of-pike') this.movePush(target, attacker, 1);
-      if (ability.id === 'ability.disarm') addStatus(target, 'disarmed', 2);
-      if (opts.charge) this.rollMorale(target, 12, 'charged by cavalry');
+      // issue 16: the ability's own effects[] beyond the base weapon hit — a 'damage' entry here is read as
+      // BONUS damage on top of the weapon hit (Charge's lance impact), never a replacement for it.
+      for (const effect of ability.effects) {
+        if ('damage' in effect) {
+          const bonusAttr = effect.damage.bonus === 'strength' ? modifier(attacker.attributes.strength) : effect.damage.bonus === 'agility' ? modifier(attacker.attributes.agility) : 0;
+          const extra = rollDice(effect.damage.dice, this.host.rng) + bonusAttr;
+          this.applyDamage(target, extra, effect.damage.type, 0);
+          if (extra > 0) this.pushLog('damage', `${target.name} takes ${extra} additional ${effect.damage.type} damage.`, target.id, { amount: extra, target: target.id });
+        } else {
+          this.applyEffect(attacker, target, effect);
+        }
+      }
+      if (ability.id === 'ability.charge') {
+        attacker.chargeCells = 0; // spent the run-up (issue 2)
+        this.tryMoraleTrigger(target, 'charge', 12); // ARCHITECTURE §5.3: a charge forces a morale check
+      }
     }
   }
 
   private resolveShove(attacker: Unit, target: Unit): void {
+    // issue 6: range enforcement (issue 1) already refuses Shove past `ability.shove`'s range:1 via
+    // targetAllowed(); this is a defensive re-check.
+    if (cellDistance(attacker.q, attacker.r, target.q, target.r) > 1) return;
     const attRoll = this.host.rng.die(20) + modifier(attacker.attributes.strength);
     const defRoll = this.host.rng.die(20) + modifier(target.attributes.agility);
     const success = attRoll >= defRoll;
@@ -1108,17 +1417,27 @@ export class CombatEngineImpl implements CombatService {
     if (success) this.movePush(target, attacker, 1);
   }
 
-  /** direction sign>0 pushes target away from source; sign<0 pulls target toward source. */
+  /** direction sign>0 pushes target away from source; sign<0 pulls target toward source. issue 6 / probe 5:
+   *  a push along a single axis (dq or dr exactly 0) must stay on that axis — never force the zero axis to 1
+   *  and go diagonal. */
   private movePush(target: Unit, source: Unit, sign: 1 | -1): void {
     if (!this.grid) return;
-    const dq = Math.sign(target.q - source.q) || 1;
-    const dr = Math.sign(target.r - source.r) || 0;
+    let dq = Math.sign(target.q - source.q);
+    let dr = Math.sign(target.r - source.r);
+    if (dq === 0 && dr === 0) dq = 1; // same cell (shouldn't happen) — arbitrary axis rather than no-op
     const nq = target.q + dq * sign;
     const nr = target.r + dr * sign;
     if (!inBounds(nq, nr, this.grid.cols, this.grid.rows)) return;
     const destCell = this.cellAt(nq, nr);
     if (!destCell || !destCell.passable) return;
-    if (this.occupantAt(nq, nr, target.id)) { addStatus(target, 'prone', 1); return; } // collision: both prone (simplified)
+    const blocker = this.occupantAt(nq, nr, target.id);
+    if (blocker) {
+      // "into a comrade → both Prone on failure" (§5.3) — Sure Foot still protects its own bearer.
+      if (!hasStatus(target, 'sure-footed')) addStatus(target, 'prone', 1);
+      if (!hasStatus(blocker, 'sure-footed')) addStatus(blocker, 'prone', 1);
+      this.pushLog('status', `${target.name} collides with ${blocker.name} — both stumble.`, target.id, { target: blocker.id });
+      return;
+    }
     const startH = this.cellAt(target.q, target.r)?.height ?? 0;
     target.q = nq; target.r = nr;
     const endH = destCell.height;
@@ -1132,18 +1451,31 @@ export class CombatEngineImpl implements CombatService {
 
   // ---------------- morale ----------------
 
-  private checkMoraleTrigger(u: Unit, reason: 'damage' | 'ally-down' | 'flanked' | 'charge' | 'leader-down' | 'rockfall'): void {
+  /** issue 8: at most one morale check per unit per *reason* per round (`moraleCheckedThisRound` is cleared
+   *  in `startRound`). Fixes probe10b's "8–10 damage checks in a single fight" spam that made every knight
+   *  hit a coin-flip rout regardless of how tough the target actually was. */
+  private tryMoraleTrigger(u: Unit, reason: string, dc: number): void {
     if (u.dead || u.down) return;
-    if (reason === 'damage' && u.hp > u.hpMax * 0.75) return;
-    const dc = moraleDc(reason === 'rockfall' ? 3 : 1);
+    let set = this.moraleCheckedThisRound.get(u.id);
+    if (!set) { set = new Set(); this.moraleCheckedThisRound.set(u.id, set); }
+    if (set.has(reason)) return;
+    set.add(reason);
     this.rollMorale(u, dc, reason);
+  }
+
+  private checkMoraleTrigger(u: Unit, reason: 'damage' | 'ally-down' | 'flanked' | 'charge' | 'leader-down' | 'rockfall'): void {
+    if (reason === 'damage' && u.hp > u.hpMax * 0.75) return;
+    const dc = moraleDc(reason === 'rockfall' ? 3 : reason === 'ally-down' || reason === 'leader-down' ? 2 : 1);
+    this.tryMoraleTrigger(u, reason, dc);
   }
 
   private rollMorale(u: Unit, dc: number, reason: string): void {
     if (u.dead || u.down) return;
     const result = moraleCheck({
       presenceMod: modifier(u.attributes.presence), leadershipLevel: u.leadershipLevel,
-      formationBonus: u.formation.defenseBonus, moraleBonusPerk: u.perkMods['morale'] ?? 0, dc, edge: u.formation.inHaufen,
+      formationBonus: u.formation.defenseBonus, moraleBonusPerk: u.perkMods['morale'] ?? 0, dc,
+      // issue 5: War Cry grants Edge on the next morale check, same as standing in a Haufen.
+      edge: u.formation.inHaufen || hasStatus(u, 'war-cry'),
     }, this.host.rng);
     this.pushLog('morale', `${u.name} morale check (${reason}): ${result.outcome}.`, u.id, { morale: result });
     if (result.outcome === 'shaken') addStatus(u, 'shaken', 3);
@@ -1173,6 +1505,7 @@ export class CombatEngineImpl implements CombatService {
   aiAbility(u: Unit, abilityId: string, target?: CellKey | EntityId): boolean {
     const ability = this.host.content.abilities.get(abilityId);
     if (!ability) return false;
+    if (!this.targetAllowed(u, ability, target)) return false;
     const cost = this.checkAndSpendCost(u, ability);
     if (!cost.ok) return false;
     this.executeAbility(u, ability, target, []);
@@ -1208,10 +1541,21 @@ export class CombatEngineImpl implements CombatService {
       units: [...this.units.values()].map((u) => ({ ...u, status: u.status.map((s) => ({ ...s })), attackBonus: { ...u.attackBonus }, soak: { ...u.soak }, ap: { ...u.ap } })),
       features: [...this.featureUses.entries()],
       objectivesState: { objectives: this.objectives.map((o) => ({ done: o.done, progress: o.progress })), phase: this.phase, ended: this.ended, outcome: this.outcome, deployZone: this.deployZone, grid: this.grid, cells: this.cells, activeUnitId: this.activeUnitId },
-      log: this.log.map((l) => l.text),
+      // issue 11 / probe 8: the full CombatEventRecord (kind/unit/target/cell/roll/morale/data), not just its
+      // rendered text — `SerializedCombat.log` is `unknown[]` precisely so combat can round-trip its own shape
+      // through it without core depending on combat's types.
+      log: this.log,
     };
   }
 
+  /**
+   * issue 11 / probe 8: restores full log fidelity (kinds, unit/target ids, roll/morale payloads). Note for
+   * the save module: `restore()` returns `Promise<void>` (the `CombatService` interface, core-owned) — it does
+   * NOT re-arm the `CombatResult` promise `start()` originally returned (that caller is long gone after a
+   * save/load round-trip). To learn when a *restored* encounter ends, listen with `combat.on('end', cb)`
+   * after calling `restore()`, rather than awaiting anything from `restore()` itself; `finish()` always still
+   * emits `'end'` on the event bus regardless of how the encounter was started.
+   */
   async restore(s: SerializedCombat): Promise<void> {
     if (!s) return;
     const enc = this.host.content.encounters.get(s.encounterId);
@@ -1234,7 +1578,9 @@ export class CombatEngineImpl implements CombatService {
     this.outcome = os.outcome;
     this.activeUnitId = os.activeUnitId;
     this.host.rng.setState(s.rngState);
-    this.log = s.log.map((text) => ({ kind: 'log', text }));
+    // issue 11 / probe 8: `serialize()` now stores full CombatEventRecord objects — restore them as-is rather
+    // than collapsing every entry to a bare {kind:'log', text}.
+    this.log = (s.log as CombatEventRecord[]).map((l) => ({ ...l }));
   }
 }
 

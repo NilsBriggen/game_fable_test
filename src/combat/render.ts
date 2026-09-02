@@ -9,8 +9,18 @@ import {
   SpriteMaterial, CanvasTexture, Object3D,
 } from 'three';
 import type { GameContext } from '@core/context';
-import type { CombatStateView, WorldService } from '@core/services';
+import type { CellView, CombatStateView, SurfaceType, WorldService } from '@core/services';
 import { cellToWorldXZ, type GridInfo } from './rules/grid';
+
+/** issue 12: a subtle tint per cell surface, drawn under the grid lines — the terrain types combat actually
+ *  cares about (water you can drown in, the road the column marches on, bare rock). Everything else is left
+ *  untinted so the underlying ground texture reads through. */
+const SURFACE_TINTS: Partial<Record<SurfaceType, number>> = {
+  water: 0x2a5a8a,
+  road: 0x8a7238,
+  rock: 0x6e6a64,
+  scree: 0x6e6a64,
+};
 
 interface Palette { cloth: number; trim: number; metal: number; skin: number; }
 const PALETTES: Record<string, Palette> = {
@@ -148,6 +158,7 @@ interface DamagePop { sprite: Sprite; life: number; }
 export class CombatRenderer {
   private root = new Group();
   private gridLines: LineSegments | null = null;
+  private terrainGroup = new Group();
   private highlightGroup = new Group();
   private unitGroup = new Group();
   private unitMeshes = new Map<number, Object3D>();
@@ -157,7 +168,7 @@ export class CombatRenderer {
 
   constructor(private ctx: GameContext) {
     this.root.name = 'combat-render-root';
-    this.root.add(this.highlightGroup, this.unitGroup);
+    this.root.add(this.terrainGroup, this.highlightGroup, this.unitGroup);
     this.root.visible = false;
     const world = this.ctx.services.tryGet('world');
     const parent = world?.getSceneRoots().dynamic ?? this.ctx.gfx.scene;
@@ -181,13 +192,20 @@ export class CombatRenderer {
     this.debugEl = el;
   }
 
-  private buildGridLines(grid: GridInfo, world: WorldService | undefined): void {
+  /** issue 12: grid lines (and the terrain tint/feature markers below) now read their height from the
+   *  combat encounter's own cell data — `cellToWorld`, backed by `CellView.height` (which for a set piece
+   *  like Morgarten is the authored `heightOverride` sampler) — instead of re-querying the raw exploration
+   *  heightmap via `world.heightAt`, which can disagree with what the encounter actually placed units on. */
+  private buildGridLines(grid: GridInfo, cells: CellView[]): void {
     if (this.gridLines) { this.root.remove(this.gridLines); this.gridLines.geometry.dispose(); }
+    const heightAt = new Map<string, number>();
+    for (const c of cells) heightAt.set(`${c.q},${c.r}`, c.height);
+    const clamp = (q: number, r: number): [number, number] => [Math.max(0, Math.min(grid.cols - 1, Math.round(q))), Math.max(0, Math.min(grid.rows - 1, Math.round(r)))];
     const positions: number[] = [];
     const sample = (q: number, r: number): [number, number, number] => {
       const { x, z } = cellToWorldXZ(q, r, grid);
-      let y = 0.05;
-      try { y += world ? world.heightAt(x, z) : 0; } catch { /* ignore */ }
+      const [cq, cr] = clamp(q, r);
+      const y = (heightAt.get(`${cq},${cr}`) ?? 0) + 0.05;
       return [x, y, z];
     };
     for (let r = 0; r <= grid.rows; r++) {
@@ -206,6 +224,53 @@ export class CombatRenderer {
     geo.setAttribute('position', new Float32BufferAttribute(positions, 3));
     this.gridLines = new LineSegments(geo, new LineBasicMaterial({ color: 0xe8dcb8, transparent: true, opacity: 0.55 }));
     this.root.add(this.gridLines);
+    this.buildTerrain(cells);
+  }
+
+  /** issue 12: surface tints (water/road/rock) and markers for the environment-interaction feature cells
+   *  (boulder pile, tree-trunk cache, the letzi wall) — previously only the plain grid lines were drawn, so
+   *  a set piece like Morgarten looked identical to an empty field. Rebuilt alongside the grid lines, i.e.
+   *  once per encounter/grid change, not every frame. */
+  private buildTerrain(cells: CellView[]): void {
+    while (this.terrainGroup.children.length) {
+      const c = this.terrainGroup.children.pop()!;
+      if (c instanceof Mesh) { c.geometry.dispose(); (c.material as MeshStandardMaterial).dispose(); }
+    }
+    const cellM = this.grid?.cellM ?? 1.5;
+    for (const c of cells) {
+      const tint = SURFACE_TINTS[c.surface];
+      if (tint !== undefined) {
+        const plane = new Mesh(new PlaneGeometry(cellM * 0.96, cellM * 0.96), new MeshStandardMaterial({ color: tint, transparent: true, opacity: c.surface === 'water' ? 0.55 : 0.3, roughness: 1, metalness: 0 }));
+        plane.rotation.x = -Math.PI / 2;
+        const [x, y, z] = this.cellCenter(c.q, c.r);
+        plane.position.set(x, y + 0.01, z);
+        this.terrainGroup.add(plane);
+      }
+      if (c.feature) this.terrainGroup.add(this.featureMarker(c));
+    }
+  }
+
+  private featureMarker(c: CellView): Object3D {
+    const [x, y, z] = this.cellCenter(c.q, c.r);
+    if (c.feature === 'letzi-wall') {
+      const wall = new Mesh(new BoxGeometry(1.1, 0.9, 0.5), new MeshStandardMaterial({ color: 0x716a5c, roughness: 1 }));
+      wall.position.set(x, y + 0.45, z);
+      return wall;
+    }
+    if (c.feature === 'trunk-cache') {
+      const trunk = new Mesh(new CylinderGeometry(0.14, 0.16, 1.1, 8), new MeshStandardMaterial({ color: 0x4a3420, roughness: 0.9 }));
+      trunk.rotation.z = Math.PI / 2;
+      trunk.position.set(x, y + 0.18, z);
+      return trunk;
+    }
+    // boulder-cache and anything else generic: a small rock pile.
+    const pile = new Group();
+    for (const [dx, dz, s] of [[0, 0, 0.28], [0.18, 0.12, 0.2], [-0.15, -0.1, 0.18]] as [number, number, number][]) {
+      const rock = new Mesh(new SphereGeometry(s, 6, 5), new MeshStandardMaterial({ color: 0x8a857c, roughness: 1 }));
+      rock.position.set(x + dx, y + s * 0.7, z + dz);
+      pile.add(rock);
+    }
+    return pile;
   }
 
   private cellCenter(q: number, r: number): [number, number, number] {
@@ -230,7 +295,7 @@ export class CombatRenderer {
     const world = this.ctx.services.tryGet('world');
     if (!this.grid || this.grid.cols !== view.grid.cols || this.grid.rows !== view.grid.rows || this.grid.origin.x !== view.grid.origin.x || this.grid.origin.z !== view.grid.origin.z) {
       this.grid = view.grid;
-      this.buildGridLines(view.grid, world);
+      this.buildGridLines(view.grid, view.cells);
     }
 
     // highlights: reachable for the active unit, Haufen outlines, deploy zone
@@ -340,7 +405,34 @@ export class CombatRenderer {
     if (active) {
       const pips = (b: boolean) => (b ? '●' : '○');
       lines.push(`Active: ${active.name}  AP[act:${pips(active.ap.action)} bon:${pips(active.ap.bonus)} rea:${pips(active.ap.reaction)} move:${active.ap.moveM.toFixed(1)}m]`);
-      lines.push(`HP ${active.hp}/${active.hpMax}  Morale ${active.morale}/${active.moraleMax}  Stance ${active.stance}`);
+      lines.push(`HP ${active.hp}/${active.hpMax}  Morale ${active.morale}/${active.moraleMax}  Stance ${active.stance}  Defense ${active.defense}`);
+      // issue 13: formation status for the acting unit — was invisible before, even though the Haufen bonus
+      // (ARCHITECTURE.md §5.3/§5.5) is a core mechanic worth being able to see fire.
+      const f = active.formation;
+      lines.push(`Formation: adjacentPolearms=${f.adjacentPolearms} defenseBonus=+${f.defenseBonus}${f.inHaufen ? ` inHaufen(#${f.haufenId})` : ''}`);
+      // issue 13: hit% + Edge/Burden sources against the nearest living enemy, via the same previewAttack()
+      // the UI would call on hover — so the overlay shows exactly what a real attack roll would use.
+      const combat = this.ctx.services.tryGet('combat');
+      if (combat && active.abilities.includes('ability.attack')) {
+        const nearestEnemy = view.units
+          .filter((u) => u.side !== active.side && !u.down && u.hp > 0)
+          .sort((a, b) => (Math.abs(a.q - active.q) + Math.abs(a.r - active.r)) - (Math.abs(b.q - active.q) + Math.abs(b.r - active.r)))[0];
+        if (nearestEnemy) {
+          const preview = combat.previewAttack(active.id, 'ability.attack', nearestEnemy.id);
+          if (preview) {
+            const sources = [...preview.context.edge.map((s) => `+${s}`), ...preview.context.burden.map((s) => `-${s}`)];
+            lines.push(`vs ${nearestEnemy.name}: ${Math.round(preview.hitChance * 100)}% hit (${preview.damage})${sources.length ? '  [' + sources.join(', ') + ']' : ''}`);
+          }
+        }
+      }
+    }
+    // issue 13: a queued reaction (opportunity attack, Brace, Cover Fire) was previously silent in the
+    // overlay — a human watching the debug view couldn't tell combat was paused waiting on one.
+    if (view.pendingReaction) {
+      const r = view.pendingReaction;
+      const unitName = view.units.find((u) => u.id === r.unit)?.name ?? r.unit;
+      const targetName = view.units.find((u) => u.id === r.target)?.name ?? r.target;
+      lines.push(`>>> pending reaction: ${unitName} may ${r.ability} (trigger: ${r.trigger}, vs ${targetName})`);
     }
     lines.push('Objectives: ' + view.objectives.map((o) => `${o.done ? '✓' : '·'} ${o.text}${o.progress ? ` (${o.progress})` : ''}`).join('  '));
     lines.push('--- log ---');

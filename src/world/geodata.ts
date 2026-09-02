@@ -100,7 +100,13 @@ const GORGE_SEGMENTS: Record<string, [string, string][]> = {
 const WIDE_U: SegParams = { shape: 'wideU', halfWidth: 140, influence: 550, riseRate: 260, corridorWidthM: 30 };
 const WIDE_U_MAJOR: SegParams = { ...WIDE_U, halfWidth: 220, influence: 750 };
 const STEEP_V: SegParams = { shape: 'steepV', halfWidth: 10, influence: 200, riseRate: 250, corridorWidthM: 14 };
-const ROAD_NORMAL: SegParams = { shape: 'wideU', halfWidth: 6, influence: 280, riseRate: 200, corridorWidthM: 6 };
+// Roads mostly run *along* a valley floor a river already shapes (e.g. the Gotthard mule track follows
+// the Reuss). A road's own rise-off-centreline profile only needs to matter for the ~6m bed itself —
+// give it real reach and it starts competing with (and beating, via "nearest wins") the river's proper
+// wide flat floor for any query point that happens to sit a little closer to a road sample point than
+// to the river's, producing a fake ~90m hillside a stone's throw from a genuinely flat valley (a real
+// bug here — the free-altdorf camera ended up standing on one, seeing pure black self-shadowed rock).
+const ROAD_NORMAL: SegParams = { shape: 'wideU', halfWidth: 6, influence: 45, riseRate: 35, corridorWidthM: 6 };
 
 function riverSegParams(riverId: string, aId: string, bId: string): SegParams {
   const gorges = GORGE_SEGMENTS[riverId];

@@ -93,3 +93,21 @@ export function rollAttack(inputs: AttackInputs, rng: Rng): AttackRoll {
 export function combineSoak(base: Record<DamageType, number>, extra: Partial<Record<DamageType, number>>): Record<DamageType, number> {
   return { cut: base.cut + (extra.cut ?? 0), thrust: base.thrust + (extra.thrust ?? 0), blunt: base.blunt + (extra.blunt ?? 0) };
 }
+
+/**
+ * Exact (closed-form, no rolling) hit-chance matching `rollAttack`'s own hit rule precisely: natural 1 always
+ * misses, natural ≥ critRange always hits, otherwise d + attackBonus ≥ targetDefense. `hit(d)` is monotonic
+ * non-decreasing in d, so P(max(a,b) hits) = 1 − (1 − p)² and P(min(a,b) hits) = p² exactly (not an
+ * approximation) — issue 7 / probe 6.
+ */
+export function estimateHitChance(attackBonus: number, targetDefense: number, critRange: number, mode: 'normal' | 'edge' | 'burden'): number {
+  let hits = 0;
+  for (let d = 1; d <= 20; d++) {
+    if (d === 1) continue; // fumble always misses
+    if (d >= critRange || d + attackBonus >= targetDefense) hits++;
+  }
+  const p = hits / 20;
+  if (mode === 'edge') return 1 - (1 - p) ** 2;
+  if (mode === 'burden') return p * p;
+  return p;
+}

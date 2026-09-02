@@ -21,13 +21,16 @@ export interface Occupant {
   side: Side;
 }
 
-/** null = impassable between these two adjacent cells */
-export function stepCost(a: CellView, b: CellView, diag: boolean, cellM: number): number | null {
+/** null = impassable between these two adjacent cells. `mounted` movers cannot cross a `letzi-wall` cell
+ *  (LORE §1: the Sattel letzi blocked cavalry) — everyone else treats it as normal (if difficult/steep) ground.
+ *  `ignoreDifficult` (Mountain Stride) skips the difficult-terrain cost doubling for this mover's move. */
+export function stepCost(a: CellView, b: CellView, diag: boolean, cellM: number, mounted = false, ignoreDifficult = false): number | null {
   if (!b.passable) return null;
+  if (mounted && b.feature === 'letzi-wall') return null;
   const slope = slopeDeg(a, b, cellM, diag);
   if (slope > 45) return null;
   let cost = diag ? cellM * 1.4 : cellM;
-  if (b.difficult) cost *= 2;
+  if (b.difficult && !ignoreDifficult) cost *= 2;
   if (slope > 30) cost += cellM;
   return cost;
 }
@@ -40,7 +43,7 @@ function occupantAt(q: number, r: number, occ: Occupant[]): Occupant | undefined
  *  (including ally-occupied ones, which are needed to route past them) plus a `from` pointer for path
  *  reconstruction. The caller filters out non-stoppable cells (occupied, self) when building `reachable()`. */
 export function dijkstra(
-  startQ: number, startR: number, moveBudgetM: number, side: Side, grid: PathGrid, occupants: Occupant[],
+  startQ: number, startR: number, moveBudgetM: number, side: Side, grid: PathGrid, occupants: Occupant[], mounted = false, ignoreDifficult = false,
 ): Map<string, { cost: number; from?: CellKey }> {
   const dist = new Map<string, { cost: number; from?: CellKey }>();
   const startKey = `${startQ},${startR}`;
@@ -63,7 +66,7 @@ export function dijkstra(
       if (!nCell) continue;
       const occupant = occupantAt(nq, nr, occupants);
       if (occupant && occupant.side !== side) continue; // enemy-occupied: impassable
-      const sc = stepCost(curCell, nCell, off.diag, grid.cellM);
+      const sc = stepCost(curCell, nCell, off.diag, grid.cellM, mounted, ignoreDifficult);
       if (sc === null) continue;
       const newCost = cur.cost + sc;
       if (newCost > moveBudgetM + 1e-6) continue;
@@ -80,9 +83,9 @@ export function dijkstra(
 
 /** Cells the unit may legally end its move on: reachable, not the start cell, and not occupied. */
 export function reachableCells(
-  startQ: number, startR: number, moveBudgetM: number, side: Side, grid: PathGrid, occupants: Occupant[],
+  startQ: number, startR: number, moveBudgetM: number, side: Side, grid: PathGrid, occupants: Occupant[], mounted = false, ignoreDifficult = false,
 ): CellKey[] {
-  const dist = dijkstra(startQ, startR, moveBudgetM, side, grid, occupants);
+  const dist = dijkstra(startQ, startR, moveBudgetM, side, grid, occupants, mounted, ignoreDifficult);
   const out: CellKey[] = [];
   for (const [key, v] of dist) {
     if (v.cost === 0) continue;

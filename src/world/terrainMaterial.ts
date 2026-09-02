@@ -91,6 +91,13 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           float snowAmt = clamp(smoothstep(uSnowLine - 50.0, uSnowLine + 30.0, vWorldPos.y) * (1.0 - 0.5 * wRock), 0.0, 1.0);
           if (snowAmt > 0.01) texel = mix(texel, texture2D(tSnow, uvY), snowAmt);
 
+          // Defensive floor: some (still-unexplained on this software rasteriser) combination of steep
+          // slope + close range very occasionally starved every branch above of a sample, leaving texel
+          // at (0,0,0,*) and the whole frame black — seen at the Schöllenen gorge scenario camera. The
+          // opaque canvas textures always carry alpha=1, so it's the RGB that must be checked, not alpha.
+          // Never let terrain render fully unlit; fall back to a neutral rock-grey rather than black.
+          if (texel.r + texel.g + texel.b < 0.05) texel = vec4(0.42, 0.4, 0.36, 1.0);
+
           diffuseColor *= texel;
         }
         #include <map_fragment>

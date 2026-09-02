@@ -47,23 +47,44 @@ describe('formationBonus (Gewalthaufen)', () => {
 });
 
 describe('isFlanked', () => {
-  it('is true when two hostiles sit on opposite sides of the target', () => {
+  it('is true when two hostiles sit on opposite sides of the target, both within reach', () => {
     const target = { q: 5, r: 5 };
-    const attacker = { q: 4, r: 5 };
-    const other = { q: 6, r: 5 };
+    const attacker = { q: 4, r: 5, reach: 1 };
+    const other = { q: 6, r: 5, reach: 1 };
     expect(isFlanked(target, attacker, [other])).toBe(true);
   });
 
   it('is false when hostiles are on the same side', () => {
     const target = { q: 5, r: 5 };
-    const attacker = { q: 4, r: 5 };
-    const other = { q: 4, r: 6 };
+    const attacker = { q: 4, r: 5, reach: 1 };
+    const other = { q: 4, r: 6, reach: 1 };
     expect(isFlanked(target, attacker, [other])).toBe(false);
   });
 
   it('is false with only one attacker', () => {
     const target = { q: 5, r: 5 };
-    const attacker = { q: 4, r: 5 };
+    const attacker = { q: 4, r: 5, reach: 1 };
     expect(isFlanked(target, attacker, [])).toBe(false);
+  });
+
+  it('is false when the attacker is out of reach of the target (probe 3b)', () => {
+    const target = { q: 5, r: 5 };
+    const farAttacker = { q: 12, r: 5, reach: 1 }; // 7 cells away
+    const other = { q: 6, r: 5, reach: 1 };
+    expect(isFlanked(target, farAttacker, [other])).toBe(false);
+  });
+
+  it('is false when the second hostile is out of reach even if the pincer angle matches', () => {
+    const target = { q: 5, r: 5 };
+    const attacker = { q: 4, r: 5, reach: 1 };
+    const farOther = { q: 12, r: 5, reach: 1 };
+    expect(isFlanked(target, attacker, [farOther])).toBe(false);
+  });
+
+  it('a polearm reach-2 hostile can still flank from 2 cells away', () => {
+    const target = { q: 5, r: 5 };
+    const attacker = { q: 3, r: 5, reach: 2 };
+    const other = { q: 7, r: 5, reach: 2 };
+    expect(isFlanked(target, attacker, [other])).toBe(true);
   });
 });

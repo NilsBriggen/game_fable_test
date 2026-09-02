@@ -79,19 +79,21 @@ function presetGasse(): PresetSample {
   };
 }
 
-/** Morgarten: lake along one long edge (low r), a road strip, a slope rising ~12 m toward the other edge
- *  (high r) with a letzi wall line near the top. Grid is authored 40x24 (LORE §6 step 12, §1). */
+/** Morgarten: the Ägerisee lies along the WEST edge (low q — real geography, LORE §1/§3), a road strip beside
+ *  it, and a slope rising ~12 m to the east (high q) that the Confederates hold. `letzi-wall` cells (impassable
+ *  to mounted movers — see `path.ts`) are authored explicitly in `content/encounters.ts`'s `terrainFeatures`,
+ *  not baked into this preset, so the encounter controls exactly where the chokepoint sits. Grid is authored
+ *  40×24 (LORE §6 step 12, §1): q = depth from the lake (0..39), r = position along the column (0..23).
+ */
 function presetMorgarten(): PresetSample {
-  return (q, r, cols, rows) => {
-    const lakeRows = Math.floor(rows * 0.18);
-    const roadRows = [lakeRows, lakeRows + 2] as const;
-    if (r < lakeRows) return { height: -0.3, surface: 'water', passable: true, cover: 0, difficult: true };
-    if (r >= roadRows[0] && r <= roadRows[1]) return { height: 0.1, surface: 'road', passable: true, cover: 0, difficult: false };
-    const slopeStart = roadRows[1] + 1;
-    const t = Math.max(0, (r - slopeStart) / Math.max(1, rows - 1 - slopeStart));
+  return (q, r, cols) => {
+    const lakeCols = Math.max(3, Math.floor(cols * 0.12));
+    const roadCols = [lakeCols, lakeCols + 2] as const;
+    if (q < lakeCols) return { height: -0.3, surface: 'water', passable: true, cover: 0, difficult: true };
+    if (q >= roadCols[0] && q <= roadCols[1]) return { height: 0.1, surface: 'road', passable: true, cover: 0, difficult: false };
+    const slopeStart = roadCols[1] + 1;
+    const t = Math.max(0, (q - slopeStart) / Math.max(1, cols - 1 - slopeStart));
     const height = t * 12;
-    const letziR = rows - 3;
-    if (r === letziR) return { height, surface: 'rock', passable: true, cover: 2, difficult: false };
     const surface: SurfaceType = t > 0.6 ? 'forest' : 'grass';
     return { height, surface, passable: true, cover: 0, difficult: false };
   };

@@ -1,10 +1,17 @@
 /**
- * abilities — content data owned by the combat builder. `CombatEffect` DSL (ARCHITECTURE.md §5.4); the engine
- * (`src/combat/engine.ts`) interprets `effects` generically, substituting the acting unit's actual equipped
- * weapon dice/type for the weapon-attack abilities (`attack`, `aimed-shot`, `hook`, `push-of-pike`, `riposte`,
- * `crossbow-snapshot`) rather than the placeholder dice written here. One def per id referenced by
- * `perks.ts` `grantsAbility`, plus the base action-economy abilities every combatant has. Every id below is
- * cited by BUILDER_RULES.md's fixed ability list.
+ * abilities — content data owned by the combat builder. `CombatEffect` DSL (ARCHITECTURE.md §5.4): the engine
+ * (`src/combat/engine.ts` — see `applyEffect`) genuinely interprets `effects[]` for every ability below —
+ * status/removeStatus/push/pull/moraleCheck/heal/reload/rally/stance/line/cone/disengage/dash/stabilize all
+ * execute exactly as written here, no per-id special-casing. `attackRoll: true` abilities (Attack, Aimed Shot,
+ * Hook, Push of Pike, Riposte, Charge, Crossbow Snapshot) roll to hit against the wielder's ACTUAL equipped
+ * weapon (dice/type/reach), so they carry no `damage` entry of their own — the weapon hit already is the
+ * effect. Charge is the one exception: its `damage` entry is genuinely additional (couched-lance impact on
+ * top of the weapon hit), which the engine's convention reads as bonus damage on a hit rather than a
+ * replacement. A few mechanics still need engine-side data the DSL can't carry (a contested roll for Shove, the
+ * cache/affects-line geometry for Roll Boulders, Herbalism-gated heal size for Bandage, un-Routing for Rally)
+ * — `engine.ts`'s `executeAbility` documents exactly which. One def per id referenced by `perks.ts`
+ * `grantsAbility`, plus the base action-economy abilities every combatant has. Every id below is cited by
+ * BUILDER_RULES.md's fixed ability list.
  */
 import type { ContentRegistry } from '@core/content';
 import type { AbilityDef } from '@core/schemas';
@@ -12,14 +19,14 @@ import type { AbilityDef } from '@core/schemas';
 export const abilities: AbilityDef[] = [
   {
     id: 'ability.attack', name: 'Attack', cost: { action: true }, target: 'enemy', range: 'weapon', attackRoll: true,
-    effects: [{ damage: { dice: '1d6', type: 'cut', bonus: 'strength' } }],
+    effects: [],
     description: 'A weapon attack with whatever is in hand — melee reach or a loaded ranged weapon.',
     historical: true, note: 'The default action of every fighting man of the period; no special technique implied.',
   },
   {
     id: 'ability.aimed-shot', name: 'Aimed Shot', cost: { action: true, noMove: true }, requires: { ranged: true, loaded: true },
     target: 'enemy', range: 'weapon', attackRoll: true,
-    effects: [{ damage: { dice: '1d10', type: 'thrust', bonus: 'none' } }],
+    effects: [],
     description: 'A steadied shot, feet planted and both hands on the stock — Tell\'s own method with the Armbrust.',
     historical: true, note: 'A braced, deliberate shot trades all movement for accuracy with any period stirrup crossbow.',
   },
@@ -67,21 +74,21 @@ export const abilities: AbilityDef[] = [
     historical: true, note: 'Bracing a spear against cavalry is the Spiess\'s and Halbarte\'s whole reason for being in the levy.',
   },
   {
-    id: 'ability.charge', name: 'Charge', cost: { action: true }, requires: {}, target: 'enemy', range: 'weapon',
-    attackRoll: true, effects: [{ damage: { dice: '1d8', type: 'thrust', bonus: 'strength' } }, { moraleCheck: { dc: 12 } }],
-    description: 'A mounted charge: move at least 3 cells in a line into the attack for +1d8 damage and a morale check on the target — exactly what the Haufen is built to break.',
+    id: 'ability.charge', name: 'Charge', cost: { action: true }, requires: { mounted: true, minChargeCells: 3 }, target: 'enemy', range: 'weapon',
+    attackRoll: true, effects: [{ damage: { dice: '1d8', type: 'thrust', bonus: 'none' } }],
+    description: 'A mounted charge: a genuine run-up of at least 3 cells in a straight line, ending adjacent to the target, for +1d8 lance-impact damage and a morale check on the target — exactly what the Haufen is built to break.',
     historical: true, note: 'Habsburg knightly cavalry at Morgarten relied on the couched-lance charge that the terrain and the Haufen defeated.',
   },
   {
-    id: 'ability.roll-boulders', name: 'Roll Boulders', cost: { action: true }, requires: { terrainFeature: 'boulder-cache' },
+    id: 'ability.roll-boulders', name: 'Roll Boulders', cost: { action: true }, requires: { terrainFeature: ['boulder-cache', 'trunk-cache'] },
     target: 'line', range: 3, attackRoll: false,
-    effects: [{ line: { cells: 3, effect: { damage: { dice: '2d10', type: 'blunt' } } } }, { status: { id: 'prone', turns: 1 } }, { moraleCheck: { dc: 14 } }],
-    description: 'Loose a cached boulder or trunk down the slope onto the road below — Morgarten\'s opening blow.',
+    effects: [{ damage: { dice: '2d10', type: 'blunt' } }, { status: { id: 'prone', turns: 1 } }, { moraleCheck: { dc: 14 } }],
+    description: 'Loose a cached boulder or trunk down the slope onto the road below — Morgarten\'s opening blow. The engine applies these effects to every unit standing on the feature\'s authored affects-line, not a generic line drawn from the caster.',
     historical: true, note: 'Johannes of Winterthur and the founding tradition both describe rocks and tree trunks rolled onto the Habsburg column from the Figlenfluh above Morgarten.',
   },
   {
     id: 'ability.hook', name: 'Hook', cost: { action: true }, requires: { weaponProperty: 'hook' }, target: 'enemy', range: 'weapon',
-    attackRoll: true, effects: [{ damage: { dice: '1d10', type: 'cut', bonus: 'strength' } }, { pull: { cells: 1 } }],
+    attackRoll: true, effects: [{ pull: { cells: 1 } }],
     description: 'The halberd\'s back-spike drags a mounted foe from the saddle on a hit.',
     historical: true, note: 'Chroniclers of Morgarten describe halberds hooking and pulling riders down; see perk.halberd-25.',
   },
@@ -94,21 +101,21 @@ export const abilities: AbilityDef[] = [
   {
     id: 'ability.push-of-pike', name: 'Push of Pike', cost: { action: true }, requires: { weaponProperty: 'brace', status: 'braced' },
     target: 'enemy', range: 'weapon', attackRoll: true,
-    effects: [{ damage: { dice: '1d8', type: 'thrust', bonus: 'strength' } }, { push: { cells: 1 } }],
+    effects: [{ push: { cells: 1 } }],
     description: 'A braced hit shoves an entire file back and checks its charge.',
     historical: true, note: 'Massed spear formations of the period are chronicled physically shoving an opposing line; see perk.spear-75.',
   },
   {
-    id: 'ability.shield-wall', name: 'Shield Wall', cost: { bonus: true }, requires: { weaponProperty: 'shield' }, target: 'self', range: 0,
-    effects: [{ status: { id: 'shield-wall', turns: 1 } }],
+    id: 'ability.shield-wall', name: 'Shield Wall', cost: { bonus: true }, requires: { shield: true }, target: 'self', range: 0,
+    effects: [{ cone: { cells: 1, effect: { status: { id: 'shield-wall', turns: 1 } } } }],
     description: 'Lock shields with the men on either side: you and adjacent allies gain +1 Defense this round.',
     historical: true, note: 'Shield-wall tactics are attested wherever medieval freemen fought shoulder to shoulder; see perk.shield-75.',
   },
   {
-    id: 'ability.second-wind', name: 'Second Wind', cost: { bonus: true }, target: 'self', range: 0,
+    id: 'ability.second-wind', name: 'Verschnaufen', cost: { bonus: true }, target: 'self', range: 0,
     effects: [{ heal: '1d6' }, { removeStatus: 'shaken' }],
-    description: 'A trained body finds a second reserve of strength: heal and shake off Shaken.',
-    historical: true, note: 'Habsburg chroniclers remark on the stamina of Waldstätte militia, men used to a working life in the mountains; see perk.athletics-75.',
+    description: 'Catch your breath and steady your nerve — only with no enemy adjacent (this is a pause between clashes, not something you can do mid-melee): heal and shake off Shaken. (Content id stays `ability.second-wind` — perk.athletics-75 grants it by id.)',
+    historical: true, note: 'Renamed from the borrowed 5e "Second Wind": this is a physically ordinary breather, not a magical fighter feature. Habsburg chroniclers remark on the stamina of Waldstätte militia, men used to a working life in the mountains; see perk.athletics-75.',
   },
   {
     id: 'ability.war-cry', name: 'War Cry', cost: {}, target: 'cone', range: 3, attackRoll: false,
@@ -118,8 +125,8 @@ export const abilities: AbilityDef[] = [
   },
   {
     id: 'ability.riposte', name: 'Riposte', cost: { reaction: true }, requires: { weaponSkill: 'sword' }, target: 'enemy', range: 'weapon',
-    attackRoll: true, reactionTrigger: 'leave-reach', effects: [{ damage: { dice: '1d8', type: 'cut', bonus: 'strength' } }],
-    description: 'A parried blow answered at once: your opportunity attack lands for full weight.',
+    attackRoll: true, reactionTrigger: 'leave-reach', effects: [],
+    description: 'A parried blow answered at once: your opportunity attack lands for full weight (automatic substitute for a plain opportunity attack — see engine.ts resolveOpportunityAttack).',
     historical: true, note: 'Arming-sword fencing of the period already pairs a parry with an immediate counter-thrust; see perk.sword-50.',
   },
   {
@@ -130,8 +137,8 @@ export const abilities: AbilityDef[] = [
   },
   {
     id: 'ability.crossbow-snapshot', name: 'Schnellschuss', cost: { bonus: true }, requires: { ranged: true, loaded: true },
-    target: 'enemy', range: 'weapon', attackRoll: true, effects: [{ damage: { dice: '1d10', type: 'thrust', bonus: 'none' } }],
-    description: 'Loose the instant a target appears, without lowering the weapon first — a second shot this turn.',
+    target: 'enemy', range: 'weapon', attackRoll: true, effects: [],
+    description: 'Loose the instant a target appears, without lowering the weapon first — a second shot this turn, or the reflex behind the Cover Fire reaction on a target that just came into range.',
     historical: true, note: 'The light hunting Armbrust of this period could be brought to bear quickly in a practised hand; see perk.crossbow-50.',
   },
   {
@@ -156,7 +163,7 @@ export const abilities: AbilityDef[] = [
     id: 'ability.rally-bonus', name: 'Rally (bonus)', cost: { bonus: true }, requires: { skill: 'leadership' }, target: 'cell', range: 3,
     effects: [{ rally: { radius: 3 } }],
     description: 'A sworn brother-in-arms rallies the Shaken as easily as drawing breath — Rally costs only a bonus action.',
-    historical: 'legend', note: 'Modelled on the Bundesbrief\'s oath of mutual aid: sworn confederates rallying one another under fire; see perk.leadership-50.',
+    historical: 'invented', note: 'A builder-invented mechanic (not itself attested tradition, unlike the Bundesbrief it is modelled on): sworn confederates rallying one another under fire, cast as a bonus-action Rally; see perk.leadership-50.',
   },
 ];
 

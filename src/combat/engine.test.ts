@@ -490,7 +490,7 @@ describe('Morgarten full autoplay', () => {
     const resultPromise = engine.start('enc.morgarten');
     expect(() => engine.submit({ type: 'auto', rounds: 8 })).not.toThrow();
     // getState().log is truncated to the last 50 entries for the UI; serialize() carries the full log.
-    const fullLog = (engine.serialize()?.log ?? []).join('\n');
+    const fullLog = ((engine.serialize()?.log ?? []) as { text: string }[]).map((l) => l.text).join('\n');
     expect(fullLog.toLowerCase()).toMatch(/boulder|struck by a rolling/);
     if (engine.isActive()) engine.submit({ type: 'flee' });
     await resultPromise;

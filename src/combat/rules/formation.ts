@@ -7,7 +7,7 @@
 import type { EntityId } from '@core/ecs';
 import type { Side } from '@core/schemas';
 import type { FormationStatus } from '@core/services';
-import { NEIGHBOR_OFFSETS } from './grid';
+import { NEIGHBOR_OFFSETS, cellDistance } from './grid';
 
 export interface FormationUnit {
   id: EntityId;
@@ -80,12 +80,17 @@ export function formationBonus(unit: FormationUnit, all: FormationUnit[]): Forma
   return { adjacentPolearms, inHaufen, defenseBonus, haufenId };
 }
 
-/** True when `attacker` and a second hostile unit sit on opposite sides of `target` (flanking geometry). */
-export function isFlanked(target: { q: number; r: number }, attacker: { q: number; r: number }, otherHostiles: { q: number; r: number }[]): boolean {
+export interface ReachPoint { q: number; r: number; reach: number }
+
+/** True when `attacker` and a second hostile unit sit on opposite sides of `target` (flanking geometry) AND
+ *  both are within their own reach of the target — a unit seven cells away cannot flank anyone (issue 4). */
+export function isFlanked(target: { q: number; r: number }, attacker: ReachPoint, otherHostiles: ReachPoint[]): boolean {
+  if (cellDistance(attacker.q, attacker.r, target.q, target.r) > attacker.reach) return false;
   const dx1 = Math.sign(attacker.q - target.q);
   const dz1 = Math.sign(attacker.r - target.r);
   if (dx1 === 0 && dz1 === 0) return false;
   return otherHostiles.some((o) => {
+    if (cellDistance(o.q, o.r, target.q, target.r) > o.reach) return false;
     const dx2 = Math.sign(o.q - target.q);
     const dz2 = Math.sign(o.r - target.r);
     if (dx2 === 0 && dz2 === 0) return false;

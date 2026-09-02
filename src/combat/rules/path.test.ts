@@ -77,4 +77,14 @@ describe('dijkstra / reachableCells', () => {
     expect(path![path!.length - 1]).toEqual({ q: 3, r: 0 });
     expect(pathCost(dist, 3, 0)).toBeCloseTo(4.5);
   });
+
+  it('a letzi-wall cell blocks mounted movers but not foot movers (issue 3)', () => {
+    const cells = flatGrid(5, 5);
+    cells[idx(2, 0, 5)].feature = 'letzi-wall';
+    const grid = { cols: 5, rows: 5, cellM: 1.5, cells };
+    const mounted = reachableCells(0, 0, 10, 'player', grid, [], true);
+    expect(mounted.some((c) => c.q === 2 && c.r === 0)).toBe(false);
+    const foot = reachableCells(0, 0, 10, 'player', grid, [], false);
+    expect(foot.some((c) => c.q === 2 && c.r === 0)).toBe(true);
+  });
 });
