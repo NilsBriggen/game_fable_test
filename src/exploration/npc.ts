@@ -87,7 +87,9 @@ export class NpcSystem {
     const x = pos.x + jitter.x, z = pos.z + jitter.z;
     const t = this.world.get(id, Transform)!;
     t.x = x; t.y = this.worldService.heightAt(x, z); t.z = z; t.yaw = 0;
-    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${def.name}`, dialogueId: def.dialogueRoot, enabled: true });
+    // Falls back to the quest builder's `dlg.generic.<archetype>` (requests/quest-1.md) for the vast
+    // majority of named NPCs that carry no bespoke `dialogueRoot` of their own.
+    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${def.name}`, dialogueId: def.dialogueRoot ?? `dlg.generic.${def.archetype}`, enabled: true });
     // frozen=true initially — the lifecycle system unfreezes + snaps position + spawns a mesh on first
     // proximity check, so we don't pay a spawn cost for NPCs the player never gets near this session.
     const npc = this.world.get(id, Npc)!;
@@ -112,7 +114,7 @@ export class NpcSystem {
     const id = this.party.createCharacter(genericDef);
     const t = this.world.get(id, Transform)!;
     t.x = jx; t.y = this.worldService.heightAt(jx, jz); t.z = jz;
-    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${arch.name}`, enabled: true });
+    this.world.add(id, Interactable, { kind: 'talk', prompt: `Talk to ${arch.name}`, dialogueId: `dlg.generic.${archId}`, enabled: true });
     const npc = this.world.get(id, Npc)!;
     npc.frozen = true;
     npc.generic = true;

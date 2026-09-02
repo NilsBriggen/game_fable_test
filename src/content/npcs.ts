@@ -7,10 +7,13 @@
  *
  * Equipment/skills for every minor NPC and the generic-crowd template are cloned from `archetypes.ts` so
  * every item id is guaranteed to exist in `items.ts` (that file's own `register()` already validates it).
- * `dialogueRoot` is set only on the named cast the task calls out by id — dialogues are a Wave-3 deliverable
- * (`src/content/dialogues` is still a stub), so `ContentRegistry.validate()` will report these as "unknown
- * dialogue" until then; see `requests/exploration-1.md`. The same applies to `faction` cross-references
- * against `src/content/factions.ts` (also still a stub) — both are pre-existing Wave-3 gaps, not bugs here.
+ * `dialogueRoot` is set on the named cast the task calls out by id, plus six side-quest-bearing minor NPCs
+ * the quest builder named (requests/quest-1.md) — every other minor NPC and the generic crowd fall back to
+ * `dlg.generic.<archetype>` at interaction time (`src/exploration/interact.ts`), which the quest builder
+ * defines. Dialogues are a Wave-3 deliverable (`src/content/dialogues` is still a stub as of this writing),
+ * so `ContentRegistry.validate()` will report every one of these as "unknown dialogue" until that content
+ * lands; see `requests/exploration-1.md`. The same applies to `faction` cross-references against
+ * `src/content/factions.ts` (also still a stub) — both are pre-existing Wave-3 gaps, not bugs here.
  */
 import type { ContentRegistry } from '@core/content';
 import type { Historicity, NpcDef, ScheduleEntry } from '@core/schemas';
@@ -21,10 +24,12 @@ const archById = new Map(archetypes.map((a) => [a.id, a]));
 const ALL_CHAPTERS = ['prologue-1291', 'ch1-1307', 'ch2-1314'];
 
 /** A minor named NPC: clones an archetype's stats/skills/equipment (so items are guaranteed valid) and
- *  gives it a name, a home and a schedule. `dialogueRoot` deliberately omitted — see file header. */
+ *  gives it a name, a home and a schedule. `dialogueRoot` is left unset for most (the interact system
+ *  falls back to `dlg.generic.<archetype>` — see `src/exploration/interact.ts`) except the six side-quest
+ *  NPCs the quest builder named explicitly (requests/quest-1.md). */
 function minor(
   id: string, given: string, family: string, home: string, faction: string, archetypeId: string,
-  opts: { chapters?: string[]; born?: number; schedule?: ScheduleEntry[]; description: string; historical?: Historicity; note?: string },
+  opts: { chapters?: string[]; born?: number; schedule?: ScheduleEntry[]; description: string; historical?: Historicity; note?: string; dialogueRoot?: string },
 ): NpcDef {
   const a = archById.get(archetypeId);
   if (!a) throw new Error(`npcs: unknown archetype "${archetypeId}"`);
@@ -35,6 +40,7 @@ function minor(
     equipment: a.equipment ? { ...a.equipment } : undefined,
     inventory: a.inventory ? a.inventory.map((i) => ({ ...i })) : undefined,
     modelId: a.modelId,
+    dialogueRoot: opts.dialogueRoot,
     chapters: opts.chapters ?? ALL_CHAPTERS,
     born: opts.born,
     schedule: opts.schedule ?? daySchedule(),
@@ -369,7 +375,7 @@ const minorCast: NpcDef[] = [
   minor('npc.hans-zumbrunnen', 'Hans', 'Zumbrunnen', 'poi.altdorf', 'uri', 'merchant', { description: 'A cloth trader working the Gotthard road, sharp about a Pfennig price.' }),
   minor('npc.peter-bühler', 'Peter', 'Bühler', 'poi.altdorf', 'uri', 'militia-spear', { schedule: guardSchedule(), description: "One of Altdorf's own levy, spear and Eisenhut, called up for the square when trouble is close." }),
   minor('npc.elsi-lussi', 'Elsi', 'Lussi', 'poi.altdorf', 'uri', 'child', { description: 'An Altdorf child, present for colour and dialogue only.' }),
-  minor('npc.burkhard-wyrsch', 'Burkhard', 'Wyrsch', 'poi.altdorf', 'uri', 'elder', { description: "An Altdorf Landsgemeinde man, grey-haired and still heard." }),
+  minor('npc.burkhard-wyrsch', 'Burkhard', 'Wyrsch', 'poi.altdorf', 'uri', 'elder', { description: "An Altdorf Landsgemeinde man, grey-haired and still heard.", dialogueRoot: 'dlg.schuetzenkoenig-entry' }),
   // ---- Bürglen ----
   minor('npc.ruodi-imhof', 'Ruodi', 'Imhof', 'poi.buerglen', 'uri', 'herder', { description: "A Bürglen herder driving cattle up the Schächental alps every summer." }),
   minor('npc.verena-gisler', 'Verena', 'Gisler', 'poi.buerglen', 'uri', 'woman-peasant', { description: "Bürglen's midwife and herbwife, known to half the Reusstal." }),
@@ -384,7 +390,7 @@ const minorCast: NpcDef[] = [
   // ---- Erstfeld / Silenen / Amsteg (Säumer road) ----
   minor('npc.toni-zurfluh', 'Toni', 'Zurfluh', 'poi.erstfeld', 'saeumer', 'saeumer', { description: 'A Gotthard muleteer resting his train at Erstfeld before the climb.' }),
   minor('npc.sepp-infanger', 'Sepp', 'Infanger', 'poi.silenen', 'saeumer', 'saeumer', { description: "A Säumer cooperative man out of Silenen, salt sacks on his mules." }),
-  minor('npc.niklaus-planzer', 'Niklaus', 'Planzer', 'poi.amsteg', 'saeumer', 'saeumer', { description: 'An Amsteg muleteer, the last easy stop before the Schöllenen.' }),
+  minor('npc.niklaus-planzer', 'Niklaus', 'Planzer', 'poi.amsteg', 'saeumer', 'saeumer', { description: 'An Amsteg muleteer, the last easy stop before the Schöllenen.', dialogueRoot: 'dlg.saeumer-escort' }),
   // ---- Andermatt / Gotthard ----
   minor('npc.balz-truttmann', 'Balz', 'Truttmann', 'poi.andermatt', 'uri', 'herder', { description: 'An Ursern herder, sure-footed on the high Gotthard meadows.' }),
   minor('npc.bruder-gion', 'Bruder', 'Gion', 'poi.gotthard', 'einsiedeln', 'monk', { schedule: monkSchedule(), description: 'A hospice brother keeping the fire lit for travellers crossing the pass.' }),
@@ -407,7 +413,7 @@ const minorCast: NpcDef[] = [
   // ---- Muotathal / Lauerz / Sattel / Arth ----
   minor('npc.gion-rohrer', 'Gion', 'Rohrer', 'poi.muotathal', 'schwyz', 'herder', { description: 'A Muotathal herder working the slopes toward the closed Pragel.' }),
   minor('npc.trudi-wallimann', 'Trudi', 'Wallimann', 'poi.lauerz', 'schwyz', 'fisher', { description: 'A Lauerzersee fisherwoman.' }),
-  minor('npc.melchior-arnold', 'Melchior', 'Arnold', 'poi.sattel', 'schwyz', 'peasant', { description: 'A Sattel farmer whose fields run down toward the Morgarten road.' }),
+  minor('npc.melchior-arnold', 'Melchior', 'Arnold', 'poi.sattel', 'schwyz', 'peasant', { description: 'A Sattel farmer whose fields run down toward the Morgarten road.', dialogueRoot: 'dlg.alpstreit-dispute' }),
   minor('npc.barbara-schmid', 'Barbara', 'Schmid', 'poi.arth', 'schwyz', 'merchant', { description: 'An Arth trader at the road junction where Schwyz, Zug and Küssnacht routes meet.' }),
   // ---- Küssnacht / Gesslerburg ----
   minor('npc.hans-müller', 'Hans', 'Müller', 'poi.kuessnacht', 'habsburg', 'peasant', { description: 'A Küssnacht villager under Habsburg administration.' }),
@@ -441,10 +447,10 @@ const minorCast: NpcDef[] = [
   // ---- Stansstad / Engelberg / Wolfenschiessen ----
   minor('npc.werni-bühler', 'Werni', 'Bühler', 'poi.stansstad', 'unterwalden', 'boatman', { description: 'A Stansstad ferryman.' }),
   minor('npc.bruder-melchior', 'Bruder', 'Melchior', 'poi.engelberg', 'unterwalden', 'monk', { schedule: monkSchedule(), description: 'An Engelberg brother, colleague of Bruder Anselm.' }),
-  minor('npc.jost-durrer', 'Jost', 'Durrer', 'poi.wolfenschiessen', 'unterwalden', 'peasant', { description: "A Wolfenschiessen farmer who keeps his own counsel about the bath-house." }),
+  minor('npc.jost-durrer', 'Jost', 'Durrer', 'poi.wolfenschiessen', 'unterwalden', 'peasant', { description: "A Wolfenschiessen farmer who keeps his own counsel about the bath-house.", dialogueRoot: 'dlg.bad-wolfenschiessen' }),
   // ---- Luzern ----
   minor('npc.hans-vogt', 'Hans', 'Vogt', 'poi.luzern', 'luzern', 'merchant', { description: 'A Luzern cloth merchant trading both lake and Gotthard routes.' }),
-  minor('npc.trudi-meier', 'Trudi', 'Meier', 'poi.luzern', 'luzern', 'innkeeper', { description: "Keeper of a Luzern quayside inn." }),
+  minor('npc.trudi-meier', 'Trudi', 'Meier', 'poi.luzern', 'luzern', 'innkeeper', { description: "Keeper of a Luzern quayside inn.", dialogueRoot: 'dlg.drache-pilatus' }),
   minor('npc.konrad-schmid', 'Konrad', 'Schmid', 'poi.luzern', 'luzern', 'boatman', { description: "A Luzern boatman working the Reuss outflow." }),
   minor('npc.werni-huber', 'Werni', 'Huber', 'poi.luzern', 'luzern', 'boatman', { description: 'A second Luzern ferryman, the Reuss bridge crossing his usual run.' }),
   minor('npc.ita-fischer', 'Ita', 'Fischer', 'poi.luzern', 'luzern', 'woman-peasant', { description: 'A Luzern market-stall keeper.' }),
@@ -463,7 +469,7 @@ const minorCast: NpcDef[] = [
   minor('npc.bruder-toni', 'Bruder', 'Toni', 'poi.einsiedeln', 'einsiedeln', 'abbey-man-at-arms', { schedule: guardSchedule(), description: "One of the abbey's own retainers." }),
   minor('npc.bruder-sepp', 'Bruder', 'Sepp', 'poi.einsiedeln', 'einsiedeln', 'abbey-man-at-arms', { schedule: guardSchedule(), description: "A second abbey man-at-arms, holding the gate." }),
   // ---- Gersau / Vitznau / Weggis (fishing shore) ----
-  minor('npc.uli-fischer', 'Uli', 'Fischer', 'poi.gersau', 'none', 'fisher', { description: "A Gersau fisherman, proud of his little free village's independence." }),
+  minor('npc.uli-fischer', 'Uli', 'Fischer', 'poi.gersau', 'none', 'fisher', { description: "A Gersau fisherman, proud of his little free village's independence.", dialogueRoot: 'dlg.fischer-gersau' }),
   minor('npc.verena-huber', 'Verena', 'Huber', 'poi.vitznau', 'luzern', 'fisher', { description: 'A Vitznau fisherwoman.' }),
   minor('npc.gion-planzer', 'Gion', 'Planzer', 'poi.weggis', 'luzern', 'peasant', { description: 'A Weggis vineyard worker.' }),
 ];
