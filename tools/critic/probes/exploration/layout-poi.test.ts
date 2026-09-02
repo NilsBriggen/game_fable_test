@@ -109,3 +109,18 @@ describe('PoiSystem with real content', () => {
     expect(gated).toBe(false); // documents the missing gate
   });
 });
+
+describe('PoiSystem — discovered state across a repeat populate (chapter change)', () => {
+  it('spawnPoiEntities() after a discovery: is the discovery kept?', () => {
+    const c = new ContentRegistry();
+    registerGeography(c); registerPois(c);
+    const world = new World();
+    const s = new PoiSystem(world, c, new ServiceRegistry(), new EventBus<ExplorationEvents>());
+    s.spawnPoiEntities();
+    s.discover('poi.ruetli');
+    expect(s.isDiscovered('poi.ruetli')).toBe(true);
+    s.spawnPoiEntities(); // what ExplorationServiceImpl.populate() does on every chapter change
+    console.log('poi.ruetli still discovered after a repeat populate():', s.isDiscovered('poi.ruetli'));
+    expect(s.isDiscovered('poi.ruetli')).toBe(false); // documents the wipe
+  });
+});
