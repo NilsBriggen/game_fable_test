@@ -6,7 +6,6 @@
  */
 import { Color, DoubleSide, MeshStandardMaterial } from 'three';
 import { getTerrainTexture } from './textures';
-import { registerCsmMaterial } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
 
 export interface TerrainMaterialHandle {
@@ -117,7 +116,12 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       );
   };
 
-  registerCsmMaterial(material);
+  // NOT registered with CSM (registerCsmMaterial is deliberately not called here): with USE_CSM
+  // defined — even with mesh.receiveShadow=false, verified that alone is not enough — close-range
+  // steep terrain rendered fully black on this software rasteriser, reproducible with the renderer's
+  // whole shadow map disabled, so it's the CSM cascade-selection shader path itself. Terrain is still
+  // lit correctly by the plain (real) DirectionalLight + HemisphereLight CSM creates; it just doesn't
+  // get cascade-aware shadow receiving.
   handle = { material, uniforms };
   return handle;
 }

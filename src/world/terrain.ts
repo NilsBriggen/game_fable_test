@@ -245,7 +245,14 @@ export class TerrainManager {
     geom.computeBoundingSphere();
     const { material } = getTerrainMaterial();
     const mesh = new Mesh(geom, material);
-    mesh.receiveShadow = true;
+    // Shadow *receiving* on this mesh is deliberately off: with CSM registered and receiveShadow=true,
+    // close-range steep terrain (e.g. the Schöllenen gorge) rendered fully black — reproducible even
+    // with the renderer's shadowMap disabled, so it's the shadow-sampling shader path itself, not a
+    // depth-bias/acne tuning issue reachable in the time available. Terrain still *casts* shadows
+    // (onto vegetation, props, itself as seen by other objects) via castShadow below; it just doesn't
+    // darken itself from shadow maps. A real loss of self-shadowed slope detail, traded for never
+    // rendering a broken black frame.
+    mesh.receiveShadow = false;
     // CSM's cascades only cover ~0-600m (ARCHITECTURE.md §5.1); LOD3 chunks start at 900m so they can
     // never appear in a shadow pass — skipping castShadow there is a big win under software rendering.
     mesh.castShadow = msg.lod <= 2;
