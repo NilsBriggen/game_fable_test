@@ -25,9 +25,8 @@ function buildRegistry(): ContentRegistry {
   registerArchetypes(c);
   registerPois(c);
   registerNpcs(c);
-  // factions.ts and dialogues.ts (both quest-builder-owned, src/content/factions.ts + src/content/dialogues/)
-  // are still Wave-3 stubs (`export {}` / empty register()) as of this writing — see requests/exploration-1.md.
-  // Stand-ins here isolate *this* validation to problems this module actually owns, not that gap.
+  // Both quest-builder-owned (src/content/factions.ts, src/content/dialogues/) — stand-ins here isolate
+  // *this* suite to problems this module actually owns, independent of whichever wave that content landed in.
   const factionDefs: FactionDef[] = LORE_FACTIONS.map((id) => ({ id, name: id, kind: 'canton', hostileTo: [], historical: true, note: 'test stand-in', description: id }));
   c.addFactions(factionDefs);
   const dialogueIds = new Set(npcs.map((n) => n.dialogueRoot).filter((d): d is string => !!d));

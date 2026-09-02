@@ -1,7 +1,8 @@
 /**
  * Interaction: nearest `Interactable` within 2.5 m and a 60° facing cone → prompt; `E` fires `interact`.
  * `talk` drives `QuestService.runDialogue()` when a quest service exists, else a console/toast fallback
- * (quest is a Wave-3 stub today). Also spawns a handful of `Container` loot entities at inns/castles.
+ * (harness scenarios that boot without the quest module registered, e.g. a bare-`world`-only smoke test).
+ * Also spawns a handful of `Container` loot entities at inns/castles.
  */
 import type { World, EntityId } from '@core/ecs';
 import { Transform, Interactable, Name, Container } from '@core/components';

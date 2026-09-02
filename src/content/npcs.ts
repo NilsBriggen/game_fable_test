@@ -9,11 +9,8 @@
  * every item id is guaranteed to exist in `items.ts` (that file's own `register()` already validates it).
  * `dialogueRoot` is set on the named cast the task calls out by id, plus six side-quest-bearing minor NPCs
  * the quest builder named (requests/quest-1.md) — every other minor NPC and the generic crowd fall back to
- * `dlg.generic.<archetype>` at interaction time (`src/exploration/interact.ts`), which the quest builder
- * defines. Dialogues are a Wave-3 deliverable (`src/content/dialogues` is still a stub as of this writing),
- * so `ContentRegistry.validate()` will report every one of these as "unknown dialogue" until that content
- * lands; see `requests/exploration-1.md`. The same applies to `faction` cross-references against
- * `src/content/factions.ts` (also still a stub) — both are pre-existing Wave-3 gaps, not bugs here.
+ * `dlg.generic.<archetype>` at interaction time (`src/exploration/interact.ts`), which the quest builder's
+ * `src/content/dialogues/generic.ts` defines.
  */
 import type { ContentRegistry } from '@core/content';
 import type { Historicity, NpcDef, ScheduleEntry } from '@core/schemas';
