@@ -19,6 +19,8 @@ export interface MenuApi {
   root: HTMLElement;
   openMenu(menu: MenuId, data?: unknown): void;
   closeMenu(): void;
+  /** close every menu without returning to Pause (used before a load / title change) */
+  closeAll(): void;
 }
 
 const ATTR_LIST: (keyof Attributes)[] = ['strength', 'agility', 'endurance', 'wits', 'presence'];
@@ -493,7 +495,7 @@ export function renderSaveLoad(api: MenuApi, mode: 'save' | 'load'): void {
   async function onSlotClick(slot: number, empty: boolean, disabledForSave: boolean): Promise<void> {
     if (mode === 'load') {
       if (empty) return;
-      api.closeMenu();
+      api.closeAll();
       await save!.load(slot);
       return;
     }

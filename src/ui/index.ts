@@ -31,6 +31,7 @@ export async function register(ctx: GameContext): Promise<void> {
     root: menuRoot,
     openMenu: (m, d) => openMenu(m, d),
     closeMenu: () => closeMenu(),
+    closeAll: () => { clear(menuRoot); openedFromPause = false; currentMenu = null; },
   };
 
   function openMenu(menu: MenuId, data?: unknown): void {
@@ -56,7 +57,9 @@ export async function register(ctx: GameContext): Promise<void> {
     const wasFromPause = openedFromPause;
     openedFromPause = false;
     currentMenu = null;
-    if (wasFromPause && ctx.state.state === 'paused') {
+    if (ctx.state.state === 'gameover') {
+      showGameOver();
+    } else if (wasFromPause && ctx.state.state === 'paused') {
       openMenu('pause');
     } else if (ctx.state.state === 'paused') {
       // Standard case (task spec): resume whatever `openMenu` paused.
@@ -148,21 +151,21 @@ export async function register(ctx: GameContext): Promise<void> {
   // outside the harness; this covers state re-entry, e.g. Pause -> Title).
   const gameOverRoot = el('div', { class: 'gameover-root', style: 'display:none' });
   mount.appendChild(gameOverRoot);
+  function showGameOver(): void {
+    clear(gameOverRoot);
+    gameOverRoot.style.display = '';
+    gameOverRoot.appendChild(el('div', { class: 'eid-panel' }, [
+      el('h2', {}, ['The field is lost']),
+      el('div', { style: 'margin:6px 0 14px' }, ['Your company lies in the mud. The chroniclers will not record their names.']),
+      el('div', { style: 'display:flex;gap:8px;justify-content:center' }, [
+        el('button', { class: 'eid-btn primary', onclick: () => { gameOverRoot.style.display = 'none'; openMenu('load'); } }, ['Load']),
+        el('button', { class: 'eid-btn', onclick: () => { gameOverRoot.style.display = 'none'; menuApi.closeAll(); openMenu('title'); } }, ['Title']),
+      ]),
+    ]));
+  }
   ctx.state.onChange((_from, to) => {
-    if (to === 'gameover') {
-      clear(gameOverRoot);
-      gameOverRoot.style.display = '';
-      gameOverRoot.appendChild(el('div', { class: 'eid-panel' }, [
-        el('h2', {}, ['The field is lost']),
-        el('div', { style: 'margin:6px 0 14px' }, ['Your company lies in the mud. The chroniclers will not record their names.']),
-        el('div', { style: 'display:flex;gap:8px;justify-content:center' }, [
-          el('button', { class: 'eid-btn primary', onclick: () => { gameOverRoot.style.display = 'none'; openMenu('load'); } }, ['Load']),
-          el('button', { class: 'eid-btn', onclick: () => { gameOverRoot.style.display = 'none'; openMenu('title'); } }, ['Title']),
-        ]),
-      ]));
-    } else if (gameOverRoot.style.display !== 'none') {
-      gameOverRoot.style.display = 'none';
-    }
+    if (to === 'gameover') showGameOver();
+    else if (gameOverRoot.style.display !== 'none') gameOverRoot.style.display = 'none';
     if (to === 'title' && currentMenu !== 'title') openMenu('title');
     if (to === 'creation' && currentMenu !== 'creation') openMenu('creation');
     if (to === 'explore' && (currentMenu === 'title' || currentMenu === 'creation')) closeMenu();

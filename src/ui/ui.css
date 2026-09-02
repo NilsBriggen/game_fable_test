@@ -260,6 +260,7 @@ button, input, select { font-family: inherit; }
 .cbt-ability-tip { position: absolute; bottom: 56px; left: 50%; transform: translateX(-50%); width: 240px; padding: 8px 10px; font-size: 12px; display: none; }
 .cbt-ability-btn:hover .cbt-ability-tip, .cbt-ability-tip.show { display: block; }
 .cbt-end-turn { position: absolute; bottom: 14px; right: 14px; }
+.cbt-flee { position: absolute; bottom: 14px; right: 190px; }
 
 .cbt-objectives { position: absolute; top: 62px; left: 14px; width: 260px; padding: 10px 12px; font-size: 12px; }
 .cbt-objectives .o { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 3px; }
