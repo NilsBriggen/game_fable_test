@@ -111,7 +111,7 @@
     },
     "ui": {
       "owner": "builder:ui",
-      "status": "pending",
+      "status": "in-progress",
       "score": null,
       "fixRounds": 0,
       "openIssues": []
