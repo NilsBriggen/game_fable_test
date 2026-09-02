@@ -14,8 +14,10 @@ const PFENNIG_PER_PFUND = PFENNIG_PER_SCHILLING * SCHILLING_PER_PFUND; // 240
 
 /** Split a flat Pfennig total into Pfund/Schilling/Pfennig and a short display label, e.g. "3 lb 5 s 4 d". */
 export function formatPfennig(totalPfennig: number): Currency {
-  const sign = totalPfennig < 0 ? -1 : 1;
-  let n = Math.floor(Math.abs(totalPfennig));
+  if (!Number.isFinite(totalPfennig)) totalPfennig = 0;
+  const whole = Math.trunc(totalPfennig);
+  const sign = whole < 0 ? -1 : 1;
+  let n = Math.abs(whole);
   const pfund = Math.floor(n / PFENNIG_PER_PFUND);
   n -= pfund * PFENNIG_PER_PFUND;
   const schilling = Math.floor(n / PFENNIG_PER_SCHILLING);
@@ -50,7 +52,7 @@ export function compassX(bearing: number, yaw: number, windowDeg = 180): number 
 }
 
 const COMPASS_LETTERS: { deg: number; letter: string }[] = [
-  { deg: 0, letter: 'N' }, { deg: 90, letter: 'E' }, { deg: 180, letter: 'S' }, { deg: -180, letter: 'S' }, { deg: -90, letter: 'W' },
+  { deg: 0, letter: 'N' }, { deg: 90, letter: 'E' }, { deg: 180, letter: 'S' }, { deg: -90, letter: 'W' },
 ];
 
 /** Cardinal letter chips visible within the compass window, as {x fraction, letter}. */

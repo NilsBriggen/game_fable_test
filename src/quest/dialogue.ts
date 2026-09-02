@@ -184,6 +184,7 @@ export async function runDialogue(
       text: c.text,
       enabled,
       checkOdds: c.check ? computeCheckOdds(c.check, rt) : undefined,
+      hint: c.check ? skillLabel(c.check.skill) : undefined,
     }));
 
     let picked: number;
@@ -230,4 +231,9 @@ export async function runDialogue(
   }
 
   return { ended: true, lastNode, effectsRun };
+}
+
+/** 'speech' → 'Speech', 'axe-mace' → 'Axe & Mace' for the [Skill NN%] label. */
+function skillLabel(skill: string): string {
+  return skill.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' & ');
 }

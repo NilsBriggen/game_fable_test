@@ -14,6 +14,8 @@ import { PLACES, LAKES } from '@content/gazetteer';
 import { generateLayout } from '../../../../src/exploration/layout';
 import { buildColliders } from '../../../../src/exploration/colliders';
 import { PoiSystem } from '../../../../src/exploration/poi';
+import { spawnBoatTravel } from '../../../../src/exploration/interact';
+import { Interactable, Transform } from '@core/components';
 
 const flat = { heightAt: () => 0, isWater: () => false };
 
@@ -39,13 +41,25 @@ describe('generateLayout', () => {
     console.log(`Altdorf-sized village: ${cols.length} solid colliders, ${overlaps} overlapping pairs (interpenetrating buildings)`);
   });
 
+  it('Zug composition after dry-land sizing: what does the town consist of?', () => {
+    const byId = new Map(pois.map((p) => [p.id, p]));
+    const grid = (globalThis as any).__critic_grid;
+    void grid;
+    const z = byId.get('poi.zug')!;
+    const flat = { heightAt: () => 0, isWater: () => false };
+    const out = generateLayout({ id: z.id, kind: z.kind, x: z.x, z: z.z, population: z.population }, flat);
+    const counts: Record<string, number> = {};
+    for (const m of out) counts[m.modelId] = (counts[m.modelId] ?? 0) + 1;
+    console.log('Zug on flat land:', JSON.stringify(counts));
+  });
+
   it('slope gate: a uniform 45° slope (dy 3.0 m per 3 m) is accepted as a building pad although the player cannot walk > 40°', () => {
     const slope45 = { heightAt: (x: number) => x * 1.0, isWater: () => false }; // 45°
     const slope49 = { heightAt: (x: number) => x * 1.2, isWater: () => false }; // 50°
     const a = generateLayout({ id: 'poi.probe-a', kind: 'village', x: 0, z: 0, population: { peasant: 8 } }, slope45);
     const b = generateLayout({ id: 'poi.probe-b', kind: 'village', x: 0, z: 0, population: { peasant: 8 } }, slope49);
     console.log(`houses placed on a 45° slope: ${a.filter((m) => m.modelId === 'house.blockbau').length}; on a 50° slope: ${b.filter((m) => m.modelId === 'house.blockbau').length}`);
-    expect(a.filter((m) => m.modelId === 'house.blockbau').length).toBeGreaterThan(0); // documents the too-lenient MAX_SLOPE_DY
+    expect(a.filter((m) => m.modelId === 'house.blockbau').length).toBe(0); // round 2: 28° pad limit
   });
 
   it('no boat/quay of a real port sits inside a gazetteer lake polygon *unless* it is the water-layer boat', () => {
@@ -106,7 +120,7 @@ describe('PoiSystem with real content', () => {
     const gated = /isDiscovered|discovered|fastTravel\b.*def|poiDef\(/.test(body);
     console.log('fastTravel body:\n' + body);
     console.log('gated on discovery or PoiDef.fastTravel:', gated);
-    expect(gated).toBe(false); // documents the missing gate
+    expect(gated).toBe(true); // round 2: gated
   });
 });
 
@@ -121,6 +135,23 @@ describe('PoiSystem — discovered state across a repeat populate (chapter chang
     expect(s.isDiscovered('poi.ruetli')).toBe(true);
     s.spawnPoiEntities(); // what ExplorationServiceImpl.populate() does on every chapter change
     console.log('poi.ruetli still discovered after a repeat populate():', s.isDiscovered('poi.ruetli'));
-    expect(s.isDiscovered('poi.ruetli')).toBe(false); // documents the wipe
+    expect(s.isDiscovered('poi.ruetli')).toBe(true); // round 2: kept
+  });
+});
+
+describe('round 2 — boat travel entities', () => {
+  it('one travel interactable per port, destinations = the other ports nearest-first', () => {
+    const c = new ContentRegistry();
+    registerGeography(c); registerPois(c);
+    const world = new World();
+    spawnBoatTravel(world, c);
+    const ports = pois.filter((p) => p.kind === 'port');
+    const ents = [...world.query(Interactable)].filter((id) => world.get(id, Interactable)!.kind === 'travel');
+    const fl = ents.map((id) => ({ id, it: world.get(id, Interactable)!, t: world.get(id, Transform)! })).find((e) => Math.hypot(e.t.x - PLACES.fluelen.x, e.t.z - PLACES.fluelen.z) < 10)!;
+    console.log(`ports ${ports.length}, travel entities ${ents.length}; Flüelen boat prompt "${fl.it.prompt}" → ${(fl.it.data!.destinations as string[]).slice(0, 4).join(', ')}`);
+    expect(ents.length).toBe(ports.length);
+    expect((fl.it.data!.destinations as string[])[0]).toBe('poi.treib'); // nearest landing across the Urnersee
+    spawnBoatTravel(world, c);
+    expect([...world.query(Interactable)].filter((id) => world.get(id, Interactable)!.kind === 'travel').length).toBe(ports.length); // idempotent
   });
 });

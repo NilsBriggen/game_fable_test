@@ -131,7 +131,7 @@ export function renderCreation(api: MenuApi): void {
     clear(attrRowsEl);
     for (const a of ATTR_LIST) {
       const v = state.attrs[a];
-      const dots = el('div', { class: 'attr-dots' }, Array.from({ length: 14 - 10 + 4 }, (_, i) => el('span', { class: `attr-dot${i < v - 10 ? ' filled' : ''}` })));
+      const dots = el('div', { class: 'attr-dots' }, Array.from({ length: 4 }, (_, i) => el('span', { class: `attr-dot${i < v - 10 ? ' filled' : ''}` })));
       const minus = el('button', { class: 'attr-btn', disabled: v <= 10, onclick: () => { state.attrs[a]--; state.points++; redrawAttrs(); renderPreview(); } }, ['−']);
       const plus = el('button', { class: 'attr-btn', disabled: v >= 14 || state.points <= 0, onclick: () => { state.attrs[a]++; state.points--; redrawAttrs(); renderPreview(); } }, ['+']);
       attrRowsEl.appendChild(el('div', { class: 'attr-row' }, [el('span', { class: 'attr-name' }, [ATTR_LABEL[a]]), minus, el('span', { class: 'attr-value' }, [`${v}`]), plus, dots]));
@@ -266,7 +266,7 @@ function drawInventory(ctx: GameContext, main: HTMLElement, id: EntityId, redraw
 
   const totalWeight = inv.items.reduce((s, it) => s + (party.itemDef(it.defId)?.weightKg ?? 0) * it.qty, 0);
   const totals = el('div', { style: 'margin-top:10px;font-size:13px;color:var(--ink-soft)' }, [
-    `Weight: ${formatWeight(totalWeight)} / ${formatWeight(inv.capacityKg)}   ·   Purse: ${formatPfennig(inv.pfennig).label}`,
+    `Weight: ${formatWeight(totalWeight)} / ${formatWeight(inv.capacityKg)}   ·   Purse: ${formatPfennig(inv.pfennig).label}  (Pfund ℔ · Schilling s · Pfennig d)`,
   ]);
 
   main.append(el('h3', { style: 'margin-top:0' }, ['Equipment']), slots, el('h3', {}, ['Pack']), list, totals);
@@ -477,15 +477,17 @@ export function renderSaveLoad(api: MenuApi, mode: 'save' | 'load'): void {
     const metas = await save!.list();
     for (const slot of buildSaveSlots(metas)) {
       const disabledForSave = mode === 'save' && slot.readOnlySave;
-      const box = el('div', { class: `save-slot${slot.empty ? ' empty' : ''}` });
+      const readonly = slot.slot === 0 || slot.slot === 6;
+      const box = el('div', { class: `save-slot${slot.empty ? ' empty' : ''}${readonly ? ' readonly' : ''}`, title: readonly ? (slot.slot === 0 ? 'Autosave — written by the game' : 'Quicksave — F5 writes, F9 loads') : `Slot ${slot.slot}` });
       box.appendChild(el('div', { class: 'thumb', style: slot.meta?.thumbnailDataUrl ? `background-image:url(${slot.meta.thumbnailDataUrl})` : undefined }));
       box.appendChild(el('div', { class: 'lbl' }, [slot.meta?.label ?? slot.label]));
       if (slot.meta) box.appendChild(el('div', { class: 'meta2' }, [`${slot.meta.chapter} · ${slot.meta.location} · ${formatPlaytime(slot.meta.playtimeSec)}`]));
       else box.appendChild(el('div', { class: 'meta2' }, ['empty']));
-      if (!slot.empty) box.appendChild(el('button', { class: 'eid-btn small danger', onclick: async (e: Event) => { e.stopPropagation(); await save!.delete(slot.slot); draw(); } }, ['Delete']));
+      if (!slot.empty && !readonly) box.appendChild(el('button', { class: 'eid-btn small danger', onclick: async (e: Event) => { e.stopPropagation(); await save!.delete(slot.slot); draw(); } }, ['Delete']));
       box.addEventListener('click', () => onSlotClick(slot.slot, slot.empty, disabledForSave));
       listEl.appendChild(box);
     }
+    listEl.appendChild(el('div', { class: 'save-footer' }, ['F5 quicksave · F9 quickload · slot 0 is the autosave']));
   }
 
   async function onSlotClick(slot: number, empty: boolean, disabledForSave: boolean): Promise<void> {
@@ -514,14 +516,14 @@ export function renderSettings(api: MenuApi): void {
   const s = ctx.settings;
   const row = (label: string, control: Node) => el('div', { class: 'settings-row' }, [el('span', {}, [label]), control]);
 
-  const quality = el('select', { onchange: (e: Event) => { s.quality = (e.target as HTMLSelectElement).value as typeof s.quality; } },
+  const quality = el('select', { onchange: (e: Event) => { ctx.applySettings({ quality: (e.target as HTMLSelectElement).value as typeof s.quality }); } },
     ['low', 'medium', 'high'].map((v) => el('option', { value: v, selected: s.quality === v }, [v])));
-  const shadow = el('select', { onchange: (e: Event) => { s.shadowRes = Number((e.target as HTMLSelectElement).value) as typeof s.shadowRes; } },
+  const shadow = el('select', { onchange: (e: Event) => { ctx.applySettings({ shadowRes: Number((e.target as HTMLSelectElement).value) as typeof s.shadowRes }); } },
     [1024, 2048, 4096].map((v) => el('option', { value: v, selected: s.shadowRes === v }, [`${v}`])));
-  const renderScale = el('input', { type: 'range', min: '0.5', max: '2', step: '0.1', value: `${s.renderScale}`, oninput: (e: Event) => { s.renderScale = Number((e.target as HTMLInputElement).value); } });
-  const viewDist = el('input', { type: 'range', min: '500', max: '8000', step: '100', value: `${s.viewDistance}`, oninput: (e: Event) => { s.viewDistance = Number((e.target as HTMLInputElement).value); } });
-  const invertY = el('input', { type: 'checkbox', checked: s.invertY, onchange: (e: Event) => { s.invertY = (e.target as HTMLInputElement).checked; } });
-  const volume = el('input', { type: 'range', min: '0', max: '1', step: '0.05', value: `${s.masterVolume}`, oninput: (e: Event) => { s.masterVolume = Number((e.target as HTMLInputElement).value); } });
+  const renderScale = el('input', { type: 'range', min: '0.5', max: '2', step: '0.1', value: `${s.renderScale}`, onchange: (e: Event) => { ctx.applySettings({ renderScale: Number((e.target as HTMLInputElement).value) }); } });
+  const viewDist = el('input', { type: 'range', min: '500', max: '8000', step: '100', value: `${s.viewDistance}`, onchange: (e: Event) => { ctx.applySettings({ viewDistance: Number((e.target as HTMLInputElement).value) }); } });
+  const invertY = el('input', { type: 'checkbox', checked: s.invertY, onchange: (e: Event) => { ctx.applySettings({ invertY: (e.target as HTMLInputElement).checked }); } });
+  const volume = el('input', { type: 'range', min: '0', max: '1', step: '0.05', value: `${s.masterVolume}`, onchange: (e: Event) => { ctx.applySettings({ masterVolume: Number((e.target as HTMLInputElement).value) }); } });
 
   modal(api, '', 'Settings', [
     el('div', { class: 'menu-main' }, [

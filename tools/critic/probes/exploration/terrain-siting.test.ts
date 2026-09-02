@@ -120,3 +120,16 @@ describe('POI siting on the real terrain (seed 1291)', () => {
     }
   });
 });
+
+describe('round 2 — Zug / Küssnacht composition on the real grid', () => {
+  it('model counts per settlement after dry-land sizing', () => {
+    const byId = new Map(pois.map((p) => [p.id, p]));
+    for (const id of ['poi.zug', 'poi.kuessnacht', 'poi.luzern', 'poi.treib', 'poi.steinbruch-axen']) {
+      const p = byId.get(id)!;
+      const out = generateLayout({ id: p.id, kind: p.kind, x: p.x, z: p.z, population: p.population }, probe);
+      const counts: Record<string, number> = {};
+      for (const m of out) counts[m.modelId] = (counts[m.modelId] ?? 0) + 1;
+      console.log(`${id}: ${JSON.stringify(counts)}`);
+    }
+  });
+});

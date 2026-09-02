@@ -173,7 +173,8 @@ export class CombatRenderer {
     const world = this.ctx.services.tryGet('world');
     const parent = world?.getSceneRoots().dynamic ?? this.ctx.gfx.scene;
     parent.add(this.root);
-    if (this.ctx.harness || new URLSearchParams(location.search).get('combatdebug') === '1') this.installDebugOverlay();
+    // the UI module's combat HUD replaced the debug overlay; keep it opt-in for headless debugging only
+    if (new URLSearchParams(location.search).get('combatdebug') === '1') this.installDebugOverlay();
   }
 
   show(): void { this.root.visible = true; }

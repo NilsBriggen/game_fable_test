@@ -223,6 +223,7 @@ export class NpcSystem {
     this.world.each(Npc, (id, npc) => {
       const t = this.world.get(id, Transform);
       if (!t) return;
+      if (this.world.has(id, PartyMember) && npc.frozen) { npc.frozen = false; t.x = playerPos.x - 2; t.z = playerPos.z + 1.5; t.y = this.worldService.heightAt(t.x, t.z); this.spawnMesh(id, t); }
       if (npc.frozen) {
         // A frozen NPC's stored Transform is just wherever it happened to be when last simulated (or its
         // spawn default near `home`) — not a live indicator of relevance. For an NPC whose schedule only
@@ -242,6 +243,7 @@ export class NpcSystem {
           && (!npc.generic || this.meshedCount < this.maxVisibleCrowd)) this.reenter(id, npc, t, analytic);
         return;
       }
+      if (this.world.has(id, PartyMember)) { this.stepFollow(id, t, playerPos, dt); this.syncMesh(id, t); return; }
       const near = dist2(t.x, t.z, playerPos.x, playerPos.z) <= NPC_SIM_RADIUS;
       if (!near) { this.freeze(id, npc); return; }
       if (this.patrols.has(id)) this.stepPatrol(id, t, dt);
@@ -322,6 +324,16 @@ export class NpcSystem {
     if (mesh?.object) (mesh.object as Object3D).visible = !asleep; // indoors
   }
 
+  /** Party companions trail the player at 2–3 m; a companion left far behind (fast travel, teleport) is snapped. */
+  private stepFollow(id: EntityId, t: { x: number; y: number; z: number; yaw: number }, playerPos: { x: number; z: number }, dt: number): void {
+    const d = dist2(t.x, t.z, playerPos.x, playerPos.z);
+    if (d > 60) { t.x = playerPos.x - 2; t.z = playerPos.z + 1.5; t.y = this.worldService.heightAt(t.x, t.z); return; }
+    if (d < 2.5) return;
+    const slot = (id % 3) - 1; // spread three companions across the player's back
+    const dest = { x: playerPos.x + slot * 1.8, z: playerPos.z + 2.2 };
+    walkToward(t, dest, Math.min(6.5, 2 + d), dt, this.worldService);
+  }
+
   private stepPatrol(id: EntityId, t: { x: number; y: number; z: number; yaw: number }, dt: number): void {
     const state = this.patrols.get(id);
     if (!state) return;
@@ -372,7 +384,15 @@ function jitterFor(seed: string, radius: number): { x: number; z: number } {
  *  where a bespoke offset per entry is wanted instead). Returns a fresh array — never mutates the
  *  original `NpcDef.schedule`, which content may share across spawns/tests. */
 function withDefaultOffset(schedule: ScheduleEntry[], fallback: [number, number]): ScheduleEntry[] {
-  return schedule.map((e) => (e.offset ? e : { ...e, offset: fallback }));
+  // activity-specific spots so a named NPC visibly moves through the day: work at the spawn jitter,
+  // market by the well, tavern/church a little inward, sleep out at the houses
+  const byActivity: Record<string, [number, number]> = {
+    market: [fallback[0] * 0.35, fallback[1] * 0.35],
+    tavern: [fallback[0] * 0.6 + 3, fallback[1] * 0.6 - 2],
+    church: [fallback[0] * 0.4, fallback[1] * 0.4 - 8],
+    sleep: [fallback[0] * 1.6, fallback[1] * 1.6],
+  };
+  return schedule.map((e) => (e.offset ? e : { ...e, offset: byActivity[e.activity] ?? fallback }));
 }
 
 /** Straight-line walk toward `dest`, terrain-following via `heightAt`, refusing to step into water.

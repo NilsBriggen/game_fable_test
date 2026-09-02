@@ -16,7 +16,7 @@ export async function register(ctx: GameContext): Promise<void> {
   clear(mount);
 
   const hud = createHud(ctx, mount);
-  const dialogueUi = createDialogueUi(mount);
+  const dialogueUi = createDialogueUi(mount, () => currentMenu !== null);
   const cutsceneUi = createCutsceneUi(mount);
   const combatUi = createCombatUi(ctx, mount);
   const loading = createLoading(mount);
@@ -24,6 +24,7 @@ export async function register(ctx: GameContext): Promise<void> {
   mount.appendChild(menuRoot);
 
   let currentMenu: MenuId | null = null;
+  let openedFromPause = false;
 
   const menuApi: MenuApi = {
     ctx,
@@ -33,6 +34,7 @@ export async function register(ctx: GameContext): Promise<void> {
   };
 
   function openMenu(menu: MenuId, data?: unknown): void {
+    openedFromPause = currentMenu === 'pause' && menu !== 'pause';
     clear(menuRoot);
     currentMenu = menu;
     // `title` and `creation` are both MenuIds *and* real GameStates (boot -> title -> creation -> explore,
@@ -51,8 +53,12 @@ export async function register(ctx: GameContext): Promise<void> {
 
   function closeMenu(): void {
     clear(menuRoot);
+    const wasFromPause = openedFromPause;
+    openedFromPause = false;
     currentMenu = null;
-    if (ctx.state.state === 'paused') {
+    if (wasFromPause && ctx.state.state === 'paused') {
+      openMenu('pause');
+    } else if (ctx.state.state === 'paused') {
       // Standard case (task spec): resume whatever `openMenu` paused.
       ctx.events.emit('request-state', ctx.state.prev);
     } else if (ctx.state.state === 'title') {
@@ -107,13 +113,10 @@ export async function register(ctx: GameContext): Promise<void> {
   if (combat) {
     let shown = false;
     combat.on('state', (view) => {
-      if (view) {
-        if (!shown) { shown = true; combatUi.show(view); } else { combatUi.update(view); }
-      } else if (shown) {
-        shown = false;
-        combatUi.hide();
-      }
+      if (!view) { if (shown) { shown = false; combatUi.hide(); } return; }
+      if (!shown) { shown = true; combatUi.show(view); } else { combatUi.update(view); }
     });
+    combat.on('end', () => { shown = false; combatUi.hideAfterResult(); });
   }
 
   // ---------------- keyboard ----------------
@@ -130,11 +133,11 @@ export async function register(ctx: GameContext): Promise<void> {
     if (e.key === 'Escape') {
       e.preventDefault();
       if (currentMenu) closeMenu();
-      else if (['explore', 'combat', 'dialogue', 'cutscene'].includes(ctx.state.state)) openMenu('pause');
+      else if (['explore', 'combat', 'dialogue', 'cutscene', 'gameover'].includes(ctx.state.state)) openMenu('pause');
       return;
     }
-    // Combat's own hotkeys (1-9, Space) are handled inside combatUi; avoid double-handling here.
-    if (ctx.state.state === 'combat') return;
+    // Combat's own hotkeys (1-9, Space) are handled inside combatUi; menus only over live play.
+    if (!['explore', 'dialogue', 'cutscene', 'paused'].includes(ctx.state.state)) return;
     if (e.key === 'Tab') { e.preventDefault(); toggleMenu('character'); return; }
     if (e.key === 'i' || e.key === 'I') { toggleMenu('inventory'); return; }
     if (e.key === 'j' || e.key === 'J') { toggleMenu('journal'); return; }
@@ -143,7 +146,23 @@ export async function register(ctx: GameContext): Promise<void> {
 
   // Boot into the title menu on the 'title' game state (main.ts also calls openMenu('title') directly
   // outside the harness; this covers state re-entry, e.g. Pause -> Title).
+  const gameOverRoot = el('div', { class: 'gameover-root', style: 'display:none' });
+  mount.appendChild(gameOverRoot);
   ctx.state.onChange((_from, to) => {
+    if (to === 'gameover') {
+      clear(gameOverRoot);
+      gameOverRoot.style.display = '';
+      gameOverRoot.appendChild(el('div', { class: 'eid-panel' }, [
+        el('h2', {}, ['The field is lost']),
+        el('div', { style: 'margin:6px 0 14px' }, ['Your company lies in the mud. The chroniclers will not record their names.']),
+        el('div', { style: 'display:flex;gap:8px;justify-content:center' }, [
+          el('button', { class: 'eid-btn primary', onclick: () => { gameOverRoot.style.display = 'none'; openMenu('load'); } }, ['Load']),
+          el('button', { class: 'eid-btn', onclick: () => { gameOverRoot.style.display = 'none'; openMenu('title'); } }, ['Title']),
+        ]),
+      ]));
+    } else if (gameOverRoot.style.display !== 'none') {
+      gameOverRoot.style.display = 'none';
+    }
     if (to === 'title' && currentMenu !== 'title') openMenu('title');
     if (to === 'creation' && currentMenu !== 'creation') openMenu('creation');
     if (to === 'explore' && (currentMenu === 'title' || currentMenu === 'creation')) closeMenu();

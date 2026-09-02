@@ -9,13 +9,15 @@ import type { CombatCommand, CombatStateView, CombatantView, CellKey } from '@co
 import type { EntityId } from '@core/ecs';
 import { el, clear } from './dom';
 import { abilityIcon, ICONS } from './icons';
-import { formatHitChance, worldToCell } from './helpers';
+import { formatHitChance, worldToCell, buildInitiativeChips } from './helpers';
 
 export interface CombatUiHandle {
   show(state: CombatStateView): void;
   update(state: CombatStateView): void;
   hide(): void;
   onCommand(cb: (cmd: CombatCommand) => void): void;
+  /** after the encounter ends: keep only the result card until Continue, then hide everything */
+  hideAfterResult(): void;
 }
 
 const STANCES: { id: 'neutral' | 'aggressive' | 'guarded' | 'braced'; label: string }[] = [
@@ -34,9 +36,11 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   const objectivesPanel = el('div', { class: 'eid-panel cbt-objectives', style: 'display:none' });
   const logPanel = el('div', { class: 'eid-panel cbt-log', style: 'display:none' });
   const endTurnBtn = el('button', { class: 'eid-btn primary cbt-end-turn', style: 'display:none' }, ['End Turn (Space)']);
+  const fleeBtn = el('button', { class: 'eid-btn cbt-flee', style: 'display:none', onclick: () => { if (window.confirm('Flee the field? The fight is lost and the party scatters.')) submit({ type: 'flee' }); } }, ['Flee']);
+  const targetCard = el('div', { class: 'eid-panel cbt-target-card', style: 'display:none' });
   const reactionModalHost = el('div', {});
   const resultHost = el('div', {});
-  root.append(deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, reactionModalHost, resultHost);
+  root.append(deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard, reactionModalHost, resultHost);
 
   const commandCbs: ((cmd: CombatCommand) => void)[] = [];
   function submit(cmd: CombatCommand): void {
@@ -110,14 +114,11 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     if (view.phase === 'deploy' || view.phase === 'ended') { initiativeRow.style.display = 'none'; return; }
     initiativeRow.style.display = 'flex';
     clear(initiativeRow);
-    for (const id of view.order) {
-      const u = view.units.find((x) => x.id === id);
-      if (!u) continue;
-      const chip = el('div', { class: `cbt-chip ${u.side}${id === view.activeUnit ? ' active' : ''}${u.down ? ' down' : ''}` }, [
-        el('div', { class: 'dot' }, [u.name.slice(0, 1)]),
-        el('div', { class: 'nm' }, [u.name]),
-      ]);
-      initiativeRow.appendChild(chip);
+    for (const c of buildInitiativeChips(view.order, view.units, view.activeUnit)) {
+      initiativeRow.appendChild(el('div', { class: `cbt-chip ${c.side}${c.active ? ' active' : ''}${c.down ? ' down' : ''}` }, [
+        el('div', { class: 'dot' }, [c.name.slice(0, 1)]),
+        el('div', { class: 'nm' }, [c.name]),
+      ]));
     }
   }
 
@@ -168,8 +169,17 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
         ? el('div', { class: 'cbt-formation-chip' }, [`Formation +${formation.defenseBonus} (${formation.adjacentPolearms} adjacent polearms)`])
         : null;
 
+    const statusRow = active.status.length
+      ? el('div', { class: 'cbt-status-row' }, active.status.map((st) => el('span', { class: 'cbt-status-chip' }, [`${st.id}${st.turns > 0 ? ` ${st.turns}` : ''}`])))
+      : null;
+    const defLine = el('div', { class: 'cbt-def-line' }, [
+      `Defense ${active.defense}`,
+      active.weapon ? ` · ${active.weapon.name} (${active.weapon.damage}, reach ${active.weapon.reach}${active.weapon.ranged ? ', ranged' : ''})` : ' · unarmed',
+      active.loaded ? ' · loaded' : '',
+    ]);
     const cardChildren: (Node | null)[] = [
       el('div', { class: 'nm' }, [active.name, el('span', { class: `side ${active.side}` }, [active.side])]),
+      statusRow, defLine,
       el('div', { class: 'cbt-bar' }, [el('div', { class: 'cbt-bar-fill hp', style: `width:${hpPct}%` }), el('div', { class: 'cbt-bar-num' }, [`${active.hp}/${active.hpMax}`])]),
       el('div', { class: 'cbt-bar' }, [el('div', { class: 'cbt-bar-fill morale', style: `width:${moralePct}%` }), el('div', { class: 'cbt-bar-num' }, [`${active.morale}/${active.moraleMax}`])]),
       stanceRow, apRow,
@@ -223,7 +233,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   }
 
   function renderObjectives(view: CombatStateView): void {
-    if (view.phase === 'deploy') { objectivesPanel.style.display = 'none'; return; }
+    if (view.phase === 'ended') { objectivesPanel.style.display = 'none'; return; }
     objectivesPanel.style.display = '';
     clear(objectivesPanel);
     objectivesPanel.appendChild(el('div', { class: 'eid-title-rule' }, [el('span', {}, ['Objectives'])]));
@@ -236,7 +246,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   }
 
   function renderLog(view: CombatStateView): void {
-    if (view.phase === 'deploy') { logPanel.style.display = 'none'; return; }
+    if (view.phase === 'deploy' || view.phase === 'ended') { logPanel.style.display = 'none'; return; }
     logPanel.style.display = 'flex';
     clear(logPanel);
     logPanel.appendChild(el('div', { class: 'eid-title-rule' }, [el('span', {}, ['Log'])]));
@@ -302,7 +312,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
         el('div', { class: 'sub' }, [`${res.rounds} rounds · ${res.dead.length} dead · ${res.downed.length} downed`]),
         xpRows.length ? el('div', { class: 'cbt-result-list' }, xpRows) : null,
         lootRows.length ? el('div', { class: 'cbt-result-list' }, lootRows) : null,
-        el('button', { class: 'eid-btn primary', onclick: () => { clear(resultHost); } }, ['Continue']),
+        el('button', { class: 'eid-btn primary', onclick: () => { clear(resultHost); hideAll(); } }, ['Continue']),
       ]),
     ]));
   }
@@ -317,7 +327,9 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     renderReaction(view);
     renderResult(view);
     const active = view.units.find((u) => u.id === view.activeUnit);
-    endTurnBtn.style.display = active && active.isPlayerControlled && view.phase === 'active' ? '' : 'none';
+    const playersTurn = !!(active && active.isPlayerControlled && view.phase === 'active');
+    endTurnBtn.style.display = playersTurn ? '' : 'none';
+    fleeBtn.style.display = playersTurn ? '' : 'none';
   }
 
   // ---------------- input ----------------
@@ -347,9 +359,53 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
         } else {
           hoverPreviewLine = null;
         }
-        renderUnitCard(view);
+        renderTargetCard(hoveredUnit && hoveredUnit.side !== active.side ? hoveredUnit : null, e.clientX, e.clientY);
+        updatePreviewOnly(view, active);
       }
     }
+  }
+
+  /** Cheap hover refresh: only the preview lines inside the unit card, not the whole card. */
+  function updatePreviewOnly(view: CombatStateView, active: CombatantView): void {
+    const existing = unitCard.querySelector('.cbt-preview');
+    const nearest = nearestEnemyOf(active, view.units);
+    const combat = ctx.services.tryGet('combat');
+    const ability = selectedAbility ?? defaultAttackAbility(active);
+    const preview = combat && nearest && ability ? combat.previewAttack(active.id, ability, nearest.id) : null;
+    const node = el('div', { class: 'cbt-preview' }, [
+      preview && nearest ? el('div', {}, [`vs ${nearest.name} (${preview.damage}): `, el('span', { class: 'hitpct' }, [formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).split(' — ')[0]])]) : null,
+      preview && formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).includes('—') ? el('div', { class: 'src' }, [formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).split(' — ')[1]]) : null,
+      hoverPreviewLine ? el('div', { class: 'src' }, [hoverPreviewLine]) : null,
+    ]);
+    if (existing) existing.replaceWith(node); else unitCard.appendChild(node);
+  }
+
+  function renderTargetCard(u: CombatantView | null, x: number, y: number): void {
+    if (!u) { targetCard.style.display = 'none'; return; }
+    clear(targetCard);
+    targetCard.style.display = '';
+    targetCard.style.left = `${x + 16}px`;
+    targetCard.style.top = `${y + 16}px`;
+    const rows: (HTMLElement | null)[] = [
+      el('div', { class: 'nm' }, [u.name]),
+      el('div', {}, [`HP ${u.hp}/${u.hpMax} · Morale ${u.morale}/${u.moraleMax}`]),
+      el('div', {}, [`Defense ${u.defense}${u.weapon ? ` · ${u.weapon.name}` : ''}${u.mounted ? ' · mounted' : ''}`]),
+      u.status.length ? el('div', { class: 'cbt-status-row' }, u.status.map((st) => el('span', { class: 'cbt-status-chip' }, [st.id]))) : null,
+      u.formation.inHaufen ? el('div', {}, [`Haufen +${u.formation.defenseBonus}`]) : null,
+    ];
+    for (const r of rows) if (r) targetCard.appendChild(r);
+  }
+
+  function hideAll(): void {
+    root.classList.add('hidden');
+    for (const p of [deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard]) p.style.display = 'none';
+    clear(reactionModalHost);
+    clear(resultHost);
+    lastView = null;
+    selectedAbility = null;
+    hoverPreviewLine = null;
+    deployStaged = new Map();
+    deploySelected = null;
   }
 
   function onCanvasClick(e: MouseEvent): void {
@@ -416,10 +472,13 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
       renderAll(state);
     },
     hide(): void {
-      root.classList.add('hidden');
-      lastView = null;
-      deployStaged = new Map();
-      deploySelected = null;
+      hideAll();
+    },
+    hideAfterResult(): void {
+      // keep the result card (if any) until Continue; everything else goes now
+      for (const p of [deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard]) p.style.display = 'none';
+      clear(reactionModalHost);
+      if (!resultHost.hasChildNodes()) hideAll();
     },
     onCommand(cb: (cmd: CombatCommand) => void): void {
       commandCbs.push(cb);

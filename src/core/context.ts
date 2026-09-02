@@ -23,6 +23,18 @@ export const defaultSettings = (): Settings => ({
   quality: 'high', shadowRes: 2048, renderScale: 1, viewDistance: 4000, showFps: false, invertY: false, masterVolume: 0.8, language: 'en',
 });
 
+const SETTINGS_KEY = 'eidgenossen.settings';
+export function loadSettings(): Settings {
+  const base = defaultSettings();
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SETTINGS_KEY) : null;
+    return raw ? { ...base, ...(JSON.parse(raw) as Partial<Settings>) } : base;
+  } catch { return base; }
+}
+export function saveSettings(s: Settings): void {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* private mode */ }
+}
+
 export class GameContext {
   world = new World();
   scheduler = new Scheduler();
@@ -32,7 +44,8 @@ export class GameContext {
   services = new ServiceRegistry();
   state = new GameStateMachine();
   content = new ContentRegistry();
-  settings: Settings = defaultSettings();
+  settings: Settings = loadSettings();
+  private settingsListeners: ((s: Settings) => void)[] = [];
   /** true when running under the harness (?harness=1) */
   harness = false;
   /** canvas element */
@@ -54,6 +67,19 @@ export class GameContext {
     this.seed = seed;
     this.rng = new RngStreams(seed);
     this.gfx = new Graphics(canvas);
+  }
+
+  /** Apply + persist settings; modules subscribe to react (render scale is applied here by core). */
+  applySettings(patch: Partial<Settings>): void {
+    Object.assign(this.settings, patch);
+    saveSettings(this.settings);
+    this.gfx.renderScale = this.settings.renderScale;
+    this.gfx.resize();
+    for (const l of this.settingsListeners) l(this.settings);
+  }
+  onSettings(cb: (s: Settings) => void): () => void {
+    this.settingsListeners.push(cb);
+    return () => { this.settingsListeners = this.settingsListeners.filter((x) => x !== cb); };
   }
 
   reseed(seed: number): void {

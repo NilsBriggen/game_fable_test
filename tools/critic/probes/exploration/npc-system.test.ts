@@ -93,7 +93,11 @@ describe('populate(chapter)', () => {
     sys.populate('ch1-1307'); // the 1291 → 1307 time-skip
     const stillThere = world.has(jost, PartyMember);
     console.log(`companion entity ${jost} survives chapter change: ${stillThere}`);
-    expect(stillThere).toBe(false); // documents the bug: companions are wiped with the crowd
+    expect(stillThere).toBe(true); // round 2: companions survive
+    let jostCount = 0;
+    world.each(Npc, (_id, n) => { if (n.defId === 'npc.jost-imhof') jostCount++; });
+    console.log(`Jost entities after the time-skip: ${jostCount}`);
+    expect(jostCount).toBe(1);
   });
 
   it('dlg.generic.<archetype> fallback: which Interactable dialogue ids have no DialogueDef', () => {
@@ -108,6 +112,80 @@ describe('populate(chapter)', () => {
     console.log(`generic dialogue ids defined: ${[...c.dialogues.keys()].filter((k) => k.startsWith('dlg.generic.')).join(', ')}`);
     console.log(`NPC entities whose fallback dialogue id does NOT exist: ${[...missing].map(([k, v]) => `${k}×${v}`).join(', ') || 'none'}`);
     console.log(`total entities with a dangling generic dialogue: ${[...missing.values()].reduce((a, b) => a + b, 0)}`);
+  });
+});
+
+describe('round 2 — life, boats, load rebinding', () => {
+  it('Sarnen at 23:00: crowd/minor NPCs are asleep → mesh hidden and Interactable disabled; at 12:00 visible and enabled', () => {
+    const { world, sys, c } = makeSystem();
+    sys.populate('prologue-1291');
+    const sarnen = c.pois.get('poi.sarnen')!;
+    const p = { x: sarnen.x, z: sarnen.z };
+    for (let i = 0; i < 40; i++) sys.update(1, p, 23); // enough ticks to walk ≤ 22 m to the sleep offset
+    let near = 0, hidden = 0, disabled = 0;
+    world.each(Npc, (id, n) => {
+      const t = world.get(id, Transform)!;
+      if (n.frozen || Math.hypot(t.x - p.x, t.z - p.z) > 120) return;
+      near++;
+      const m = world.get(id, MeshRef); if (m && !(m.object as Object3D).visible) hidden++;
+      const it = world.get(id, Interactable); if (it && !it.enabled) disabled++;
+    });
+    console.log(`Sarnen 23:00 — near NPCs ${near}, hidden ${hidden}, not interactable ${disabled}`);
+    expect(hidden).toBeGreaterThan(near * 0.7);
+    for (let i = 0; i < 60; i++) sys.update(1, p, 12);
+    let vis = 0, en = 0, near2 = 0;
+    world.each(Npc, (id, n) => {
+      const t = world.get(id, Transform)!;
+      if (n.frozen || Math.hypot(t.x - p.x, t.z - p.z) > 120) return;
+      near2++;
+      const m = world.get(id, MeshRef); if (m && (m.object as Object3D).visible) vis++;
+      const it = world.get(id, Interactable); if (it && it.enabled) en++;
+    });
+    console.log(`Sarnen 12:00 — near NPCs ${near2}, visible ${vis}, interactable ${en}`);
+    expect(vis).toBe(near2);
+  });
+
+  it('crowd actually moves during the day: market offset differs from work offset for generic NPCs', () => {
+    const { world, sys, c } = makeSystem();
+    sys.populate('prologue-1291');
+    let moved = 0, total = 0;
+    world.each(Npc, (_id, n) => {
+      if (!n.generic) return;
+      total++;
+      const w = n.schedule.find((e) => e.activity === 'work')?.offset ?? [0, 0];
+      const m = n.schedule.find((e) => e.activity === 'market')?.offset ?? [0, 0];
+      if (Math.hypot(w[0] - m[0], w[1] - m[1]) > 3) moved++;
+    });
+    console.log(`generic NPCs with a market spot > 3 m from their work spot: ${moved}/${total}`);
+    expect(moved).toBeGreaterThan(total * 0.8);
+  });
+
+  it('a recruited companion within 300 m is still stepped by its own schedule (does it wander off from the player?)', () => {
+    const { world, sys, c } = makeSystem();
+    sys.populate('prologue-1291');
+    let jost = -1;
+    world.each(Npc, (id, n) => { if (n.defId === 'npc.jost-imhof') jost = id; });
+    world.add(jost, PartyMember, { slot: 1, control: 'companion' });
+    const fl = c.pois.get('poi.fluelen')!;
+    const t = world.get(jost, Transform)!;
+    const start = { x: t.x, z: t.z };
+    for (let i = 0; i < 600; i++) sys.update(1, { x: fl.x, z: fl.z }, 15); // 15:00 → schedule says Altdorf market
+    const d = Math.hypot(t.x - start.x, t.z - start.z);
+    console.log(`companion Jost after 10 min at 15:00 with the player standing at Flüelen: moved ${d.toFixed(0)} m toward ${world.get(jost, Npc)!.targetPoi}`);
+  });
+
+  it('rebindPatrols(): a fresh NpcSystem over restored patrol entities regains 10 patrols and 3 leads', () => {
+    const A = makeSystem();
+    A.sys.populate('prologue-1291');
+    // simulate load: same World/entities, new system (index.ts teardown clears the system, save restores entities)
+    const partyB = { createCharacter: () => { throw new Error('not used'); } } as unknown as PartyService;
+    const ws = { heightAt: () => 0, isWater: () => false, hasModel: () => true, spawnModel: () => new Object3D() } as unknown as WorldService;
+    const B = new NpcSystem(A.world, A.c, partyB, ws, new Object3D(), vi.fn());
+    B.rebindPatrols();
+    const pat = (B as unknown as { patrols: Map<number, unknown>; patrolLead: Set<number> });
+    console.log(`after rebind: patrols=${pat.patrols.size} leads=${pat.patrolLead.size}`);
+    expect(pat.patrols.size).toBe(10);
+    expect(pat.patrolLead.size).toBe(3);
   });
 });
 
@@ -198,9 +276,11 @@ describe('freeze / re-entry / walking', () => {
     sys.setHostileHabsburg(true);
     const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(10 * 60 * 1000);
     const pt = world.get(lead, Transform)!;
-    for (let i = 0; i < 5; i++) sys.update(0.1, { x: pt.x + 1, z: pt.z + 1 }, 12);
+    const playerAt = { x: pt.x + 1, z: pt.z + 1 };
+    for (let i = 0; i < 5; i++) sys.update(0.1, playerAt, 12);
     console.log(`patrol near (${pt.x.toFixed(0)}, ${pt.z.toFixed(0)}) (Arth is (${arth.x}, ${arth.z})); startEncounter calls: ${JSON.stringify(startEncounter.mock.calls)}`);
-    expect(startEncounter).toHaveBeenCalledWith('enc.altdorf-square');
+    expect(startEncounter.mock.calls[0][0]).toBe('enc.habsburg-patrol');
+    expect(Math.hypot(startEncounter.mock.calls[0][1].x - playerAt.x, startEncounter.mock.calls[0][1].z - playerAt.z)).toBeLessThan(0.01);
     nowSpy.mockRestore();
   });
 

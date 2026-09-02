@@ -18,7 +18,7 @@ import { buildPlayerModel, animateWalkCycle } from './playerModel';
 import { registerExplorationHumanoids } from './humanoid';
 import { NpcSystem } from './npc';
 import { PoiSystem } from './poi';
-import { InteractSystem, spawnContainers, spawnBoatTravel } from './interact';
+import { InteractSystem, spawnContainers, spawnBoatTravel, spawnTradeAndRest } from './interact';
 import { updateHud } from './hud';
 import { buildSettlements, type BuiltSettlements } from './settlements';
 import type { Collider } from './colliders';
@@ -85,6 +85,7 @@ class ExplorationServiceImpl implements ExplorationService {
     this.poiSystem.spawnPoiEntities();
     spawnContainers(this.ctx.world, this.ctx.content);
     spawnBoatTravel(this.ctx.world, this.ctx.content);
+    spawnTradeAndRest(this.ctx.world, this.ctx.content);
     this.rebuildSettlements();
   }
 

@@ -5,6 +5,7 @@
  */
 import type { DialogueNodeView } from '@core/services';
 import { el, clear } from './dom';
+import { formatCheckOdds } from './helpers';
 import { portraitSvg } from './icons';
 
 const TYPE_MS_PER_CHAR = 16;
@@ -14,7 +15,7 @@ export interface DialogueUi {
   hide(): void;
 }
 
-export function createDialogueUi(mount: HTMLElement): DialogueUi {
+export function createDialogueUi(mount: HTMLElement, menuOpen: () => boolean = () => false): DialogueUi {
   const letterTop = el('div', { class: 'dlg-letterbox top', style: 'height:0' });
   const letterBottom = el('div', { class: 'dlg-letterbox bottom', style: 'height:0' });
   const panelRoot = el('div', { id: 'dialogue-root' });
@@ -23,6 +24,7 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
 
   let typeTimer: number | null = null;
   let resolveCurrent: ((i: number) => void) | null = null;
+  let cleanupCurrent: (() => void) | null = null;
 
   function letterbox(on: boolean): void {
     letterTop.style.height = on ? '12vh' : '0';
@@ -35,6 +37,8 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
 
   function show(node: DialogueNodeView): Promise<number> {
     stopTyping();
+    if (cleanupCurrent) { cleanupCurrent(); cleanupCurrent = null; }
+    if (resolveCurrent) { resolveCurrent(0); resolveCurrent = null; }
     return new Promise((resolve) => {
       resolveCurrent = resolve;
       letterbox(true);
@@ -67,6 +71,7 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
         typedSpan.textContent = node.text;
         cursorSpan.style.visibility = 'hidden';
         finished = true;
+        skipHint.style.display = 'none';
         renderChoices();
       }
 
@@ -76,8 +81,9 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
           const row = el('div', { class: `dlg-choice${c.enabled ? '' : ' disabled'}`, onclick: () => pick(idx) }, [
             el('span', { class: 'num' }, [`${idx + 1}`]),
             el('span', {}, [c.text]),
-            c.hint && !c.enabled ? el('span', { class: 'hint' }, [`(${c.hint})`]) : null,
-            typeof c.checkOdds === 'number' ? el('span', { class: 'odds' }, [`[${Math.round(c.checkOdds)}%]`]) : null,
+            typeof c.checkOdds === 'number'
+              ? el('span', { class: 'odds' }, [formatCheckOdds(c.hint ?? 'Check', c.checkOdds)])
+              : c.hint ? el('span', { class: 'hint' }, [`(${c.hint})`]) : null,
           ]);
           choicesEl.appendChild(row);
         });
@@ -98,6 +104,7 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
       const keyHandler = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement | null;
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+        if (menuOpen()) return; // a pause menu over the conversation owns the keyboard
         if (e.key >= '1' && e.key <= '9') { pick(Number(e.key) - 1); return; }
         if (e.key === 'Enter' || e.key === ' ') { pick(0); }
       };
@@ -108,7 +115,9 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
 
       function cleanup(): void {
         window.removeEventListener('keydown', keyHandler);
+        cleanupCurrent = null;
       }
+      cleanupCurrent = cleanup;
 
       typeTimer = window.setInterval(() => {
         i++;
@@ -120,7 +129,9 @@ export function createDialogueUi(mount: HTMLElement): DialogueUi {
 
   function hide(): void {
     stopTyping();
+    if (cleanupCurrent) { cleanupCurrent(); cleanupCurrent = null; }
     panelRoot.hidden = true;
+    clear(panelRoot);
     letterbox(false);
     if (resolveCurrent) { resolveCurrent(0); resolveCurrent = null; }
   }

@@ -56,6 +56,10 @@ export class InteractSystem {
     const ui = this.services.tryGet('ui');
     if (it.kind === 'travel') {
       this.travel(it.data?.destinations as string[] | undefined);
+    } else if (it.kind === 'trade') {
+      if (ui) ui.openMenu('trade', { entity, merchant: it.data?.merchant }); else console.info('[exploration] trade (no ui)');
+    } else if (it.kind === 'rest') {
+      if (ui) ui.openMenu('rest', { entity }); else console.info('[exploration] rest (no ui)');
     } else if (it.kind === 'talk') {
       if (quest && it.dialogueId && quest.dialogueExists?.(it.dialogueId) !== false) {
         quest.runDialogue(it.dialogueId, entity).catch((err) => console.error('[exploration] runDialogue failed', err));
@@ -89,6 +93,25 @@ export class InteractSystem {
         if (ok) { await ex.fastTravel(d); return; }
       }
     })();
+  }
+}
+
+/** A bed at every inn ("rest") and a stall at every merchant-populated settlement ("trade"). */
+export function spawnTradeAndRest(world: World, content: ContentRegistry): void {
+  for (const id of world.query(Interactable)) { const k = world.get(id, Interactable)!.kind; if (k === 'trade' || k === 'rest') world.destroy(id); }
+  for (const poi of content.pois.values()) {
+    if (poi.population?.innkeeper) {
+      const id = world.create(`rest.${poi.id}`);
+      world.add(id, Transform, { x: poi.x - 4, y: 0, z: poi.z + 3, yaw: 0 });
+      world.add(id, Name, { id: `rest.${poi.id}`, display: 'Inn' });
+      world.add(id, Interactable, { kind: 'rest', prompt: `Rest at the inn`, enabled: true });
+    }
+    if (poi.population?.merchant || poi.kind === 'town') {
+      const id = world.create(`trade.${poi.id}`);
+      world.add(id, Transform, { x: poi.x + 4, y: 0, z: poi.z - 3, yaw: 0 });
+      world.add(id, Name, { id: `trade.${poi.id}`, display: 'Market stall' });
+      world.add(id, Interactable, { kind: 'trade', prompt: `Trade at the market`, enabled: true, data: { merchant: poi.id } });
+    }
   }
 }
 
