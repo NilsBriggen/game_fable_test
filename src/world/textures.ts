@@ -1,16 +1,296 @@
 /**
- * Procedural canvas textures: tiling diffuse + normal maps for terrain splatting and for prop
- * materials (wood grain, stone, shingle, plaster). No external assets — BUILDER_RULES.md forbids them.
+ * Texture supply. Terrain: three CC0 PBR DataArrayTextures (albedo / normal / AO+roughness), 8 layers,
+ * decoded from one packed 512x4096 JPEG each (tools/assets/fetch-world.mjs, CREDITS-world.md).
+ * Vegetation: CC0 bark + canvas alpha cut-outs. Props: the original procedural canvas textures.
  */
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace, NoColorSpace, Texture } from 'three';
+import {
+  CanvasTexture, ClampToEdgeWrapping, DataArrayTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter,
+  LinearSRGBColorSpace, NoColorSpace, RGBAFormat, RepeatWrapping, SRGBColorSpace, Texture, TextureLoader,
+  UnsignedByteType,
+} from 'three';
 import { valueNoise2D, fbm2D } from './noise';
 
-function newCanvas(size: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+const ASSET_BASE = 'assets/textures';
+
+/** Layer order must match world-manifest.json terrainLayers. */
+export const TERRAIN_LAYER = {
+  grass: 0, meadow: 1, forest: 2, rock: 3, scree: 4, snow: 5, mud: 6, road: 7,
+} as const;
+export const TERRAIN_LAYER_COUNT = 8;
+const LAYER_PX = 512;
+
+function newCanvas(size: number, h = size): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
+  canvas.width = size; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   return { canvas, ctx };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Terrain PBR arrays
+// ---------------------------------------------------------------------------------------------
+
+export interface TerrainArrays {
+  albedo: DataArrayTexture;
+  normal: DataArrayTexture;
+  orm: DataArrayTexture;
+  /** resolves once all three real arrays have replaced their 1×1 placeholders */
+  ready: Promise<void>;
+  loaded: boolean;
+}
+
+let terrainArrays: TerrainArrays | null = null;
+
+/** A 1×1×8 grey/flat placeholder so the material can compile before the JPEGs arrive. */
+function placeholderArray(r: number, g: number, b: number): DataArrayTexture {
+  const data = new Uint8Array(new ArrayBuffer(TERRAIN_LAYER_COUNT * 4));
+  for (let i = 0; i < TERRAIN_LAYER_COUNT; i++) {
+    data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = 255;
+  }
+  const t = new DataArrayTexture(data, 1, 1, TERRAIN_LAYER_COUNT);
+  t.format = RGBAFormat; t.type = UnsignedByteType;
+  t.colorSpace = NoColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Decode one packed 512×(512·8) JPEG into the pixel block a DataArrayTexture wants (layer-major). */
+async function decodeLayerStack(url: string): Promise<Uint8Array> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`terrain texture ${url}: HTTP ${res.status}`);
+  const blob = await res.blob();
+  const bmp = await createImageBitmap(blob);
+  const { ctx } = newCanvas(LAYER_PX, LAYER_PX * TERRAIN_LAYER_COUNT);
+  ctx.drawImage(bmp, 0, 0, LAYER_PX, LAYER_PX * TERRAIN_LAYER_COUNT);
+  bmp.close();
+  const img = ctx.getImageData(0, 0, LAYER_PX, LAYER_PX * TERRAIN_LAYER_COUNT);
+  return new Uint8Array(img.data.buffer.slice(0) as ArrayBuffer);
+}
+
+function fillArray(tex: DataArrayTexture, data: Uint8Array): void {
+  tex.image = { data, width: LAYER_PX, height: LAYER_PX, depth: TERRAIN_LAYER_COUNT } as any;
+  tex.needsUpdate = true;
+}
+
+export function getTerrainArrays(): TerrainArrays {
+  if (terrainArrays) return terrainArrays;
+  const mk = (r: number, g: number, b: number): DataArrayTexture => {
+    const t = placeholderArray(r, g, b);
+    t.wrapS = t.wrapT = RepeatWrapping;
+    t.magFilter = LinearFilter;
+    t.minFilter = LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
+    t.anisotropy = 4;
+    return t;
+  };
+  const albedo = mk(120, 130, 96);
+  const normal = mk(128, 128, 255);
+  const orm = mk(255, 200, 128);
+  const arrays: TerrainArrays = {
+    albedo, normal, orm, loaded: false,
+    ready: Promise.resolve(),
+  };
+  arrays.ready = (async () => {
+    const [a, n, o] = await Promise.all([
+      decodeLayerStack(`${ASSET_BASE}/terrain/albedo-array.jpg`),
+      decodeLayerStack(`${ASSET_BASE}/terrain/normal-array.jpg`),
+      decodeLayerStack(`${ASSET_BASE}/terrain/orm-array.jpg`),
+    ]);
+    fillArray(albedo, a);
+    fillArray(normal, n);
+    fillArray(orm, o);
+    arrays.loaded = true;
+  })();
+  terrainArrays = arrays;
+  return arrays;
+}
+
+// Macro variation: low-frequency field that breaks tile repetition at distance. R/G/B = 3 decorrelated octave sets.
+
+let macroTex: DataTexture | null = null;
+export function macroVariationTexture(size = 256): DataTexture {
+  if (macroTex) return macroTex;
+  const data = new Uint8Array(new ArrayBuffer(size * size * 4));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const a = fbm2D(x, y, { octaves: 4, frequency: 0.021, seed: 31 }) * 0.5 + 0.5;
+      const b = fbm2D(x, y, { octaves: 3, frequency: 0.052, seed: 977 }) * 0.5 + 0.5;
+      const c = fbm2D(x, y, { octaves: 5, frequency: 0.011, seed: 4111 }) * 0.5 + 0.5;
+      data[i] = Math.round(a * 255); data[i + 1] = Math.round(b * 255); data[i + 2] = Math.round(c * 255); data[i + 3] = 255;
+    }
+  }
+  const t = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+  t.wrapS = t.wrapT = RepeatWrapping;
+  t.magFilter = LinearFilter;
+  t.minFilter = LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.colorSpace = NoColorSpace;
+  t.needsUpdate = true;
+  macroTex = t;
+  return t;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Vegetation cut-outs (canvas, alpha-tested)
+// ---------------------------------------------------------------------------------------------
+
+const canvasCache = new Map<string, CanvasTexture>();
+
+function cached(key: string, make: () => CanvasTexture): CanvasTexture {
+  const hit = canvasCache.get(key);
+  if (hit) return hit;
+  const t = make();
+  canvasCache.set(key, t);
+  return t;
+}
+
+/** One conifer branch sprig, flat: woody stem + needle combs. Alpha cut-out for foliage cards. */
+export function needleSprayTexture(kind: 'spruce' | 'fir' | 'larch' | 'pine' = 'spruce'): CanvasTexture {
+  return cached(`needles:${kind}`, () => {
+    const S = 256;
+    const { canvas, ctx } = newCanvas(S);
+    ctx.clearRect(0, 0, S, S);
+    const base = kind === 'spruce' ? [30, 62, 38] : kind === 'fir' ? [40, 78, 52] : kind === 'larch' ? [96, 128, 56] : [46, 82, 48];
+    const needleLen = kind === 'larch' ? 0.055 : 0.085;
+    const rows = kind === 'larch' ? 34 : 26;
+    // woody stem down the middle of the card
+    ctx.strokeStyle = 'rgba(62,46,30,0.95)';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(S * 0.5, S); ctx.lineTo(S * 0.5, S * 0.06); ctx.stroke();
+    let seed = kind.length * 7 + 3;
+    const rnd = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    for (let r = 0; r < rows; r++) {
+      const t = r / rows;
+      const y = S * (0.95 - t * 0.9);
+      const spread = S * 0.46 * (1 - t * 0.8) + S * 0.05;
+      // side twigs: 2 per row, each carrying a comb of needles
+      for (const dir of [-1, 1]) {
+        const twigLen = spread * (0.7 + rnd() * 0.35);
+        const droop = kind === 'spruce' ? 0.28 : 0.12;
+        const x1 = S * 0.5 + dir * twigLen;
+        const y1 = y + twigLen * droop;
+        ctx.strokeStyle = 'rgba(58,44,28,0.9)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(S * 0.5, y); ctx.lineTo(x1, y1); ctx.stroke();
+        const n = Math.round(10 + rnd() * 6);
+        for (let i = 0; i < n; i++) {
+          const u = (i + 0.4) / n;
+          const bx = S * 0.5 + (x1 - S * 0.5) * u;
+          const by = y + (y1 - y) * u;
+          for (const side of [-1, 1]) {
+            const ang = (dir > 0 ? -0.35 : Math.PI + 0.35) + side * (0.75 + rnd() * 0.45);
+            const len = S * needleLen * (0.6 + rnd() * 0.7);
+            const shade = 0.72 + rnd() * 0.5;
+            ctx.strokeStyle = `rgba(${Math.round(base[0] * shade)},${Math.round(base[1] * shade)},${Math.round(base[2] * shade)},1)`;
+            ctx.lineWidth = kind === 'larch' ? 1.1 : 1.7;
+            ctx.beginPath();
+            ctx.moveTo(bx, by);
+            ctx.lineTo(bx + Math.cos(ang) * len, by + Math.sin(ang) * len);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
+    tex.anisotropy = 4;
+    return tex;
+  });
+}
+
+/** A beech/maple leaf cluster card: overlapping ovate leaves with visible gaps and midribs. */
+export function broadleafSprayTexture(season: 'summer' | 'autumn' = 'summer'): CanvasTexture {
+  return cached(`leaves:${season}`, () => {
+    const S = 256;
+    const { canvas, ctx } = newCanvas(S);
+    ctx.clearRect(0, 0, S, S);
+    let seed = season === 'autumn' ? 991 : 17;
+    const rnd = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    ctx.strokeStyle = 'rgba(64,48,30,0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(S * 0.5, S); ctx.lineTo(S * 0.5, S * 0.2); ctx.stroke();
+    for (let i = 0; i < 46; i++) {
+      const t = rnd();
+      const cx = S * 0.5 + (rnd() - 0.5) * S * 0.84;
+      const cy = S * (0.92 - t * 0.86) + (rnd() - 0.5) * 18;
+      const rx = S * (0.055 + rnd() * 0.045);
+      const ry = rx * (1.5 + rnd() * 0.5);
+      const rot = (rnd() - 0.5) * 2.4;
+      const shade = 0.7 + rnd() * 0.55;
+      const col = season === 'autumn' ? [172, 116, 42] : [74, 106, 46];
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rot);
+      ctx.fillStyle = `rgb(${Math.round(col[0] * shade)},${Math.round(col[1] * shade)},${Math.round(col[2] * shade)})`;
+      ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = `rgba(${Math.round(col[0] * shade * 0.6)},${Math.round(col[1] * shade * 0.6)},${Math.round(col[2] * shade * 0.6)},0.85)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -ry); ctx.lineTo(0, ry); ctx.stroke();
+      ctx.restore();
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
+    tex.anisotropy = 4;
+    return tex;
+  });
+}
+
+/** A tuft of grass blades (alpha) for the near-camera instanced ground cover. */
+export function grassTuftTexture(): CanvasTexture {
+  return cached('grassTuft', () => {
+    const S = 128;
+    const { canvas, ctx } = newCanvas(S);
+    ctx.clearRect(0, 0, S, S);
+    let seed = 4242;
+    const rnd = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    for (let i = 0; i < 22; i++) {
+      const x0 = S * (0.12 + rnd() * 0.76);
+      const h = S * (0.45 + rnd() * 0.5);
+      const bend = (rnd() - 0.5) * S * 0.42;
+      const w = 2 + rnd() * 2.4;
+      const shade = 0.55 + rnd() * 0.6;
+      const grad = ctx.createLinearGradient(0, S, 0, S - h);
+      grad.addColorStop(0, `rgb(${Math.round(54 * shade)},${Math.round(76 * shade)},${Math.round(34 * shade)})`);
+      grad.addColorStop(1, `rgb(${Math.round(118 * shade)},${Math.round(150 * shade)},${Math.round(66 * shade)})`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = w;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x0, S);
+      ctx.quadraticCurveTo(x0 + bend * 0.35, S - h * 0.55, x0 + bend, S - h);
+      ctx.stroke();
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
+    return tex;
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bark (CC0 Bark012, packed to 256² by tools/assets/fetch-world.mjs)
+// ---------------------------------------------------------------------------------------------
+
+let barkPair: { map: Texture; normalMap: Texture } | null = null;
+export function barkTextures(): { map: Texture; normalMap: Texture } {
+  if (barkPair) return barkPair;
+  const loader = new TextureLoader();
+  const map = loader.load(`${ASSET_BASE}/vegetation/bark-conifer.jpg`);
+  map.colorSpace = SRGBColorSpace;
+  map.wrapS = map.wrapT = RepeatWrapping;
+  const normalMap = loader.load(`${ASSET_BASE}/vegetation/bark-conifer-n.jpg`);
+  normalMap.colorSpace = LinearSRGBColorSpace;
+  normalMap.wrapS = normalMap.wrapT = RepeatWrapping;
+  barkPair = { map, normalMap };
+  return barkPair;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Legacy procedural canvas textures (props — models.ts, owned by the asset builder — and the map)
+// ---------------------------------------------------------------------------------------------
 
 function grayNoiseField(size: number, freq: number, seed: number, octaves = 4): Float32Array {
   const out = new Float32Array(size * size);
@@ -81,6 +361,7 @@ const cache = new Map<string, TexturePair>();
 
 export type TerrainSurfaceTex = 'grass' | 'rock' | 'scree' | 'snow' | 'forest' | 'mud' | 'road' | 'settlement' | 'meadow';
 
+/** Flat tinted tile for props/map. The terrain itself splats the CC0 arrays above. */
 export function getTerrainTexture(kind: TerrainSurfaceTex, size = 256): TexturePair {
   const key = `terrain:${kind}:${size}`;
   const hit = cache.get(key);
@@ -89,45 +370,16 @@ export function getTerrainTexture(kind: TerrainSurfaceTex, size = 256): TextureP
   let map: CanvasTexture;
   let bumpFreq = 0.06, bumpStrength = 1.6;
   switch (kind) {
-    case 'grass':
-      map = makeDiffuse(size, seed, 0.05, [58, 82, 38], [96, 128, 58]);
-      bumpStrength = 0.8;
-      break;
-    case 'meadow':
-      map = makeDiffuse(size, seed, 0.045, [86, 112, 56], [138, 158, 84], 0.03);
-      bumpStrength = 0.6;
-      break;
-    case 'forest':
-      // Darkened (critic issue 5): forested slopes must read as forest from a distance even where the
-      // instanced trees themselves haven't populated yet (e.g. a chunk just streamed in).
-      map = makeDiffuse(size, seed, 0.08, [26, 32, 18], [54, 54, 32]);
-      bumpStrength = 1.2;
-      break;
-    case 'rock':
-      map = makeDiffuse(size, seed, 0.09, [72, 68, 62], [128, 122, 112]);
-      bumpFreq = 0.12; bumpStrength = 2.6;
-      break;
-    case 'scree':
-      map = makeDiffuse(size, seed, 0.14, [96, 90, 80], [150, 142, 128], 0.08);
-      bumpFreq = 0.18; bumpStrength = 2.2;
-      break;
-    case 'snow':
-      map = makeDiffuse(size, seed, 0.05, [214, 220, 230], [250, 250, 255]);
-      bumpStrength = 0.5;
-      break;
-    case 'mud':
-      map = makeDiffuse(size, seed, 0.07, [58, 46, 34], [92, 72, 50]);
-      bumpStrength = 1.0;
-      break;
-    case 'road':
-      map = makeDiffuse(size, seed, 0.1, [96, 84, 66], [138, 122, 96], 0.05);
-      bumpFreq = 0.1; bumpStrength = 1.4;
-      break;
+    case 'grass': map = makeDiffuse(size, seed, 0.05, [58, 82, 38], [96, 128, 58]); bumpStrength = 0.8; break;
+    case 'meadow': map = makeDiffuse(size, seed, 0.045, [86, 112, 56], [138, 158, 84], 0.03); bumpStrength = 0.6; break;
+    case 'forest': map = makeDiffuse(size, seed, 0.08, [26, 32, 18], [54, 54, 32]); bumpStrength = 1.2; break;
+    case 'rock': map = makeDiffuse(size, seed, 0.09, [72, 68, 62], [128, 122, 112]); bumpFreq = 0.12; bumpStrength = 2.6; break;
+    case 'scree': map = makeDiffuse(size, seed, 0.14, [96, 90, 80], [150, 142, 128], 0.08); bumpFreq = 0.18; bumpStrength = 2.2; break;
+    case 'snow': map = makeDiffuse(size, seed, 0.05, [214, 220, 230], [250, 250, 255]); bumpStrength = 0.5; break;
+    case 'mud': map = makeDiffuse(size, seed, 0.07, [58, 46, 34], [92, 72, 50]); bumpStrength = 1.0; break;
+    case 'road': map = makeDiffuse(size, seed, 0.1, [96, 84, 66], [138, 122, 96], 0.05); bumpFreq = 0.1; bumpStrength = 1.4; break;
     case 'settlement':
-    default:
-      map = makeDiffuse(size, seed, 0.06, [110, 96, 74], [150, 134, 106]);
-      bumpStrength = 0.7;
-      break;
+    default: map = makeDiffuse(size, seed, 0.06, [110, 96, 74], [150, 134, 106]); bumpStrength = 0.7; break;
   }
   const height = grayNoiseField(size, bumpFreq, seed + 3000);
   const normalMap = normalMapFromHeight(size, height, bumpStrength);
@@ -247,21 +499,27 @@ export function plasterTexture(size = 256, tint: [number, number, number] = [214
   return pair;
 }
 
-/** Tileable ripple normal map for lake water (animated via texture.offset in water.ts). */
-export function waterNormalTexture(size = 128): CanvasTexture {
-  const key = `waterN:${size}`;
-  const hitPair = cache.get(key);
-  if (hitPair) return hitPair.normalMap;
+/** Two decorrelated tileable ripple normal maps; water.ts scrolls them against each other. */
+export function waterNormalTexture(variant: 0 | 1 = 0, size = 256): CanvasTexture {
+  const key = `waterN:${variant}:${size}`;
+  const hit = cache.get(key);
+  if (hit) return hit.normalMap;
   const height = new Float32Array(size * size);
+  const seed = variant === 0 ? 900 : 1731;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const a = Math.sin((x / size) * Math.PI * 2 * 6) * 0.5;
-      const b = Math.sin(((x + y) / size) * Math.PI * 2 * 9 + 1.3) * 0.3;
-      const c = fbm2D(x, y, { octaves: 3, frequency: 0.08, seed: 900 }) * 0.4;
-      height[y * size + x] = a + b + c;
+      // sum of a few wrapped sine trains at incommensurate directions + fbm chop
+      const u = x / size, v = y / size;
+      let h = 0;
+      const trains: [number, number, number][] = variant === 0
+        ? [[3, 1, 0.5], [1, 4, 0.32], [5, 3, 0.2]]
+        : [[2, 5, 0.42], [4, 1, 0.3], [1, 2, 0.26]];
+      for (const [kx, ky, amp] of trains) h += Math.sin((u * kx + v * ky) * Math.PI * 2 + kx * 1.7) * amp;
+      h += fbm2D(x, y, { octaves: 3, frequency: 0.09, seed }) * 0.35;
+      height[y * size + x] = h;
     }
   }
-  const normalMap = normalMapFromHeight(size, height, 0.9);
+  const normalMap = normalMapFromHeight(size, height, variant === 0 ? 0.8 : 0.55);
   cache.set(key, { map: normalMap, normalMap });
   return normalMap;
 }
@@ -269,6 +527,14 @@ export function waterNormalTexture(size = 128): CanvasTexture {
 export function disposeAllTextures(): void {
   for (const p of cache.values()) { p.map.dispose(); p.normalMap.dispose(); }
   cache.clear();
+  for (const t of canvasCache.values()) t.dispose();
+  canvasCache.clear();
+  macroTex?.dispose(); macroTex = null;
+  if (terrainArrays) {
+    terrainArrays.albedo.dispose(); terrainArrays.normal.dispose(); terrainArrays.orm.dispose();
+    terrainArrays = null;
+  }
+  if (barkPair) { barkPair.map.dispose(); barkPair.normalMap.dispose(); barkPair = null; }
 }
 
 export type { Texture };

@@ -47,7 +47,7 @@ export function buildWater(): WaterHandle {
   const group = new Group();
   group.name = 'water';
   const geo = buildWorldGeo();
-  const ripple = waterNormalTexture(128);
+  const ripple = waterNormalTexture(0, 256);
   ripple.wrapS = ripple.wrapT = RepeatWrapping;
   const meshes: Mesh[] = [];
   const materials: MeshPhysicalMaterial[] = [];

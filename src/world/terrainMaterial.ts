@@ -1,88 +1,180 @@
 /**
- * The single terrain MeshStandardMaterial, splat-blended via onBeforeCompile from procedural
- * textures. Vertex `surfaceId` (chunkmesh.ts) is pre-remapped on the CPU into 4 broad blend groups
- * (grass, forest, rock/scree, path) so GPU interpolation between adjacent triangles blends sensibly;
- * snow is layered on top live, by height + season, so the bake never needs to change with the seasons.
+ * The single terrain material. One MeshStandardMaterial, splat-blended in onBeforeCompile from three
+ * CC0 PBR DataArrayTextures (8 layers) against a 2048x2176 surface-weight mask baked from the CPU
+ * height model. Biplanar sampling on slopes, macro variation, live snow line, wet shores, and the
+ * aerial-perspective fog that sky.ts drives (and vegetation/water share via TERRAIN_FOG_*).
  */
-import { Color, DoubleSide, MeshStandardMaterial } from 'three';
-import { getTerrainTexture } from './textures';
+import { Color, DataTexture, FrontSide, LinearFilter, LinearMipmapLinearFilter, MeshStandardMaterial, RGBAFormat, UnsignedByteType, Vector2, Vector3 } from 'three';
+import { MAP_BOUNDS } from '@content/gazetteer';
+import { getTerrainArrays, macroVariationTexture, TERRAIN_LAYER } from './textures';
 import { registerCsmMaterial } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
 
 export interface TerrainMaterialHandle {
   material: MeshStandardMaterial;
-  uniforms: Record<string, { value: unknown }>;
+  uniforms: Record<string, { value: any }>;
 }
+
+/** Shared atmosphere uniforms; sky.ts writes them, terrain/vegetation/water read them. */
+export const FOG_UNIFORMS = {
+  uFogColor: { value: new Color(0xbfd2e0) },
+  uFogSunColor: { value: new Color(0xffe9c4) },
+  uFogDensity: { value: 0.00030 },
+  uFogHeightFalloff: { value: 0.0016 },
+  uFogBaseY: { value: 30 },
+  uSunDir: { value: new Vector3(0.4, 0.7, 0.3) },
+  uFogMax: { value: 0.96 },
+};
+
+/** GLSL for the shared aerial perspective. Call applyAerialFog(shader) to inject it. */
+const FOG_DECL = /* glsl */ `
+uniform vec3 uFogColor, uFogSunColor, uSunDir;
+uniform float uFogDensity, uFogHeightFalloff, uFogBaseY, uFogMax;
+vec3 aerialPerspective(vec3 col, vec3 worldPos, vec3 viewVec) {
+  float dist = length(viewVec);
+  // height fog: thicker in the valleys, thin on the summits
+  float hFac = exp(-max(0.0, worldPos.y - uFogBaseY) * uFogHeightFalloff);
+  float amt = 1.0 - exp(-dist * uFogDensity * (0.35 + 0.65 * hFac));
+  amt = clamp(amt, 0.0, uFogMax);
+  // in-scattering: haze looking toward the sun is warm and bright, away from it cool blue
+  float sunAmt = max(0.0, dot(normalize(viewVec), normalize(uSunDir)));
+  vec3 haze = mix(uFogColor, uFogSunColor, pow(sunAmt, 3.0) * 0.85);
+  return mix(col, haze, amt);
+}
+`;
+
+export function applyAerialFog(shader: { vertexShader: string; fragmentShader: string; uniforms: any }): void {
+  Object.assign(shader.uniforms, FOG_UNIFORMS);
+  if (!shader.vertexShader.includes('vFogWorldPos')) {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', 'varying vec3 vFogWorldPos;\n#include <common>')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n#ifdef USE_INSTANCING\n  vFogWorldPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vFogWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
+  }
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', `varying vec3 vFogWorldPos;\n${FOG_DECL}\n#include <common>`)
+    .replace('#include <dithering_fragment>', 'gl_FragColor.rgb = aerialPerspective(gl_FragColor.rgb, vFogWorldPos, vFogWorldPos - cameraPosition);\n#include <dithering_fragment>');
+}
+
+// ---------------------------------------------------------------------------------------------
+// Splat mask: 7 surface weights over the whole map, baked once from the CPU surface grid.
+//   A.rgba = grass, meadow, forest, rock      B.rgb = scree, mud, road
+// ---------------------------------------------------------------------------------------------
+
+/** heightmodel SURFACE_IDS index -> (mask texture 0|1, channel 0..3), or null to fall back to grass. */
+const SURFACE_TO_MASK: Record<number, [0 | 1, number]> = {
+  0: [0, 0],  // grass
+  8: [0, 1],  // meadow
+  2: [0, 2],  // forest
+  1: [0, 3],  // rock
+  3: [1, 0],  // scree
+  5: [1, 1],  // mud
+  4: [1, 1],  // water -> wet shore under the lake surface
+  6: [1, 2],  // road
+  7: [1, 2],  // settlement -> trampled earth
+  9: [0, 0],  // snow (never baked; the shader adds it live)
+};
+
+let maskA: DataTexture | null = null;
+let maskB: DataTexture | null = null;
+let maskBuilt = false;
+
+function emptyMask(): DataTexture {
+  const t = new DataTexture(new Uint8Array([255, 0, 0, 0]), 1, 1, RGBAFormat, UnsignedByteType);
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Bake the mask from a surface-id sampler (vegetation.ts calls this once the CPU grid exists). */
+export function buildSplatMask(surfaceIdAt: (gx: number, gz: number) => number, gridW: number, gridH: number): void {
+  if (maskBuilt) return;
+  maskBuilt = true;
+  const n = gridW * gridH;
+  const a = new Uint8Array(new ArrayBuffer(n * 4));
+  const b = new Uint8Array(new ArrayBuffer(n * 4));
+  for (let i = 0; i < n; i++) {
+    const slot = SURFACE_TO_MASK[surfaceIdAt(i % gridW, (i / gridW) | 0)] ?? SURFACE_TO_MASK[0];
+    (slot[0] === 0 ? a : b)[i * 4 + slot[1]] = 255;
+  }
+  const mk = (data: Uint8Array<ArrayBuffer>): DataTexture => {
+    const t = new DataTexture(data, gridW, gridH, RGBAFormat, UnsignedByteType);
+    t.magFilter = LinearFilter;
+    t.minFilter = LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
+    t.needsUpdate = true;
+    return t;
+  };
+  const ta = mk(a), tb = mk(b);
+  if (handle) {
+    handle.uniforms.tMaskA.value?.dispose?.();
+    handle.uniforms.tMaskB.value?.dispose?.();
+    handle.uniforms.tMaskA.value = ta;
+    handle.uniforms.tMaskB.value = tb;
+    handle.uniforms.uMaskTexel.value.set(1 / gridW, 1 / gridH);
+  }
+  maskA = ta; maskB = tb;
+}
+
+export function splatMaskReady(): boolean { return maskBuilt; }
+
+// ---------------------------------------------------------------------------------------------
 
 let handle: TerrainMaterialHandle | null = null;
 
 export function getTerrainMaterial(): TerrainMaterialHandle {
   if (handle) return handle;
-  const grass = getTerrainTexture('grass');
-  const forest = getTerrainTexture('forest');
-  const rock = getTerrainTexture('rock');
-  const snow = getTerrainTexture('snow');
-  const path = getTerrainTexture('road');
+  const arrays = getTerrainArrays();
 
-  const material = new MeshStandardMaterial({ color: new Color(0xffffff), roughness: 1, metalness: 0, side: DoubleSide });
-  const uniforms: Record<string, { value: unknown }> = {
-    tGrass: { value: grass.map },
-    tForest: { value: forest.map },
-    tRock: { value: rock.map },
-    tSnow: { value: snow.map },
-    tPath: { value: path.map },
-    tGrassN: { value: grass.normalMap },
-    tForestN: { value: forest.normalMap },
-    tRockN: { value: rock.normalMap },
-    tSnowN: { value: snow.normalMap },
-    tPathN: { value: path.normalMap },
+  const material = new MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, side: FrontSide });
+  material.fog = false; // aerial perspective below replaces scene fog on the terrain
+
+  const uniforms: Record<string, { value: any }> = {
+    tAlbedo: { value: arrays.albedo },
+    tNormal: { value: arrays.normal },
+    tOrm: { value: arrays.orm },
+    tMaskA: { value: maskA ?? emptyMask() },
+    tMaskB: { value: maskB ?? emptyMask() },
+    tMacro: { value: macroVariationTexture() },
+    uMaskMin: { value: new Vector2(MAP_BOUNDS.minX, MAP_BOUNDS.minZ) },
+    uMaskSpan: { value: new Vector2(MAP_BOUNDS.maxX - MAP_BOUNDS.minX, MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) },
+    uMaskTexel: { value: new Vector2(1 / 2048, 1 / 2176) },
     uSnowLine: { value: 900 },
-    uGrassTint: { value: new Color(0x9fb862) },
-    uFogColor: { value: new Color(0xbfd2e0) },
-    uFogDensity: { value: 0.00012 },
-    uFogHeightFalloff: { value: 0.0022 },
-    uFogBaseY: { value: 40 },
+    uSnowDepth: { value: 0 },      // weather: extra whitening at any altitude (0..1)
+    uSeasonTint: { value: new Color(0x9fb862) },
+    uAltitudeTint: { value: new Color(0xc9c58a) }, // grass drifts to this above the villages
+    uWetness: { value: 0 },        // rain darkens + glosses the ground
+    uLakeLevel: { value: 0 },
+    ...FOG_UNIFORMS,
   };
 
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
-    for (const k of Object.keys(uniforms)) (material as any).userData.shaderUniforms = uniforms;
+    (material as any).userData.shaderUniforms = uniforms;
 
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `attribute float surfaceId;\nvarying float vSurfaceId;\nvarying vec3 vWorldPos;\n#include <common>`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvSurfaceId = surfaceId;`)
-      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\nvWorldPos = worldPosition.xyz;`);
+      .replace('#include <common>', 'varying vec3 vWorldPos;\n#include <common>')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWorldPos = worldPosition.xyz;');
 
     shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `
-        uniform sampler2D tGrass, tForest, tRock, tSnow, tPath;
-        uniform sampler2D tGrassN, tForestN, tRockN, tSnowN, tPathN;
-        uniform float uSnowLine;
-        uniform vec3 uGrassTint;
-        uniform vec3 uFogColor;
-        uniform float uFogDensity, uFogHeightFalloff, uFogBaseY;
-        varying float vSurfaceId;
+      .replace('#include <common>', /* glsl */ `
+        precision highp sampler2DArray;
+        uniform sampler2DArray tAlbedo, tNormal, tOrm;
+        uniform sampler2D tMaskA, tMaskB, tMacro;
+        uniform vec2 uMaskMin, uMaskSpan, uMaskTexel;
+        uniform float uSnowLine, uSnowDepth, uWetness, uLakeLevel;
+        uniform vec3 uSeasonTint, uAltitudeTint;
         varying vec3 vWorldPos;
-        float tent(float x, float c) { return clamp(1.0 - abs(x - c), 0.0, 1.0); }
-        // Triplanar blend weights from the geometric normal (rock/scree only — see map_fragment below):
-        // a single xz projection is what produced the vertical streaking on every cliff face in every
-        // scenario screenshot; blending the xz/xy/zy projections by |normal| fixes vertical surfaces.
-        vec3 triplanarWeights(vec3 n) {
-          vec3 a = pow(abs(n), vec3(4.0));
-          return a / max(1e-5, a.x + a.y + a.z);
+        ${FOG_DECL}
+        // metres per texture repeat, per layer (grass meadow forest rock scree snow mud road)
+        const float TILE[8] = float[8](5.0, 6.0, 4.5, 7.0, 4.0, 8.0, 4.5, 4.0);
+        vec2 gUv;              // uv of the projection actually used (for the derivative normal frame)
+        vec3 gMapN;
+
+        // Biplanar: the horizontal projection plus whichever vertical plane faces the surface.
+        void planes(vec3 wp, vec3 n, float tile, out vec2 uvFlat, out vec2 uvSteep, out float steep) {
+          uvFlat = wp.xz / tile;
+          uvSteep = (abs(n.x) > abs(n.z)) ? vec2(wp.z, wp.y) / tile : vec2(wp.x, wp.y) / tile;
+          steep = smoothstep(0.86, 0.5, n.y); // ~30deg .. ~60deg
         }
-        vec4 sampleTriplanar(sampler2D tex, vec3 wp, vec3 n, float scale) {
-          vec3 w = triplanarWeights(n);
-          vec4 cx = texture2D(tex, wp.zy * scale);
-          vec4 cy = texture2D(tex, wp.xz * scale);
-          vec4 cz = texture2D(tex, wp.xy * scale);
-          return cx * w.x + cy * w.y + cz * w.z;
-        }
-        // Standard tangent-space normal-map perturbation from screen-space derivatives (three.js's own
-        // perturbNormal2Arb technique) — lets a single planar UV carry a bound normal map without a
-        // precomputed tangent attribute, which the terrain geometry (chunkmesh.ts) doesn't bake.
         vec3 perturbNormalFromMap(vec3 eyePos, vec3 surfNormal, vec2 uv, vec3 mapN) {
           vec3 q0 = dFdx(eyePos), q1 = dFdy(eyePos);
           vec2 st0 = dFdx(uv), st1 = dFdy(uv);
@@ -91,82 +183,112 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           vec3 T = q1perp * st0.x + q0perp * st1.x;
           vec3 B = q1perp * st0.y + q0perp * st1.y;
           float det = max(dot(T, T), dot(B, B));
-          float scale = det == 0.0 ? 0.0 : inversesqrt(det);
-          return normalize(T * (mapN.x * scale) + B * (mapN.y * scale) + N * mapN.z);
+          float sc = det == 0.0 ? 0.0 : inversesqrt(det);
+          return normalize(T * (mapN.x * sc) + B * (mapN.y * sc) + N * mapN.z);
         }
-        vec2 gTerrainUv;
-        vec3 gTerrainMapN;
         #include <common>
-        `,
-      )
-      .replace(
-        '#include <map_fragment>',
-        `
+      `)
+      .replace('#include <map_fragment>', /* glsl */ `
         {
-          // Adjacent categories in the 0..3 blend-group scale are the only ones that can be
-          // simultaneously non-zero (tent() has support width 1), so at most two texture2D calls
-          // are needed here (plus a conditional snow overlay) -- kept branchy on purpose: this
-          // material also has to run acceptably on the harness's software (SwiftShader) rasteriser.
-          float wGrass = tent(vSurfaceId, 0.0);
-          float wForest = tent(vSurfaceId, 1.0);
-          float wRock = tent(vSurfaceId, 2.0);
-          float wPath = tent(vSurfaceId, 3.0);
-          float sum = max(1e-4, wGrass + wForest + wRock + wPath);
-          wGrass /= sum; wForest /= sum; wRock /= sum; wPath /= sum;
-
-          vec2 uvY = vWorldPos.xz / 40.0;
-          gTerrainUv = uvY;
           vec3 nrm = normalize(vNormal);
-          vec4 texel = vec4(0.0);
-          vec3 mapN = vec3(0.0);
-          if (wGrass > 0.001) { texel += texture2D(tGrass, uvY) * vec4(uGrassTint, 1.0) * wGrass; mapN += (texture2D(tGrassN, uvY).xyz * 2.0 - 1.0) * wGrass; }
-          if (wForest > 0.001) { texel += texture2D(tForest, uvY) * wForest; mapN += (texture2D(tForestN, uvY).xyz * 2.0 - 1.0) * wForest; }
-          if (wRock > 0.001) { texel += sampleTriplanar(tRock, vWorldPos, nrm, 1.0 / 40.0) * wRock; mapN += (texture2D(tRockN, uvY).xyz * 2.0 - 1.0) * wRock; }
-          if (wPath > 0.001) { texel += texture2D(tPath, uvY) * wPath; mapN += (texture2D(tPathN, uvY).xyz * 2.0 - 1.0) * wPath; }
+          vec2 muv = (vWorldPos.xz - uMaskMin) / uMaskSpan;
+          vec3 macro = texture2D(tMacro, vWorldPos.xz * 0.0022).rgb;
+          // warp the mask lookup by a texel so the 7.8 m grid never shows as straight edges
+          muv += (macro.rg - 0.5) * uMaskTexel * 2.2;
+          vec4 mA = texture2D(tMaskA, muv);
+          vec4 mB = texture2D(tMaskB, muv);
 
-          float snowAmt = clamp(smoothstep(uSnowLine - 50.0, uSnowLine + 30.0, vWorldPos.y) * (1.0 - 0.5 * wRock), 0.0, 1.0);
-          if (snowAmt > 0.01) {
-            texel = mix(texel, texture2D(tSnow, uvY), snowAmt);
-            mapN = mix(mapN, texture2D(tSnowN, uvY).xyz * 2.0 - 1.0, snowAmt);
+          float w[8];
+          w[0] = mA.r; w[1] = mA.g; w[2] = mA.b; w[3] = mA.a;
+          w[4] = mB.r; w[6] = mB.g; w[7] = mB.b; w[5] = 0.0;
+
+          // altitude drift: pasture below the villages becomes alpine meadow above them
+          float alp = smoothstep(90.0, 230.0, vWorldPos.y);
+          float toMeadow = w[0] * alp;
+          w[0] -= toMeadow; w[1] += toMeadow;
+
+          // snow: by altitude, softened by slope (steep faces shed snow) and by the weather override
+          float slopeShed = smoothstep(0.42, 0.82, nrm.y);
+          float snowAmt = clamp(smoothstep(uSnowLine - 70.0, uSnowLine + 45.0, vWorldPos.y) + uSnowDepth, 0.0, 1.0);
+          snowAmt *= slopeShed * (0.72 + 0.28 * macro.b);
+          float wsum = max(1e-4, w[0]+w[1]+w[2]+w[3]+w[4]+w[6]+w[7]);
+          for (int i = 0; i < 8; i++) w[i] /= wsum;
+          for (int i = 0; i < 8; i++) w[i] *= (1.0 - snowAmt);
+          w[5] = snowAmt;
+
+          // dominant two layers -> two taps per map instead of eight
+          int i0 = 0; float w0 = -1.0;
+          for (int i = 0; i < 8; i++) if (w[i] > w0) { w0 = w[i]; i0 = i; }
+          int i1 = 0; float w1 = -1.0;
+          for (int i = 0; i < 8; i++) if (i != i0 && w[i] > w1) { w1 = w[i]; i1 = i; }
+          float blend = w1 / max(1e-4, w0 + w1);
+
+          float t0 = TILE[i0], t1 = TILE[i1];
+          vec2 f0, s0, f1, s1; float st0v, st1v;
+          planes(vWorldPos, nrm, t0, f0, s0, st0v);
+          planes(vWorldPos, nrm, t1, f1, s1, st1v);
+
+          // de-tiling: the dominant layer is also sampled at 4.3x and mixed by the macro field
+          vec4 a0 = mix(texture(tAlbedo, vec3(f0, float(i0))), texture(tAlbedo, vec3(f0 * 0.233, float(i0))), 0.42 * macro.r + 0.12);
+          vec4 a1 = texture(tAlbedo, vec3(f1, float(i1)));
+          vec3 n0 = texture(tNormal, vec3(f0, float(i0))).xyz;
+          vec3 n1 = texture(tNormal, vec3(f1, float(i1))).xyz;
+          vec3 o0 = texture(tOrm, vec3(f0, float(i0))).xyz;
+          vec3 o1 = texture(tOrm, vec3(f1, float(i1))).xyz;
+          gUv = f0;
+          if (st0v > 0.02) {
+            a0 = mix(a0, texture(tAlbedo, vec3(s0, float(i0))), st0v);
+            n0 = mix(n0, texture(tNormal, vec3(s0, float(i0))).xyz, st0v);
+            o0 = mix(o0, texture(tOrm, vec3(s0, float(i0))).xyz, st0v);
+            a1 = mix(a1, texture(tAlbedo, vec3(s1, float(i1))), st1v);
+            n1 = mix(n1, texture(tNormal, vec3(s1, float(i1))).xyz, st1v);
+            if (st0v > 0.5) gUv = s0;
           }
-          gTerrainMapN = length(mapN) > 1e-4 ? normalize(mapN) : vec3(0.0, 0.0, 1.0);
+          vec3 albedo = mix(a0.rgb, a1.rgb, blend);
+          gMapN = normalize(mix(n0, n1, blend) * 2.0 - 1.0);
+          vec3 orm = mix(o0, o1, blend);
 
-          diffuseColor *= texel;
+          // season / altitude tint on the two grass layers only
+          float greenW = w[0] + w[1];
+          vec3 tint = mix(uSeasonTint, uAltitudeTint, alp);
+          albedo = mix(albedo, albedo * tint * 1.55, greenW * 0.85);
+
+          // macro variation: large-scale luminance + hue drift so 5 m tiles vanish at 500 m
+          albedo *= mix(vec3(0.78), vec3(1.22), macro.b);
+          albedo = mix(albedo, albedo * vec3(1.06, 1.0, 0.9), (macro.g - 0.5) * 0.5 + 0.25);
+
+          // shore + rain wetting: darker, smoother, slightly bluer
+          float shore = (1.0 - smoothstep(0.0, 6.5, vWorldPos.y - uLakeLevel)) * step(uLakeLevel - 3.0, vWorldPos.y);
+          float wet = clamp(max(shore, uWetness) * (1.0 - snowAmt), 0.0, 1.0);
+          albedo *= mix(1.0, 0.52, wet);
+
+          diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
+          roughnessFactor *= clamp(mix(orm.y, 0.22, wet), 0.05, 1.0);
+          diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
-        #include <map_fragment>
-        `,
-      )
-      .replace(
-        '#include <normal_fragment_maps>',
-        `
+      `)
+      .replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>
-        normal = perturbNormalFromMap(-vViewPosition, normal, gTerrainUv, gTerrainMapN);
-        `,
-      )
-      .replace(
-        '#include <dithering_fragment>',
-        `
-        {
-          float dist = length(vViewPosition);
-          float heightFactor = exp(-max(0.0, uFogBaseY - vWorldPos.y) * uFogHeightFalloff);
-          float fogAmt = 1.0 - exp(-dist * uFogDensity * (0.4 + heightFactor));
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(fogAmt, 0.0, 0.85));
-        }
+        normal = perturbNormalFromMap(-vViewPosition, normal, gUv, gMapN);
+      `)
+      .replace('#include <dithering_fragment>', `
+        gl_FragColor.rgb = aerialPerspective(gl_FragColor.rgb, vWorldPos, vWorldPos - cameraPosition);
         #include <dithering_fragment>
-        `,
-      );
+      `);
   };
 
-  // Terrain now participates in CSM shadow receiving (see terrain.ts's mesh.receiveShadow=true): the
-  // earlier "always renders black" symptom that led to opting out was a camera-inside-mountain bug
-  // (heightmodel.ts peak fix), not a CSM shader-path bug.
   registerCsmMaterial(material);
   handle = { material, uniforms };
   return handle;
 }
 
+/** Layer ids, exported so vegetation/map can stay in step with the array order. */
+export { TERRAIN_LAYER };
+
 export function disposeTerrainMaterial(): void {
   if (!handle) return;
   handle.material.dispose();
+  maskA?.dispose(); maskB?.dispose();
+  maskA = maskB = null; maskBuilt = false;
   handle = null;
 }
