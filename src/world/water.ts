@@ -169,6 +169,7 @@ export function buildWater(): WaterHandle {
         varying vec2 vShoreUv;
         vec4 gShore;
         vec3 gWaveN;
+        float gRough = 0.08;
         // Two counter-scrolling ripple sheets at different scales; the sum never repeats visibly.
         vec3 rippleNormal(vec2 p) {
           vec2 w = normalize(uWind);
@@ -193,8 +194,12 @@ export function buildWater(): WaterHandle {
           float foam = clamp(band * smoothstep(0.34, 0.86, wob), 0.0, 1.0);
           foam += (1.0 - smoothstep(0.0, 0.012, depth)) * 0.55; // always a thin lick right at the stones
           diffuseColor.rgb *= pow(mix(col, uFoamColor, clamp(foam, 0.0, 0.92)), vec3(2.2));
-          roughnessFactor = mix(0.055, 0.75, clamp(foam, 0.0, 1.0));
+          gRough = mix(0.055, 0.75, clamp(foam, 0.0, 1.0));
         }
+      `)
+      .replace('#include <roughnessmap_fragment>', `
+        #include <roughnessmap_fragment>
+        roughnessFactor = gRough;
       `)
       .replace('#include <normal_fragment_maps>', /* glsl */ `
         {

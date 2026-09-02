@@ -145,7 +145,7 @@ function buildTree(kind: TreeKind, rng: Rng, lod: 0 | 1): BufferGeometry {
         right.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(len * 0.5);
         nrm.set(Math.cos(a) * 0.45, 0.9, Math.sin(a) * 0.45).normalize();
         mb.quad(centre, right, up, nrm, folUv);
-        if (lod === 0 && rng.next() < 0.55) {
+        if (lod === 0 && rng.next() < 0.32) {
           // second card rolled about the branch axis so the whorl has volume, not a flat disc
           centre.set(dx * 0.5, y + dy * 0.5 + len * 0.12, dz * 0.5);
           right.set(-Math.sin(a), 0.85, Math.cos(a)).normalize().multiplyScalar(len * 0.42);

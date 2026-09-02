@@ -187,6 +187,8 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         const float TILE[8] = float[8](5.0, 6.0, 4.5, 7.0, 4.0, 8.0, 4.5, 4.0);
         vec2 gUv;              // uv of the projection actually used (for the derivative normal frame)
         vec3 gMapN;
+        float gRough = 1.0;    // written in <map_fragment>, applied in <roughnessmap_fragment>
+        float gSnow = 0.0;
 
         // Biplanar: the horizontal projection plus whichever vertical plane faces the surface.
         void planes(vec3 wp, vec3 n, float tile, out vec2 uvFlat, out vec2 uvSteep, out float steep) {
@@ -282,9 +284,14 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo *= mix(1.0, 0.52, wet);
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
-          roughnessFactor *= clamp(mix(orm.y, 0.22, wet), 0.05, 1.0);
+          gRough = clamp(mix(orm.y, 0.22, wet), 0.05, 1.0);
+          gSnow = snowAmt;
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
+      `)
+      .replace('#include <roughnessmap_fragment>', `
+        #include <roughnessmap_fragment>
+        roughnessFactor *= gRough;
       `)
       .replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>

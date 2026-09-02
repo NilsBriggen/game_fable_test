@@ -16,8 +16,11 @@ import { boulderGeometry, rockMaterial } from './propGeometry';
 
 type Tier = 'full' | 'mid' | 'impostor';
 
-const SPACING: Record<Tier, number> = { full: 10, mid: 14, impostor: 26 };
-const IMPOSTOR_SPACING_FAR = 46;
+const SPACING: Record<Tier, number> = { full: 10, mid: 13, impostor: 22 };
+const IMPOSTOR_SPACING_FAR = 42;
+/** Tier by distance from the camera to the nearest point of the chunk, not by terrain chunk LOD:
+ *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m. */
+const TIER_DIST = { full: 95, mid: 250 };
 const GRASS_RADIUS = 80;
 const GRASS_SPACING = 2.6;
 
@@ -127,7 +130,11 @@ export class VegetationManager {
     for (const key of [...this.chunkGrass.keys()]) if (!activeKeys.has(key)) this.freeGrass(key);
 
     for (const c of active) {
-      const tier: Tier = c.lod === 0 ? 'full' : c.lod === 1 ? 'mid' : 'impostor';
+      // distance from the camera to the nearest point of this 500 m chunk
+      const ddx = Math.max(c.originX - camX, 0, camX - (c.originX + 500));
+      const ddz = Math.max(c.originZ - camZ, 0, camZ - (c.originZ + 500));
+      const d = Math.hypot(ddx, ddz);
+      const tier: Tier = d < TIER_DIST.full ? 'full' : d < TIER_DIST.mid ? 'mid' : 'impostor';
       if (this.chunkTier.get(c.key) !== tier) {
         this.freeChunk(c.key);
         this.chunkTier.set(c.key, tier);
@@ -174,7 +181,7 @@ export class VegetationManager {
 
   private populateChunk(key: string, cx: number, cz: number, originX: number, originZ: number, tier: Tier, lod: number): void {
     const rng = new Rng(hashString(`${this.seed}:veg:${cx}:${cz}`) >>> 0);
-    const spacing = tier === 'impostor' && lod >= 3 ? IMPOSTOR_SPACING_FAR : SPACING[tier];
+    const spacing = tier === 'impostor' && lod >= 2 ? IMPOSTOR_SPACING_FAR : SPACING[tier];
     const size = 500;
     const allocs: { poolKey: string; index: number }[] = [];
     for (let gz = 0; gz < size; gz += spacing) {
@@ -186,7 +193,7 @@ export class VegetationManager {
         const slope = this.terrain.slopeAt(x, z);
         if (slope > 0.72) continue;
         const y = this.terrain.heightAt(x, z);
-        if (y > TREELINE * 1.12) continue;
+        if (y > TREELINE) continue; // LORE §3: nothing grows above game h 355
 
         let treeChance = 0, rockChance = 0;
         if (surface === 'forest') { treeChance = tier === 'impostor' ? 0.5 : 0.66; rockChance = 0.012; }

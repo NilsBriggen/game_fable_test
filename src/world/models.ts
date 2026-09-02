@@ -128,11 +128,11 @@ function cylGeo(rTop: number, rBot: number, h: number, seg = 8, caps = true): Bu
     const b1 = new Vector3(Math.cos(a1) * rBot, -h / 2, Math.sin(a1) * rBot);
     const t0 = new Vector3(Math.cos(a0) * rTop, h / 2, Math.sin(a0) * rTop);
     const t1 = new Vector3(Math.cos(a1) * rTop, h / 2, Math.sin(a1) * rTop);
-    quad(p, b0, b1, t1, t0);
+    quad(p, b0, t0, t1, b1);
     if (caps) {
       const cT = new Vector3(0, h / 2, 0), cB = new Vector3(0, -h / 2, 0);
-      p.push(cT.x, cT.y, cT.z, t0.x, t0.y, t0.z, t1.x, t1.y, t1.z);
-      p.push(cB.x, cB.y, cB.z, b1.x, b1.y, b1.z, b0.x, b0.y, b0.z);
+      p.push(cT.x, cT.y, cT.z, t1.x, t1.y, t1.z, t0.x, t0.y, t0.z);
+      p.push(cB.x, cB.y, cB.z, b0.x, b0.y, b0.z, b1.x, b1.y, b1.z);
     }
   }
   return fromPositions(p);

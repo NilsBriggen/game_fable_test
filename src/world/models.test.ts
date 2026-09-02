@@ -4,12 +4,13 @@
  * exploration layout assumes, and that every animation the game asks for exists in the CC0 clip pack.
  */
 import { Box3, Mesh, type Material, type Object3D } from 'three';
+
+interface Buffer { toString(enc: string, start?: number, end?: number): string; readUInt32LE(offset: number): number }
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ModelLibrary } from './models';
 import { CHARACTER_ARCHETYPES, clipFor, spawnCharacter, type WeaponKind } from './characters';
 import { archetypes } from '@content/archetypes';
 import type { CharacterAnim } from '@core/services';
-import manifest from '../../tools/assets/manifest.json';
 
 // three's TextureLoader needs a DOM to build an <img>; the tests never decode one.
 beforeAll(() => {
@@ -99,9 +100,16 @@ describe('characters', () => {
     }
   });
 
-  it('maps every CharacterAnim onto a clip the downloaded pack actually contains', () => {
-    // tools/assets/manifest.json is the contract for what fetch.mjs packs into rig-medium.anims.bin.
-    const have = new Set(manifest.characters.flatMap((c) => c.clipFiles.flatMap((f) => f.clips)));
+  it('maps every CharacterAnim onto a clip the downloaded pack actually contains', async () => {
+    // Read the packed clip list straight out of public/assets/characters/rig-medium.anims.bin.
+    // `node:fs` is loaded through a computed specifier: src/** may not import across the tools/ boundary
+    // (tools/check-imports.mjs) and the project's tsconfig carries no @types/node.
+    const spec = 'node:' + 'fs';
+    const { readFileSync } = await import(spec) as { readFileSync: (p: string) => Buffer };
+    const buf = readFileSync('public/assets/characters/rig-medium.anims.bin');
+    expect(buf.toString('ascii', 0, 4)).toBe('EANM');
+    const header = JSON.parse(buf.toString('utf8', 8, 8 + buf.readUInt32LE(4))) as { clips: { name: string }[] };
+    const have = new Set(header.clips.map((c) => c.name));
     const anims: CharacterAnim[] = ['idle', 'walk', 'run', 'attack', 'hit', 'down', 'dead', 'brace', 'shoot', 'reload', 'talk', 'cheer', 'flee'];
     const weapons: WeaponKind[] = ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff', 'axe', 'none'];
     for (const a of anims) for (const w of weapons) for (const seed of [0, 1, 2]) {

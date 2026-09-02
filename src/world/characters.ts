@@ -191,7 +191,8 @@ class SkinBuilder {
     for (let s = 0; s + 1 < rows.length; s++) {
       for (let i = 0; i < seg; i++) {
         const a = rows[s][i], b = rows[s][i + 1], c = rows[s + 1][i + 1], d = rows[s + 1][i];
-        this.face(a, b, c); this.face(a, c, d);
+        // wound so the outward face (analytic normal above) is the front face
+        this.face(a, c, b); this.face(a, d, c);
       }
     }
     const cap = (sec: typeof sections[number], up: boolean) => {
@@ -203,7 +204,7 @@ class SkinBuilder {
         ring.push(this.vertex(new Vector3((sec.cx ?? 0) + Math.cos(a) * sec.rx, sec.y, (sec.cz ?? 0) + Math.sin(a) * sec.rz),
           n, Math.cos(a) * sec.rx / this.uvScale, Math.sin(a) * sec.rz / this.uvScale, sec.color ?? color, sec.w));
       }
-      for (let i = 0; i < seg; i++) up ? this.face(centre, ring[i], ring[i + 1]) : this.face(centre, ring[i + 1], ring[i]);
+      for (let i = 0; i < seg; i++) up ? this.face(centre, ring[i + 1], ring[i]) : this.face(centre, ring[i], ring[i + 1]);
     };
     if (opts.capTop) cap(sections[sections.length - 1], true);
     if (opts.capBottom) cap(sections[0], false);
@@ -295,7 +296,7 @@ class SkinBuilder {
       const ib = this.vertex(corners[b], n, sx / this.uvScale, 0, color, ww);
       const ic = this.vertex(corners[c], n, sx / this.uvScale, sy / this.uvScale, color, ww);
       const id = this.vertex(corners[d], n, 0, sy / this.uvScale, color, ww);
-      this.face(ia, ib, ic); this.face(ia, ic, id);
+      this.face(ia, ic, ib); this.face(ia, id, ic);
     }
   }
 
