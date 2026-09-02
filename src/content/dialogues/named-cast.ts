@@ -212,8 +212,8 @@ export const namedCastDialogues: DialogueDef[] = [
       argue: {
         speaker: 'npc.konrad-ab-yberg', text: '"Enough charters, enough monks reading us Latin about pastures we\'ve grazed since before their abbey stood." Konrad\'s fist is white on his staff. "Stauffacher, I say we take back what is ours tonight, Epiphany or no."',
         choices: [
-          { text: 'Back the raid on Einsiedeln.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', false] }, { quest: ['advance', 'quest.marchenstreit', 'raid'] }], end: true },
-          { text: 'Urge restraint — let Stauffacher negotiate first.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', true] }, { quest: ['advance', 'quest.marchenstreit', 'speech-path'] }], end: true },
+          { text: 'Back the raid on Einsiedeln.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', false] }, { quest: ['advance', 'quest.marchenstreit', 'travel-einsiedeln'] }], end: true },
+          { text: 'Urge restraint — let Stauffacher negotiate first.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', true] }, { quest: ['advance', 'quest.marchenstreit', 'travel-einsiedeln'] }], end: true },
         ],
       },
       'ch2-other': { speaker: 'npc.konrad-ab-yberg', text: 'The abbot\'s monks still hold pasture that fed my grandfather\'s cattle, {player}. I have not changed my mind about it.', end: true },

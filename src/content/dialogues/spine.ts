@@ -89,9 +89,9 @@ export const spineDialogues: DialogueDef[] = [
       council: {
         speaker: 'narrator', text: "Word goes round the valleys: before spring, Zwing Uri, Rotzberg and Landenberg's hill at Sarnen must all fall. \"One of us should see it done with our own hands,\" someone says. \"The rest can be trusted to good men.\"",
         choices: [
-          { text: 'Storm Zwing Uri yourself.', effects: [{ setVar: ['quest.burgenbruch', 'chosen', 'zwing-uri'] }, { quest: ['advance', 'quest.burgenbruch', 'zwing-uri'] }], end: true },
-          { text: 'Climb Rotzberg by rope, yourself, by night.', effects: [{ setVar: ['quest.burgenbruch', 'chosen', 'rotzberg'] }, { quest: ['advance', 'quest.burgenbruch', 'rotzberg'] }], end: true },
-          { text: 'Join the New Year\'s gift procession into Sarnen yourself.', effects: [{ setVar: ['quest.burgenbruch', 'chosen', 'sarnen'] }, { quest: ['advance', 'quest.burgenbruch', 'sarnen'] }], end: true },
+          { text: 'Storm Zwing Uri yourself.', effects: [{ setVar: ['quest.burgenbruch', 'chosen', 'zwing-uri'] }, { quest: ['advance', 'quest.burgenbruch', 'travel-zwing-uri'] }], end: true },
+          { text: 'Climb Rotzberg by rope, yourself, by night.', effects: [{ setVar: ['quest.burgenbruch', 'chosen', 'rotzberg'] }, { quest: ['advance', 'quest.burgenbruch', 'travel-rotzberg'] }], end: true },
+          { text: 'Join the New Year\'s gift procession into Sarnen yourself.', effects: [{ setVar: ['quest.burgenbruch', 'chosen', 'sarnen'] }, { quest: ['advance', 'quest.burgenbruch', 'travel-sarnen'] }], end: true },
           { text: 'Send trusted companions to all three, and command from Altdorf.', check: { skill: 'leadership', dc: 14, fail: 'council-fail' }, next: 'delegated-success' },
         ],
       },
@@ -153,8 +153,8 @@ export const spineDialogues: DialogueDef[] = [
         speaker: 'npc.konrad-ab-yberg', text: '"Enough of the abbot\'s Latin," Konrad says, over the noise of the Landsgemeinde hall on the night of the Epiphany. "Schwyz men have grazed the March since before that abbey had a roof. Stauffacher, I say we take back what is ours tonight."',
         variants: [{ condition: { hasCompanion: 'npc.bruder-anselm' }, text: '"Enough of the abbot\'s Latin," Konrad says — and does not fail to notice Bruder Anselm at your shoulder. "No offence meant to your brother there. But Schwyz men have grazed the March since before that abbey had a roof, and I say we take it back tonight."' }],
         choices: [
-          { text: 'Back the raid on Einsiedeln.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', false] }, { quest: ['advance', 'quest.marchenstreit', 'raid'] }], end: true },
-          { text: 'Urge restraint — let Stauffacher and the abbot talk first.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', true] }, { quest: ['advance', 'quest.marchenstreit', 'speech-path'] }], end: true },
+          { text: 'Back the raid on Einsiedeln.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', false] }, { quest: ['advance', 'quest.marchenstreit', 'travel-einsiedeln'] }], end: true },
+          { text: 'Urge restraint — let Stauffacher and the abbot talk first.', effects: [{ setVar: ['quest.marchenstreit', 'restraint', true] }, { quest: ['advance', 'quest.marchenstreit', 'travel-einsiedeln'] }], end: true },
         ],
       },
     },
@@ -179,8 +179,8 @@ export const spineDialogues: DialogueDef[] = [
         speaker: 'narrator', text: 'Every valley must send men, and every man sent must be fed, armed, and, ideally, willing. Walking the Landsgemeinde meadows to talk farmers into halberds is its own kind of work.',
         choices: [{ text: 'Make the rounds and recruit.', check: { skill: 'leadership', dc: 14, fail: 'recruit-thin' }, next: 'recruit-strong' }],
       },
-      'recruit-strong': { speaker: 'narrator', text: 'More men answer the call than the Ammann dared hope — the Schwyz contingent alone swells past what the old counts allowed for, a full two files of spears more than the last muster mustered.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'strong'] }, { setFlag: ['morgarten.recruits-strong', true] }, { quest: ['advance', 'quest.muster-1315', 'scout-zug'] }], end: true },
-      'recruit-thin': { speaker: 'narrator', text: 'You get enough men to matter, though not so many that anyone feels easy about the odds. It will have to do.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'thin'] }, { quest: ['advance', 'quest.muster-1315', 'scout-zug'] }], end: true },
+      'recruit-strong': { speaker: 'narrator', text: 'More men answer the call than the Ammann dared hope — the Schwyz contingent alone swells past what the old counts allowed for, a full two files of spears more than the last levy raised.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'strong'] }, { setFlag: ['morgarten.recruits-strong', true] }, { quest: ['advance', 'quest.muster-1315', 'travel-zug'] }], end: true },
+      'recruit-thin': { speaker: 'narrator', text: 'You get enough men to matter, though not so many that anyone feels easy about the odds. It will have to do.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'thin'] }, { quest: ['advance', 'quest.muster-1315', 'travel-zug'] }], end: true },
     },
   },
   {

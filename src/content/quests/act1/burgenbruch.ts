@@ -16,17 +16,35 @@ export const burgenbruch: QuestDef = {
       onEnter: [{ dialogue: 'dlg.burgenbruch-council' }],
     },
     {
-      id: 'zwing-uri', journal: 'You make for Zwing Uri, half-built above Amsteg, to take it yourself.',
+      // Critic wave3-quest.md round 3 #2: gate the set piece on actually being at the castle — a
+      // choice to "storm Zwing Uri yourself" must not resolve the fight before the player has walked
+      // there, same as every other travel-* gate in the spine.
+      id: 'travel-zwing-uri', journal: 'You set out for Zwing Uri, half-built above Amsteg.',
+      marker: 'poi.zwing-uri', objectiveText: 'Make for Zwing Uri.',
+      advanceWhen: [{ cond: { nearPoi: ['poi.zwing-uri', 90] }, to: 'zwing-uri' }],
+    },
+    {
+      id: 'zwing-uri', journal: 'Zwing Uri stands half-built above Amsteg, ready to be taken.',
       marker: 'poi.zwing-uri', objectiveText: 'Take Zwing Uri.',
       onEnter: [{ dialogue: 'dlg.zwing-uri-stealth' }],
     },
     {
-      id: 'rotzberg', journal: 'You make for Rotzberg, above Stans, to climb its wall by night.',
+      id: 'travel-rotzberg', journal: 'You set out for Rotzberg, above Stans, to climb its wall by night.',
+      marker: 'poi.rotzberg', objectiveText: 'Make for Rotzberg.',
+      advanceWhen: [{ cond: { nearPoi: ['poi.rotzberg', 90] }, to: 'rotzberg' }],
+    },
+    {
+      id: 'rotzberg', journal: 'Rotzberg\'s wall rises above you in the dark.',
       marker: 'poi.rotzberg', objectiveText: 'Take Rotzberg.',
       onEnter: [{ dialogue: 'dlg.rotzberg-climb' }],
     },
     {
-      id: 'sarnen', journal: "You join the New Year's gift procession into Sarnen, weapons hidden in the baskets.",
+      id: 'travel-sarnen', journal: "You set out to join the New Year's gift procession into Sarnen, weapons hidden in the baskets.",
+      marker: 'poi.landenberg', objectiveText: 'Make for Landenberg\'s hill at Sarnen.',
+      advanceWhen: [{ cond: { nearPoi: ['poi.landenberg', 90] }, to: 'sarnen' }],
+    },
+    {
+      id: 'sarnen', journal: "The gift procession forms up below Landenberg's hill.",
       marker: 'poi.landenberg', objectiveText: "Take Landenberg's hill at Sarnen.",
       onEnter: [{ dialogue: 'dlg.sarnen-procession' }],
     },
