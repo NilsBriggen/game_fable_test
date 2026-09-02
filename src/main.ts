@@ -4,6 +4,7 @@
  */
 import { GameContext } from '@core/context';
 import type { GameState } from '@core/state';
+import { Name } from '@core/components';
 import { loadContent } from './content';
 import * as worldMod from './world';
 import * as saveMod from './save';
@@ -136,21 +137,22 @@ function gameTimeForStart(): number {
 
 
 // ---------- harness: Act 1 playthrough driver (final gate) ----------
-interface PlaythroughBeat { name: string; poi?: string; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number }
+interface PlaythroughBeat { name: string; poi?: string; talkTo?: string; dwellSeconds?: number; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number }
+// Mirrors src/quest/walkthrough.test.ts: arrive (presence gates), talk to the quest NPC where the stage needs it, fights auto-play.
 const ACT1_BEATS: PlaythroughBeat[] = [
-  { name: '01-fluelen-news', poi: 'poi.fluelen', untilStage: ['quest.der-eid', 'altdorf-message'] },
-  { name: '02-altdorf-attinghausen', poi: 'poi.altdorf', untilStage: ['quest.der-eid', 'escort'] },
+  { name: '01-fluelen-news', poi: 'poi.fluelen', dwellSeconds: 8, untilStage: ['quest.der-eid', 'fluelen-news'] },
+  { name: '02-altdorf-arrive', poi: 'poi.altdorf', untilStage: ['quest.der-eid', 'altdorf-message'] },
+  { name: '03-altdorf-fuerst', poi: 'poi.altdorf', talkTo: 'npc.walter-fuerst', untilStage: ['quest.der-eid', 'escort'] },
   { name: '04-brunnen-quay-fight', poi: 'poi.brunnen', combatRounds: 40, untilStage: ['quest.der-eid', 'travel-ruetli'] },
   { name: '05-ruetli-oath', poi: 'poi.ruetli', hour: 22, untilDone: 'quest.der-eid' },
   { name: '06-altdorf-1307-hat', poi: 'poi.altdorf', untilStage: ['quest.der-hut', 'travel-tellsplatte'] },
   { name: '07-tellsplatte', poi: 'poi.tellsplatte', untilStage: ['quest.der-hut', 'travel-hohle-gasse'] },
   { name: '08-hohle-gasse-fight', poi: 'poi.hohle-gasse', combatRounds: 40, untilStage: ['quest.der-hut', 'burgenbruch'] },
-  { name: '09-burgenbruch', poi: 'poi.sarnen', untilDone: 'quest.der-hut' },
+  { name: '09-zwing-uri', poi: 'poi.zwing-uri', untilDone: 'quest.der-hut' },
   { name: '10-marchenstreit-schwyz', poi: 'poi.schwyz', untilStage: ['quest.marchenstreit', 'travel-einsiedeln'] },
   { name: '11-einsiedeln-raid', poi: 'poi.einsiedeln', combatRounds: 40, untilDone: 'quest.marchenstreit' },
   { name: '12-muster-sattel', poi: 'poi.sattel-letzi', untilStage: ['quest.muster-1315', 'travel-zug'] },
-  { name: '13-scout-zug', poi: 'poi.zug', untilStage: ['quest.muster-1315', 'hunenberg'] },
-  { name: '13b-hunenberg-schwyz', poi: 'poi.schwyz', untilStage: ['quest.morgarten', 'travel-morgarten'] },
+  { name: '13-scout-zug', poi: 'poi.zug', untilDone: 'quest.muster-1315' },
   { name: '14-morgarten-battle', poi: 'poi.morgarten', hour: 8, combatRounds: 60, untilDone: 'quest.morgarten' },
   { name: '15-brunnen-pact', poi: 'poi.brunnen', untilDone: 'quest.brunnen-1315' },
 ];
@@ -193,7 +195,16 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
     if (typeof beat.hour === 'number') { ctx.clock.setHour(beat.hour); world.setTimeOfDay(beat.hour); }
     const limit = (beat.maxSeconds ?? opts.maxSecondsPerBeat ?? 90) * 1000;
     let ok = false, note: string | undefined;
+    if (beat.dwellSeconds) { const d0 = performance.now(); while (performance.now() - d0 < beat.dwellSeconds * 1000) await nextFrame(); }
+    let talked = false;
     while (performance.now() - t0 < limit) {
+      if (beat.talkTo && !talked && ctx.state.state === 'explore') {
+        talked = true;
+        let target: number | null = null;
+        ctx.world.each(Name, (id, n) => { if (target === null && n.id === beat.talkTo) target = id; });
+        if (target !== null) ex.interactWith(target);
+        else { const def = ctx.content.npcs.get(beat.talkTo); if (def?.dialogueRoot) void quest.runDialogue(def.dialogueRoot); }
+      }
       if (combat.isActive()) {
         fights++;
         if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-start`);
