@@ -18,50 +18,278 @@
     }
   },
   "textureProfiles": {
-    "prop": { "diff": { "src": "Color", "size": 1024, "q": 0.86 }, "nor": { "src": "NormalGL", "size": 512, "q": 0.86 }, "rough": { "src": "Roughness", "size": 512, "q": 0.8 } },
-    "terrain": { "diff": { "src": "Color", "size": 1024, "q": 0.86 }, "nor": { "src": "NormalGL", "size": 1024, "q": 0.86 }, "rough": { "src": "Roughness", "size": 1024, "q": 0.8 } }
+    "prop": {
+      "diff": {
+        "src": "Color",
+        "size": 1024,
+        "q": 0.86
+      },
+      "nor": {
+        "src": "NormalGL",
+        "size": 512,
+        "q": 0.86
+      },
+      "rough": {
+        "src": "Roughness",
+        "size": 512,
+        "q": 0.8
+      }
+    },
+    "terrain": {
+      "diff": {
+        "src": "Color",
+        "size": 1024,
+        "q": 0.86
+      },
+      "nor": {
+        "src": "NormalGL",
+        "size": 1024,
+        "q": 0.86
+      },
+      "rough": {
+        "src": "Roughness",
+        "size": 1024,
+        "q": 0.8
+      }
+    }
   },
   "textures": [
-    { "id": "wood-log", "source": "ambientcg", "asset": "Wood035", "profile": "prop", "target": "public/assets/textures/props/wood-log", "use": "Blockbau logs, beams, posts" },
-    { "id": "wood-plank", "source": "ambientcg", "asset": "WoodSiding005", "profile": "prop", "target": "public/assets/textures/props/wood-plank", "use": "planks: doors, barns, carts, boats, fences" },
-    { "id": "shingle", "source": "ambientcg", "asset": "WoodSiding013", "profile": "prop", "target": "public/assets/textures/props/shingle", "use": "wooden shingle roofs" },
-    { "id": "stone-block", "source": "ambientcg", "asset": "Bricks100", "profile": "prop", "target": "public/assets/textures/props/stone-block", "use": "church, castle, stone bridge masonry" },
-    { "id": "drystone", "source": "ambientcg", "asset": "Rocks001", "profile": "prop", "target": "public/assets/textures/props/drystone", "use": "letzi drystone walls, foundations" },
-    { "id": "plaster", "source": "ambientcg", "asset": "Plaster003", "profile": "prop", "target": "public/assets/textures/props/plaster", "use": "limewashed walls and gables" },
-    { "id": "iron", "source": "ambientcg", "asset": "Metal041B", "profile": "prop", "target": "public/assets/textures/props/iron", "use": "hinges, blades, kettle hats, bells" },
-    { "id": "thatch", "source": "ambientcg", "asset": "ThatchedRoof001A", "profile": "prop", "target": "public/assets/textures/props/thatch", "use": "hay racks, straw, tent cloth backing" },
-    { "id": "rock", "source": "ambientcg", "asset": "Rock035", "profile": "prop", "target": "public/assets/textures/props/rock", "use": "boulders, roof weight stones, stumps' surroundings" },
-    { "id": "wool", "source": "ambientcg", "asset": "Fabric019", "profile": "prop", "target": "public/assets/textures/props/wool", "use": "character clothing (tunics, gambesons, habits, dresses)" },
-    { "id": "leather", "source": "ambientcg", "asset": "Leather037", "profile": "prop", "target": "public/assets/textures/props/leather", "use": "belts, boots, shields, straps" },
-    { "id": "chainmail", "source": "ambientcg", "asset": "Chainmail004", "profile": "prop", "target": "public/assets/textures/props/chainmail", "use": "mail shirts and coifs" }
+    {
+      "id": "wood-log",
+      "source": "ambientcg",
+      "asset": "Wood035",
+      "profile": "prop",
+      "target": "public/assets/textures/props/wood-log",
+      "use": "Blockbau logs, beams, posts"
+    },
+    {
+      "id": "wood-plank",
+      "source": "ambientcg",
+      "asset": "WoodSiding005",
+      "profile": "prop",
+      "target": "public/assets/textures/props/wood-plank",
+      "use": "planks: doors, barns, carts, boats, fences"
+    },
+    {
+      "id": "shingle",
+      "source": "ambientcg",
+      "asset": "WoodSiding013",
+      "profile": "prop",
+      "target": "public/assets/textures/props/shingle",
+      "use": "wooden shingle roofs"
+    },
+    {
+      "id": "stone-block",
+      "source": "ambientcg",
+      "asset": "Bricks100",
+      "profile": "prop",
+      "target": "public/assets/textures/props/stone-block",
+      "use": "church, castle, stone bridge masonry"
+    },
+    {
+      "id": "drystone",
+      "source": "ambientcg",
+      "asset": "Rocks001",
+      "profile": "prop",
+      "target": "public/assets/textures/props/drystone",
+      "use": "letzi drystone walls, foundations"
+    },
+    {
+      "id": "plaster",
+      "source": "ambientcg",
+      "asset": "Plaster003",
+      "profile": "prop",
+      "target": "public/assets/textures/props/plaster",
+      "use": "limewashed walls and gables"
+    },
+    {
+      "id": "iron",
+      "source": "ambientcg",
+      "asset": "Metal041B",
+      "profile": "prop",
+      "target": "public/assets/textures/props/iron",
+      "use": "hinges, blades, kettle hats, bells"
+    },
+    {
+      "id": "thatch",
+      "source": "ambientcg",
+      "asset": "ThatchedRoof001A",
+      "profile": "prop",
+      "target": "public/assets/textures/props/thatch",
+      "use": "hay racks, straw, tent cloth backing"
+    },
+    {
+      "id": "rock",
+      "source": "ambientcg",
+      "asset": "Rock035",
+      "profile": "prop",
+      "target": "public/assets/textures/props/rock",
+      "use": "boulders, roof weight stones, stumps' surroundings"
+    },
+    {
+      "id": "wool",
+      "source": "ambientcg",
+      "asset": "Fabric019",
+      "profile": "prop",
+      "target": "public/assets/textures/props/wool",
+      "use": "character clothing (tunics, gambesons, habits, dresses)"
+    },
+    {
+      "id": "leather",
+      "source": "ambientcg",
+      "asset": "Leather037",
+      "profile": "prop",
+      "target": "public/assets/textures/props/leather",
+      "use": "belts, boots, shields, straps"
+    },
+    {
+      "id": "chainmail",
+      "source": "ambientcg",
+      "asset": "Chainmail004",
+      "profile": "prop",
+      "target": "public/assets/textures/props/chainmail",
+      "use": "mail shirts and coifs"
+    }
   ],
   "terrain": [
-    { "id": "grass", "source": "ambientcg", "asset": "Grass004", "profile": "terrain", "target": "public/assets/textures/terrain/grass" },
-    { "id": "meadow", "source": "ambientcg", "asset": "Grass001", "profile": "terrain", "target": "public/assets/textures/terrain/meadow" },
-    { "id": "rock", "source": "ambientcg", "asset": "Rock030", "profile": "terrain", "target": "public/assets/textures/terrain/rock" },
-    { "id": "scree", "source": "ambientcg", "asset": "Gravel023", "profile": "terrain", "target": "public/assets/textures/terrain/scree" },
-    { "id": "snow", "source": "ambientcg", "asset": "Snow010A", "profile": "terrain", "target": "public/assets/textures/terrain/snow" },
-    { "id": "forest_floor", "source": "ambientcg", "asset": "Ground023", "profile": "terrain", "target": "public/assets/textures/terrain/forest_floor" },
-    { "id": "mud", "source": "ambientcg", "asset": "Ground054", "profile": "terrain", "target": "public/assets/textures/terrain/mud" },
-    { "id": "road", "source": "ambientcg", "asset": "Ground081", "profile": "terrain", "target": "public/assets/textures/terrain/road" }
+    {
+      "id": "grass",
+      "source": "ambientcg",
+      "asset": "Grass004",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/grass"
+    },
+    {
+      "id": "meadow",
+      "source": "ambientcg",
+      "asset": "Grass001",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/meadow"
+    },
+    {
+      "id": "rock",
+      "source": "ambientcg",
+      "asset": "Rock030",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/rock"
+    },
+    {
+      "id": "scree",
+      "source": "ambientcg",
+      "asset": "Gravel023",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/scree"
+    },
+    {
+      "id": "snow",
+      "source": "ambientcg",
+      "asset": "Snow010A",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/snow"
+    },
+    {
+      "id": "forest_floor",
+      "source": "ambientcg",
+      "asset": "Ground023",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/forest_floor"
+    },
+    {
+      "id": "mud",
+      "source": "ambientcg",
+      "asset": "Ground054",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/mud"
+    },
+    {
+      "id": "road",
+      "source": "ambientcg",
+      "asset": "Ground081",
+      "profile": "terrain",
+      "target": "public/assets/textures/terrain/road"
+    }
   ],
   "characters": [
     {
       "id": "rig-medium",
       "source": "kaykit",
-      "itch": { "user": "kaylousberg", "slug": "kaykit-character-animations", "upload": 15799903, "file": "KayKit_Character_Animations_1.1.zip" },
+      "itch": {
+        "user": "kaylousberg",
+        "slug": "kaykit-character-animations",
+        "upload": 15799903,
+        "file": "KayKit_Character_Animations_1.1.zip"
+      },
       "target": "public/assets/characters/rig-medium.anims.bin",
       "postprocess": "rig-anims",
       "note": "Rig_Medium clip library. Post-processing keeps only the clips listed below, drops constant position/scale tracks (kept for root+hips) and stores rotations as float32 — the game rebuilds its own period-proportioned skeleton and retargets these rotations onto it (src/world/characters.ts).",
       "clipFiles": [
-        { "file": "Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clips": ["Idle_A", "Idle_B", "Hit_A", "Hit_B", "Death_A", "Death_A_Pose", "Interact", "Throw", "Use_Item"] },
-        { "file": "Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb", "clips": ["Walking_A", "Walking_B", "Walking_C", "Running_A", "Running_B"] },
-        { "file": "Animations/gltf/Rig_Medium/Rig_Medium_CombatMelee.glb", "clips": ["Melee_1H_Attack_Chop", "Melee_1H_Attack_Slice_Diagonal", "Melee_1H_Attack_Stab", "Melee_2H_Attack_Chop", "Melee_2H_Attack_Stab", "Melee_2H_Idle", "Melee_Blocking", "Melee_Block_Hit", "Melee_Unarmed_Idle"] },
-        { "file": "Animations/gltf/Rig_Medium/Rig_Medium_CombatRanged.glb", "clips": ["Ranged_2H_Aiming", "Ranged_2H_Shoot", "Ranged_2H_Reload"] },
-        { "file": "Animations/gltf/Rig_Medium/Rig_Medium_Simulation.glb", "clips": ["Cheering", "Waving", "Sit_Chair_Idle"] },
-        { "file": "Animations/gltf/Rig_Medium/Rig_Medium_Tools.glb", "clips": ["Working_A", "Holding_B"] }
+        {
+          "file": "Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+          "clips": [
+            "Idle_A",
+            "Idle_B",
+            "Hit_A",
+            "Hit_B",
+            "Death_A",
+            "Death_A_Pose",
+            "Interact",
+            "Throw",
+            "Use_Item"
+          ]
+        },
+        {
+          "file": "Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb",
+          "clips": [
+            "Walking_A",
+            "Walking_B",
+            "Walking_C",
+            "Running_A",
+            "Running_B"
+          ]
+        },
+        {
+          "file": "Animations/gltf/Rig_Medium/Rig_Medium_CombatMelee.glb",
+          "clips": [
+            "Melee_1H_Attack_Chop",
+            "Melee_1H_Attack_Slice_Diagonal",
+            "Melee_1H_Attack_Stab",
+            "Melee_2H_Attack_Chop",
+            "Melee_2H_Attack_Stab",
+            "Melee_2H_Idle",
+            "Melee_Blocking",
+            "Melee_Block_Hit",
+            "Melee_Unarmed_Idle"
+          ]
+        },
+        {
+          "file": "Animations/gltf/Rig_Medium/Rig_Medium_CombatRanged.glb",
+          "clips": [
+            "Ranged_2H_Aiming",
+            "Ranged_2H_Shoot",
+            "Ranged_2H_Reload"
+          ]
+        },
+        {
+          "file": "Animations/gltf/Rig_Medium/Rig_Medium_Simulation.glb",
+          "clips": [
+            "Cheering",
+            "Waving",
+            "Sit_Chair_Idle"
+          ]
+        },
+        {
+          "file": "Animations/gltf/Rig_Medium/Rig_Medium_Tools.glb",
+          "clips": [
+            "Working_A",
+            "Holding_B"
+          ]
+        }
       ],
-      "licenceFile": { "file": "License.txt", "target": "public/assets/characters/KayKit-License.txt" }
+      "licenceFile": {
+        "file": "License.txt",
+        "target": "public/assets/characters/KayKit-License.txt"
+      }
     }
-  ]
+  ],
+  "terrainNote": "Terrain surface textures are already fetched, packed into DataArrayTextures and wired by the world-look builder's tools/assets/fetch-world.mjs + world-manifest.json (public/assets/textures/terrain/*-array.jpg, credited in public/assets/CREDITS-world.md). The entries below are the per-surface equivalents this builder would have fetched; they are NOT fetched by default (`--only terrain` forces it) so the same 8 materials are not committed twice."
 }

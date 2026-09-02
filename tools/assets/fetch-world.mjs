@@ -35,7 +35,7 @@ const FORCE = process.argv.includes('--force');
 
 const manifest = JSON.parse(await readFile(path.join(__dirname, 'world-manifest.json'), 'utf8'));
 const SIZE = manifest.layerSize;
-const SRC = manifest.sources.ambientcg;
+const SRC = { author: manifest.author, homepage: manifest.homepage, licence: manifest.licence, url: 'https://ambientcg.com/get?file={name}_1K-JPG.zip' };
 
 await mkdir(CACHE, { recursive: true });
 await mkdir(path.join(root, 'public/assets/textures/terrain'), { recursive: true });
@@ -188,47 +188,31 @@ sizes.barkN = await writeDataUrl(manifest.outputs.barkNormal, await packSingle(f
 await browser.close();
 
 // ---------------------------------------------------------------------------
+const rows = [
+  ...layers.map((l) => [`${manifest.outputs.terrainAlbedoArray} #L${l.layer} (${l.id})`, l.url, l.author, l.licence, `${sizes.albedo} kB (whole array)`]),
+  ...layers.map((l) => [`${manifest.outputs.terrainNormalArray} #L${l.layer} (${l.id})`, l.url, l.author, l.licence, `${sizes.normal} kB (whole array)`]),
+  ...layers.map((l) => [`${manifest.outputs.terrainOrmArray} #L${l.layer} (${l.id})`, l.url, l.author, l.licence, `${sizes.orm} kB (whole array)`]),
+  [manifest.outputs.barkAlbedo, veg[0].url, veg[0].author, veg[0].licence, `${sizes.bark} kB`],
+  [manifest.outputs.barkNormal, veg[0].url, veg[0].author, veg[0].licence, `${sizes.barkN} kB`],
+];
 const credits = [
   '# Credits — world look (terrain, vegetation, sky, water)',
   '',
-  'Owned by the *world-look* builder. Everything listed here is **CC0 1.0 Universal** (public domain',
-  'dedication): no attribution is legally required, we record it anyway. Fetched and packed reproducibly',
-  'by `node tools/assets/fetch-world.mjs` from `tools/assets/world-manifest.json`.',
+  `All source material below is **${manifest.licence}** by **${manifest.author}** (${manifest.homepage}).`,
+  'Fetched and packed reproducibly by `node tools/assets/fetch-world.mjs` from `tools/assets/world-manifest.json`.',
+  'The three terrain files are 512×4096 JPEGs holding eight 512² layers each, uploaded as three.js `DataArrayTexture`s.',
   '',
-  '## Source sets',
+  '| File | Source URL | Author | Licence | Size |',
+  '|---|---|---|---|---|',
+  ...rows.map((r) => `| \`${r[0]}\` | ${r[1]} | ${r[2]} | ${r[3]} | ${r[4]} |`),
   '',
-  `Source: **${SRC.author}** — ${SRC.homepage} — licence: **${SRC.licence}**.`,
-  'Downloaded as `<Name>_1K-JPG.zip`; we keep only Color, NormalGL, Roughness and AmbientOcclusion.',
+  '## Generated at runtime (no external file)',
   '',
-  '| Terrain layer | ambientCG set | used for |',
+  '| Asset | Where | Why not downloaded |',
   '|---|---|---|',
-  ...layers.map((l) => `| ${l.layer} \`${l.id}\` | [${l.asset}](https://ambientcg.com/view?id=${l.asset}) | ${l.note} |`),
-  ...veg.map((l) => `| vegetation \`${l.id}\` | [${l.asset}](https://ambientcg.com/view?id=${l.asset}) | ${l.note} |`),
-  '',
-  '## Packed runtime files',
-  '',
-  '| File | Contents | Size |',
-  '|---|---|---|',
-  `| \`${manifest.outputs.terrainAlbedoArray}\` | ${SIZE}×${SIZE * layers.length} JPEG — 8 albedo layers stacked, uploaded as a \`DataArrayTexture\` | ${sizes.albedo} kB |`,
-  `| \`${manifest.outputs.terrainNormalArray}\` | same layout, OpenGL-convention tangent-space normals | ${sizes.normal} kB |`,
-  `| \`${manifest.outputs.terrainOrmArray}\` | same layout; R = ambient occlusion, G = roughness, B = unused | ${sizes.orm} kB |`,
-  `| \`${manifest.outputs.barkAlbedo}\` | 256² conifer bark albedo | ${sizes.bark} kB |`,
-  `| \`${manifest.outputs.barkNormal}\` | 256² conifer bark normal | ${sizes.barkN} kB |`,
-  '',
-  '## Not downloaded, and why',
-  '',
-  '* **Sky HDRI (Poly Haven).** A baked HDRI cannot follow the game clock: the harness alone needs 06:00',
-  '  dawn, noon, 19:00 dusk and 23:00 night at 47° N. The sky stays the analytic Preetham model',
-  '  (`three/addons/objects/Sky.js`) driven by a real solar-position calculation, and `src/world/sky.ts`',
-  '  renders a PMREM environment map **from that sky** every time the sun moves — so the image-based',
-  '  lighting and the water reflections are the live sky, which a static HDRI could not give us.',
-  '* **Quaternius / Poly Haven tree models.** Trees are built procedurally in `src/world/treeGeometry.ts`',
-  '  (bark-textured trunk + branch whorls + alpha-tested needle sprays with a generated needle texture,',
-  '  3 LODs + a billboard impostor). A downloaded GLB would be one fixed mesh at one LOD with its own',
-  '  material; the procedural generator gives per-species silhouettes, the LOD chain the 1.5 M-triangle',
-  '  budget needs, and species variation from one shared material.',
-  '* **Alpha cut-out foliage/grass atlases.** Generated on a canvas at load time (`src/world/textures.ts`)',
-  '  so the needle/leaf/blade colour follows the season tint instead of being baked.',
+  '| Sky + environment map | `src/world/sky.ts` (Preetham `three/addons/objects/Sky.js` + PMREM) | a baked HDRI cannot follow the 06:00/12:00/19:00/23:00 game clock at 47° N; the IBL and the water reflection are rendered from the live sky instead |',
+  '| Tree meshes + needle/leaf/grass cut-outs | `src/world/treeGeometry.ts`, `src/world/textures.ts` | a downloaded GLB is one mesh at one LOD; the generator gives per-species silhouettes, 3 LODs + impostor, and season-tinted foliage from one shared material |',
+  '| Terrain splat mask, macro-variation noise, water ripple normals | `src/world/textures.ts`, `src/world/terrainMaterial.ts` | derived from the height model / procedural; nothing to download |',
   '',
 ].join('\n');
 await writeFile(path.join(root, 'public/assets/CREDITS-world.md'), credits);
