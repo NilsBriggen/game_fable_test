@@ -478,7 +478,7 @@ export function renderSaveLoad(api: MenuApi, mode: 'save' | 'load'): void {
     clear(listEl);
     const metas = await save!.list();
     for (const slot of buildSaveSlots(metas)) {
-      const disabledForSave = mode === 'save' && slot.readOnlySave;
+      const disabledForSave = mode === 'save' && (slot.readOnlySave || slot.slot === 0);
       const readonly = slot.slot === 0 || slot.slot === 6;
       const box = el('div', { class: `save-slot${slot.empty ? ' empty' : ''}${readonly ? ' readonly' : ''}`, title: readonly ? (slot.slot === 0 ? 'Autosave — written by the game' : 'Quicksave — F5 writes, F9 loads') : `Slot ${slot.slot}` });
       box.appendChild(el('div', { class: 'thumb', style: slot.meta?.thumbnailDataUrl ? `background-image:url(${slot.meta.thumbnailDataUrl})` : undefined }));

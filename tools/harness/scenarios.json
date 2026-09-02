@@ -257,5 +257,15 @@
     "hour": 12,
     "spawnAt": "poi.altdorf",
     "menu": "map"
+  },
+  {
+    "id": "combat-brunnen-quay-turn",
+    "description": "Brunnen quay fight on a player-controlled turn (HUD capture)",
+    "state": "explore",
+    "hour": 15,
+    "spawnAt": "poi.brunnen",
+    "encounter": "enc.brunnen-quay",
+    "combatScript": "auto:1",
+    "waitPlayerTurn": true
   }
 ]

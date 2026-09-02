@@ -8,6 +8,7 @@ import type { GameContext } from '@core/context';
 import type { CombatCommand, CombatStateView, CombatantView, CellKey } from '@core/services';
 import type { EntityId } from '@core/ecs';
 import { el, clear } from './dom';
+import { showConfirm } from './hud';
 import { abilityIcon, ICONS } from './icons';
 import { formatHitChance, worldToCell, buildInitiativeChips } from './helpers';
 
@@ -36,7 +37,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   const objectivesPanel = el('div', { class: 'eid-panel cbt-objectives', style: 'display:none' });
   const logPanel = el('div', { class: 'eid-panel cbt-log', style: 'display:none' });
   const endTurnBtn = el('button', { class: 'eid-btn primary cbt-end-turn', style: 'display:none' }, ['End Turn (Space)']);
-  const fleeBtn = el('button', { class: 'eid-btn cbt-flee', style: 'display:none', onclick: () => { if (window.confirm('Flee the field? The fight is lost and the party scatters.')) submit({ type: 'flee' }); } }, ['Flee']);
+  const fleeBtn = el('button', { class: 'eid-btn cbt-flee', style: 'display:none', onclick: () => { void showConfirm(mount, 'Flee the field? The fight is lost and the party scatters.', 'Flee', 'Stay').then((ok) => { if (ok) submit({ type: 'flee' }); }); } }, ['Flee']);
   const targetCard = el('div', { class: 'eid-panel cbt-target-card', style: 'display:none' });
   const reactionModalHost = el('div', {});
   const resultHost = el('div', {});
@@ -377,6 +378,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
       preview && formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).includes('—') ? el('div', { class: 'src' }, [formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).split(' — ')[1]]) : null,
       hoverPreviewLine ? el('div', { class: 'src' }, [hoverPreviewLine]) : null,
     ]);
+    if (!node.hasChildNodes()) { existing?.remove(); return; }
     if (existing) existing.replaceWith(node); else unitCard.appendChild(node);
   }
 

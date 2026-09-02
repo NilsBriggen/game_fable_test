@@ -232,7 +232,7 @@ interface Scenario {
   spawnAt?: string | { x: number; z: number }; yaw?: number;
   camera?: 'follow' | { pos: number[]; lookAt: number[] };
   flyover?: { pos: number[]; lookAt: number[] }[];
-  encounter?: string; ambush?: 'player' | 'enemy'; combatScript?: string | CombatCommand[];
+  encounter?: string; ambush?: 'player' | 'enemy'; combatScript?: string | CombatCommand[]; waitPlayerTurn?: boolean;
   dialogue?: string; menu?: string; freshGame?: boolean;
 }
 
@@ -296,6 +296,16 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
           ? [{ type: 'auto', rounds: Number(sc.combatScript.split(':')[1] ?? 1) }]
           : sc.combatScript;
         await combat.runScript(script);
+      }
+      if (sc.waitPlayerTurn) {
+        // step the AI until a player-controlled unit is active (so the screenshot shows the player's HUD)
+        for (let i = 0; i < 60; i++) {
+          const st = combat.getState();
+          const active = st?.units.find((u) => u.id === st.activeUnit);
+          if (!st || st.phase === 'ended' || (active && active.isPlayerControlled)) break;
+          combat.stepAi();
+          await nextFrame();
+        }
       }
     }
   }
