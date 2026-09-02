@@ -100,10 +100,21 @@
     },
     "quest": {
       "owner": "builder:quest",
-      "status": "built",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
+      "status": "fix-round",
+      "score": 5,
+      "fixRounds": 1,
+      "openIssues": [
+        "stale lastCombat advances stage mid-combat",
+        "no arrival gates; Act 1 runs as one nested chain",
+        "abbot say-nothing soft-lock",
+        "unhandled rejections when combat absent",
+        "8 compliance violations (son-in-law, plate, Otmar date, \"give no year\", bought-office clause, seals, Gertrud, journal dates)",
+        "choice flags never read (H\u00fcnenberg, Anselm, Tell)",
+        "check cache key per choice",
+        "post-order quest-advanced; setChapter idempotence; root fallback",
+        "stage ids disagree with exploration/poi.ts",
+        "no lose branches on spine fights"
+      ],
       "notes": "47 tests; Act 1 walkthrough test green; awaiting critic"
     },
     "ui": {
@@ -114,11 +125,12 @@
       "openIssues": []
     },
     "act1-content": {
-      "owner": "builder:content",
-      "status": "pending",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": []
+      "owner": "builder:quest",
+      "status": "fix-round",
+      "score": 5,
+      "fixRounds": 1,
+      "openIssues": [],
+      "notes": "scored with quest module (same builder)"
     }
   },
   "coreChanges": [
