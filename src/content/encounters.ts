@@ -102,15 +102,17 @@ export const encounters: EncounterDef[] = [
       { archetype: 'habsburg-footman', side: 'enemy', q: 36, r: 6, group: 'column' },
       { archetype: 'habsburg-crossbowman', side: 'enemy', q: 2, r: 4, group: 'column' },
       { archetype: 'habsburg-crossbowman', side: 'enemy', q: 37, r: 4, group: 'column' },
-      // Confederate slope line: halberd/spear militia above the road, ready to descend as a Haufen.
-      { archetype: 'militia-halberd', side: 'player', q: 6, r: 9, group: 'haufen' },
-      { archetype: 'militia-halberd', side: 'player', q: 12, r: 9, group: 'haufen' },
-      { archetype: 'militia-halberd', side: 'player', q: 18, r: 9, group: 'haufen' },
-      { archetype: 'militia-halberd', side: 'player', q: 24, r: 9, group: 'haufen' },
-      { archetype: 'militia-halberd', side: 'player', q: 30, r: 9, group: 'haufen' },
-      { archetype: 'militia-spear', side: 'player', q: 9, r: 10, group: 'haufen' },
-      { archetype: 'militia-spear', side: 'player', q: 21, r: 10, group: 'haufen' },
-      { archetype: 'militia-spear', side: 'player', q: 33, r: 10, group: 'haufen' },
+      // Confederate slope line: halberd militia stand directly on the boulder/trunk caches, each lined up
+      // on a Habsburg footman's column below (r=6) so the rockfall has a target from the opening round;
+      // spear militia hold the line just below them, ready to close the Haufen once the boulders have fallen.
+      { archetype: 'militia-halberd', side: 'player', q: 6, r: 8, group: 'haufen' },
+      { archetype: 'militia-halberd', side: 'player', q: 12, r: 8, group: 'haufen' },
+      { archetype: 'militia-halberd', side: 'player', q: 18, r: 8, group: 'haufen' },
+      { archetype: 'militia-halberd', side: 'player', q: 24, r: 8, group: 'haufen' },
+      { archetype: 'militia-halberd', side: 'player', q: 30, r: 8, group: 'haufen' },
+      { archetype: 'militia-spear', side: 'player', q: 9, r: 9, group: 'haufen' },
+      { archetype: 'militia-spear', side: 'player', q: 21, r: 9, group: 'haufen' },
+      { archetype: 'militia-spear', side: 'player', q: 33, r: 9, group: 'haufen' },
     ],
     objectives: [
       { type: 'survive', turns: 3 },
@@ -119,11 +121,11 @@ export const encounters: EncounterDef[] = [
     ],
     loseObjectives: [{ type: 'protect', npc: 'player' }],
     terrainFeatures: [
-      { kind: 'boulder-cache', cells: [[8, 8]], affects: [[8, 7], [8, 6], [8, 5]] },
-      { kind: 'boulder-cache', cells: [[20, 8]], affects: [[20, 7], [20, 6], [20, 5]] },
-      { kind: 'boulder-cache', cells: [[32, 8]], affects: [[32, 7], [32, 6], [32, 5]] },
-      { kind: 'trunk-cache', cells: [[14, 8]], affects: [[14, 7], [14, 6], [14, 5]] },
-      { kind: 'trunk-cache', cells: [[26, 8]], affects: [[26, 7], [26, 6], [26, 5]] },
+      { kind: 'boulder-cache', cells: [[6, 8]], affects: [[6, 7], [6, 6], [6, 5]] },
+      { kind: 'boulder-cache', cells: [[18, 8]], affects: [[18, 7], [18, 6], [18, 5]] },
+      { kind: 'boulder-cache', cells: [[30, 8]], affects: [[30, 7], [30, 6], [30, 5]] },
+      { kind: 'trunk-cache', cells: [[12, 8]], affects: [[12, 7], [12, 6], [12, 5]] },
+      { kind: 'trunk-cache', cells: [[24, 8]], affects: [[24, 7], [24, 6], [24, 5]] },
     ],
     scripted: [
       { round: 4, actions: [{ moraleAll: { side: 'enemy', delta: -15 } }, { caption: 'The column bunches between the lake and the slope.' }] },

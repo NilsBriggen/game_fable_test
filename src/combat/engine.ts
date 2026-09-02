@@ -80,6 +80,9 @@ export class CombatEngineImpl implements CombatService {
   private deployZone: DeployZone = { q: 0, r: 0, cols: 1, rows: 1 };
   private resultResolve: ((r: CombatResult) => void) | null = null;
   private forceAiAll = false;
+  /** set during a `{type:'auto', rounds:N}` command: advance() stops cleanly once this many rounds have
+   *  played, instead of running to completion (win/lose) — see BUILDER_RULES.md's `auto` semantics. */
+  private autoStopRound: number | null = null;
   private reactionQueue: PendingReactionItem[] = [];
   private scriptedRoundFired = new Set<number>();
   private ended = false;
@@ -110,8 +113,12 @@ export class CombatEngineImpl implements CombatService {
     this.emitState();
     // Autosave contract: isActive() and serialize() must be valid before this fires.
     this.host.events?.emit('request-state', 'combat');
-    this.advance();
-    return new Promise<CombatResult>((resolve) => { this.resultResolve = resolve; });
+    return new Promise<CombatResult>((resolve) => {
+      this.resultResolve = resolve;
+      // advance() can resolve the whole encounter synchronously (e.g. an instant rout) — resultResolve must
+      // already be captured before that happens, or the returned promise would never settle.
+      this.advance();
+    });
   }
 
   private resetState(): void {
@@ -134,7 +141,11 @@ export class CombatEngineImpl implements CombatService {
     const useRealParty = realParty.length > 0;
     let ordinal = 0;
     for (const pu of enc.units) {
-      if (pu.side === 'player' && useRealParty) continue; // real party supersedes the standalone fallback squad
+      // A real party supersedes the standalone fallback squad (ungrouped side:'player' units, used only so
+      // an encounter is playable stand-alone with no exploration/party — BUILDER_RULES.md). Grouped player-
+      // side units (e.g. Morgarten's 8 allied militia, group:'haufen') are persistent NPC allies and are
+      // always placed alongside whatever real party exists, not replaced by it.
+      if (pu.side === 'player' && useRealParty && !pu.group) continue;
       const def = pu.npc ? this.host.content.npcs.get(pu.npc) : pu.archetype ? this.host.content.archetypes.get(pu.archetype) : undefined;
       if (!def) { console.warn(`[combat] placeUnits: no archetype/npc for placed unit`, pu); continue; }
       const count = pu.count ?? 1;
@@ -187,7 +198,10 @@ export class CombatEngineImpl implements CombatService {
       if (!d?.weapon) return null;
       return { defId: d.id, name: d.name, hands: d.weapon.hands, reach: d.weapon.reach, damage: d.weapon.damage, damageType: d.weapon.damageType, properties: d.weapon.properties, range: d.weapon.range, ammo: d.weapon.ammo };
     };
-    const isRealParty = this.host.party.getParty().includes(id);
+    // Every side:'player' unit waits for an explicit command (submit(), or a harness {type:'auto'} script) —
+    // real party members controlled by a human UI, and the encounter's own standalone fallback squad (no
+    // party exists yet) controlled by the harness/AI script per BUILDER_RULES.md. Only side:'enemy' units
+    // act automatically on their own initiative turn.
     const unit: Unit = {
       id, name, side, archetype: ch.archetype, q, r,
       hp: ch.hp, hpMax: ch.hpMax, morale: ch.morale, moraleMax: ch.moraleMax,
@@ -199,7 +213,7 @@ export class CombatEngineImpl implements CombatService {
       ap: { action: true, bonus: true, reaction: true, moveM: derived.speedM, moveMax: derived.speedM },
       status: [], stance: 'neutral', loaded: false, mounted: !!opts.mounted,
       down: ch.hp <= 0, dead: false, bleedTurns: 3, routed: false, initiative: 0,
-      isPlayerControlled: isRealParty, doctrine: doctrineFor(ch.archetype, side),
+      isPlayerControlled: side === 'player', doctrine: doctrineFor(ch.archetype, side),
       chargeCells: 0, perkMods: derived.perkMods, critRange: 20 - (derived.perkMods['critRange'] ?? 0),
       modelId: this.host.world.get(id, Renderable)?.modelId, group: opts.group, npcId: opts.npcId,
       formation: { adjacentPolearms: 0, inHaufen: false, defenseBonus: 0 },
@@ -220,7 +234,10 @@ export class CombatEngineImpl implements CombatService {
     rolled.sort((a, b) => b.roll - a.roll || (modifier(b.u.attributes.agility) - modifier(a.u.attributes.agility)) || (b.tie - a.tie));
     this.order = rolled.map((r) => r.u.id);
     for (const r of rolled) r.u.initiative = r.roll;
-    this.turnIndex = 0;
+    // Force nextUnit()'s very first call to see "past the end of the order" so it calls startRound() and
+    // properly begins round 1 (with round-1 scripted events, bleed ticks, etc.) before anyone's first turn,
+    // instead of only discovering the round boundary after the whole initiative order has already acted once.
+    this.turnIndex = this.order.length;
     this.activeUnitId = null;
   }
 
@@ -233,6 +250,7 @@ export class CombatEngineImpl implements CombatService {
       if (this.checkEndConditions()) { this.finish(); return; }
       if (this.reactionQueue.length) { this.phase = 'reaction'; this.emitState(); return; }
       if (this.activeUnitId === null) {
+        if (this.autoStopRound !== null && this.round >= this.autoStopRound) { this.emitState(); return; }
         if (!this.nextUnit()) { this.finish(); return; }
         continue;
       }
@@ -320,7 +338,12 @@ export class CombatEngineImpl implements CombatService {
     const enemyAlive = living('enemy');
     if (playerAlive.length === 0) { this.outcome = 'lose'; return true; }
     for (const lo of this.loseObjectives) {
-      if (this.objectiveMet(lo.def)) { this.outcome = 'lose'; return true; }
+      // 'protect' reads as "the target is still safe" when met — as a lose condition that means "not lost
+      // yet", so it triggers a loss on failure, the opposite of every other objective type (which trigger a
+      // loss when they themselves become true, e.g. an enemy reaching a cell it shouldn't).
+      const met = this.objectiveMet(lo.def);
+      const triggersLoss = lo.def.type === 'protect' ? !met : met;
+      if (triggersLoss) { this.outcome = 'lose'; return true; }
     }
     if (enemyAlive.length === 0) { this.outcome = 'win'; return true; }
     if (enemyAlive.every((u) => u.routed)) { this.outcome = 'win'; return true; }
@@ -554,7 +577,7 @@ export class CombatEngineImpl implements CombatService {
 
   private abilitiesFor(u: Unit): string[] {
     const out: string[] = [];
-    if (u.weapon || u.ranged) out.push('ability.attack');
+    out.push('ability.attack'); // always available — an unarmed strike is the fallback (see attackInputsFor)
     if (u.ranged && u.loaded) out.push('ability.aimed-shot');
     if (u.ranged && !u.loaded) out.push('ability.reload');
     out.push('ability.shove', 'ability.disengage', 'ability.dash');
@@ -712,7 +735,7 @@ export class CombatEngineImpl implements CombatService {
         case 'ability': return this.cmdAbility(cmd.unit, cmd.ability, cmd.target);
         case 'stance': return this.cmdStance(cmd.unit, cmd.stance);
         case 'end-turn': return this.cmdEndTurn(cmd.unit);
-        case 'reaction': return this.cmdReaction(cmd.accept);
+        case 'reaction': return this.cmdReaction(cmd.unit, cmd.accept);
         case 'deploy': return this.cmdDeploy(cmd.placements);
         case 'flee': return this.cmdFlee();
         case 'auto': return this.cmdAuto(cmd.rounds);
@@ -768,7 +791,36 @@ export class CombatEngineImpl implements CombatService {
     if (startH - endH >= 3) this.applyFall(u, startH - endH);
     this.recomputeFormation();
     for (const p of provokers) this.queueReaction(p, u, 'leave-reach', 'opportunity-attack');
+    for (const d of this.computeBraceTriggers(u, path)) this.queueBrace(d, u);
     return events;
+  }
+
+  /** Braced (or in-Haufen) polearm defenders whose reach the mover just entered by moving ≥ 2 cells in a
+   *  straight line, or by being mounted (ARCHITECTURE.md §5.3 Reactions / §5.5 Haufen). A charge into any
+   *  front unit of a Haufen pulls the Brace reaction from every adjacent facing polearm unit in it. */
+  private computeBraceTriggers(mover: Unit, path: CellKey[]): Unit[] {
+    if (path.length < 2) return [];
+    if (!(mover.chargeCells >= 2 || mover.mounted)) return [];
+    const startCell = path[0];
+    const candidates = [...this.units.values()].filter((d) => d.side !== mover.side && !d.dead && !d.down && isPolearm(d.weapon) && (d.stance === 'braced' || d.formation.inHaufen) && d.ap.reaction);
+    const primaries = candidates.filter((d) => {
+      const reach = d.weapon?.reach ?? 1;
+      const wasAdjacent = cellDistance(d.q, d.r, startCell.q, startCell.r) <= reach;
+      const nowAdjacent = cellDistance(d.q, d.r, mover.q, mover.r) <= reach;
+      return !wasAdjacent && nowAdjacent;
+    });
+    const extras = new Set<Unit>();
+    for (const d of primaries) {
+      if (!d.formation.inHaufen) continue;
+      for (const o of candidates) {
+        if (o.id === d.id || o.formation.haufenId !== d.formation.haufenId) continue;
+        const reach = o.weapon?.reach ?? 1;
+        if (cellDistance(o.q, o.r, mover.q, mover.r) <= reach) extras.add(o);
+      }
+    }
+    const all = new Map<EntityId, Unit>();
+    for (const d of [...primaries, ...extras]) all.set(d.id, d);
+    return [...all.values()];
   }
 
   private applyFall(u: Unit, meters: number): void {
@@ -812,21 +864,24 @@ export class CombatEngineImpl implements CombatService {
 
   private cmdAuto(rounds: number): CommandResult {
     this.forceAiAll = true;
-    const targetRound = this.round + Math.max(1, rounds);
+    this.autoStopRound = this.round + Math.max(1, rounds);
     let guard = 0;
-    while (this.round < targetRound && !this.ended && guard++ < 20000) {
-      this.activeUnitId = this.activeUnitId ?? null;
-      this.advance();
-      if (this.reactionQueue.length) this.cmdReaction(true); // AI-driven auto-play always resolves reactions
-    }
+    this.advance();
+    // forceAiAll auto-resolves reactions inline (see queueReaction/queueBrace), but drain defensively in case
+    // a reaction was queued right as autoStopRound was hit (phase left as 'reaction').
+    while (this.reactionQueue.length && guard++ < 1000) this.cmdReaction(this.reactionQueue[0].unitId, true);
     this.forceAiAll = false;
+    this.autoStopRound = null;
+    if (this.phase === 'reaction') this.phase = 'active';
     this.emitState();
     return { ok: true };
   }
 
-  private cmdReaction(accept: boolean): CommandResult {
-    const item = this.reactionQueue.shift();
+  private cmdReaction(unitId: EntityId, accept: boolean): CommandResult {
+    const item = this.reactionQueue[0];
     if (!item) return { ok: false, reason: 'no pending reaction' };
+    if (item.unitId !== unitId) return { ok: false, reason: 'not this unit\'s pending reaction' };
+    this.reactionQueue.shift();
     item.resolve(accept);
     if (this.reactionQueue.length === 0) this.phase = 'active';
     this.advance();
@@ -843,6 +898,35 @@ export class CombatEngineImpl implements CombatService {
     const autoResolve = this.forceAiAll || !reactingUnit.isPlayerControlled;
     if (autoResolve) { resolve(true); return; }
     this.reactionQueue.push({ unitId: reactingUnit.id, ability, trigger, targetId: source.id, resolve });
+  }
+
+  private queueBrace(defender: Unit, mover: Unit): void {
+    if (!defender.ap.reaction) return;
+    const resolve = (accept: boolean) => {
+      defender.ap.reaction = false;
+      if (!accept) return;
+      this.resolveBrace(defender, mover);
+    };
+    const autoResolve = this.forceAiAll || !defender.isPlayerControlled;
+    if (autoResolve) { resolve(true); return; }
+    this.reactionQueue.push({ unitId: defender.id, ability: 'ability.brace', trigger: 'enter-reach', targetId: mover.id, resolve });
+  }
+
+  /** Brace reaction: free attack with Edge; double weapon dice against a mounted target. */
+  private resolveBrace(defender: Unit, mover: Unit): void {
+    const weapon = defender.weapon;
+    if (!weapon) return;
+    const skillId = this.host.content.items.get(weapon.defId)?.weapon?.skill ?? '';
+    const attackBonus = defender.attackBonus[skillId] ?? 0;
+    const defense = this.effectiveDefense(mover, this.cellAt(mover.q, mover.r)?.cover ?? 0);
+    const inputs: AttackInputs = {
+      attackBonus, targetDefense: defense, edge: ['brace'], burden: [], weaponDice: weapon.damage, damageType: weapon.damageType,
+      damageBonus: modifier(defender.attributes.strength), soak: mover.soak, ignoreSoak: defender.perkMods['ignoreSoak'], critRange: defender.critRange,
+    };
+    const roll = rollAttack(inputs, this.host.rng);
+    if (roll.hit && mover.mounted) roll.damage += Math.max(0, rollDice(weapon.damage, this.host.rng) - roll.soak);
+    this.pushLog('reaction', `${defender.name} braces against the charge!`, defender.id, { target: mover.id, roll });
+    if (roll.hit) this.applyDamage(mover, roll.damage, weapon.damageType, roll.soak);
   }
 
   private resolveOpportunityAttack(attacker: Unit, target: Unit, abilityId: string): void {
@@ -1003,8 +1087,8 @@ export class CombatEngineImpl implements CombatService {
       damageBonus: modifier(weapon.properties.includes('finesse') ? attacker.attributes.agility : attacker.attributes.strength),
       soak, ignoreSoak: attacker.perkMods['ignoreSoak'], critRange: attacker.critRange,
     };
-    if (opts.charge) inputs.weaponDice = `${inputs.weaponDice}+1d8`;
     const roll = rollAttack(inputs, this.host.rng);
+    if (opts.charge && roll.hit) roll.damage += rollDice('1d8', this.host.rng); // "+1d8 damage" (ARCHITECTURE §5.3 Charge)
     this.pushLog('attack', `${attacker.name} attacks ${target.name}: ${roll.hit ? (roll.critical ? 'critical hit' : 'hit') : 'miss'}.`, attacker.id, { target: target.id, roll });
     if (roll.hit) {
       this.applyDamage(target, roll.damage, weapon.damageType, roll.soak);

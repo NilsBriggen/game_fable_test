@@ -44,8 +44,7 @@ function furthestFrom(engine: CombatEngineImpl, u: Unit, enemies: Unit[]): CellK
 
 function tryAttack(engine: CombatEngineImpl, u: Unit, target: Unit): boolean {
   const weapon = u.weapon ?? u.ranged;
-  if (!weapon) return false;
-  const reach = weapon.range?.long ?? weapon.reach;
+  const reach = weapon ? (weapon.range?.long ?? weapon.reach) : 1; // unarmed fallback (see attackInputsFor)
   if (dist(u, target) > reach) return false;
   if (u.ranged && !u.weapon && !u.loaded) return engine.aiAbility(u, 'ability.reload');
   return engine.aiAbility(u, 'ability.attack', target.id);
