@@ -45,10 +45,11 @@
     },
     "world": {
       "owner": "builder:world",
-      "status": "in-progress",
+      "status": "critic-round-1",
       "score": null,
       "fixRounds": 0,
-      "openIssues": []
+      "openIssues": [],
+      "notes": "builder stopped by integrator after 4h without report (ignored converge request); tree green (3559 lines, 24 tests); critic running on tree state; fresh builder will take fix rounds"
     },
     "save": {
       "owner": "builder:save",
@@ -133,7 +134,13 @@
       "status": "applied"
     }
   ],
-  "escalations": [],
+  "escalations": [
+    {
+      "module": "world",
+      "what": "original builder ran 4h, never reported, ignored converge request; stopped. Fix rounds go to a fresh builder from the critic sheet.",
+      "at": "2026-09-02T16:20Z"
+    }
+  ],
   "harness": {
     "lastRun": null,
     "passed": null,
