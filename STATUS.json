@@ -116,12 +116,14 @@
       "notes": "66 tests; critic 5\u21927\u21928; polish applied"
     },
     "ui": {
-      "owner": "builder:ui",
-      "status": "built",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
-      "notes": "16 helper tests; no screenshots yet (harness queue); integrator capturing 6 UI scenarios for the critic"
+      "owner": "integrator (fixes)",
+      "status": "critic-round-2",
+      "score": 6,
+      "fixRounds": 1,
+      "openIssues": [
+        "active-combat HUD not yet captured on a stable tree"
+      ],
+      "notes": "critic 6/10 round 1; integrator fixed issues 1-18 except creation preview from party.derived"
     },
     "act1-content": {
       "owner": "builder:quest",
