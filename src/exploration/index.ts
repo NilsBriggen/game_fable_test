@@ -15,6 +15,7 @@ import { EventBus } from '@core/events';
 import { CameraRigImpl } from './camera';
 import { PlayerController } from './player';
 import { buildPlayerModel, animateWalkCycle } from './playerModel';
+import { registerExplorationHumanoids } from './humanoid';
 import { NpcSystem } from './npc';
 import { PoiSystem } from './poi';
 import { InteractSystem, spawnContainers } from './interact';
@@ -43,6 +44,7 @@ class ExplorationServiceImpl implements ExplorationService {
     roots.props.add(this.settlementsGroup);
 
     if (!world.hasModel('char.player')) world.registerModel('char.player', () => buildPlayerModel());
+    registerExplorationHumanoids(world);
 
     this.cameraRig = new CameraRigImpl(ctx.gfx.camera, world, () => {
       const id = this.getPlayer();

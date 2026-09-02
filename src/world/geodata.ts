@@ -312,8 +312,18 @@ export function limitGrade(pts: SplinePoint[], maxTan: number): number[] {
  * shores must never be vertical-walled trenches). `steep` gives the real Axen cliff (Urnersee east
  * shore) a faster rise while staying continuous — never a step. */
 export function shoreProfile(dist: number, levelH: number, D: number, steep: boolean): number {
-  const params: SegParams = { shape: 'wideU', halfWidth: 25, influence: D, riseRate: steep ? 250 : 120, corridorWidthM: 0 };
-  return valleyProfile(dist, levelH, params);
+  // NOT valleyProfile's generic 'wideU' power-law curve here: that shape is `pow(d/520, 0.55)`, which
+  // has an INFINITE initial slope right at its halfWidth boundary (any power < 1 does) — fine for a
+  // corridor sampled every few metres of centreline, but for a shore band with a small halfWidth
+  // (25m) it produced a visible kink: dead flat right up to the boundary, then a real jump in the very
+  // next 10m sample. A smoothstep-shaped rise has zero derivative at *both* ends (the shoreline-flat
+  // start and the point it hands off to the existing mountainside), so the transition has no kink.
+  const halfWidth = 25;
+  if (dist <= halfWidth) return levelH;
+  const riseRate = steep ? 250 : 120;
+  const t = clamp((dist - halfWidth) / Math.max(1, D - halfWidth), 0, 1);
+  const shaped = t * t * (3 - 2 * t);
+  return levelH + riseRate * shaped;
 }
 
 export function lakeShelf(x: number, z: number, lake: LakePoly): number | null {

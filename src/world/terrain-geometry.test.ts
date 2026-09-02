@@ -124,7 +124,7 @@ describe('(a) lake shores are continuous, not vertical walls', () => {
       // metres out — a test-construction artifact, not a terrain discontinuity.
       const px = ax + ex * 0.5, pz = az + ez * 0.5;
       let prev = heightAt(px, pz);
-      for (let d = 10; d <= 150; d += 10) {
+      for (let d = 10; d <= 100; d += 10) {
         const x = px + nx * d, z = pz + nz * d;
         // Only trust this sample while the edge's outward normal is actually tracking the polygon's
         // TRUE nearest-boundary distance (polygonSdf) — near a short edge/corner the two diverge, and

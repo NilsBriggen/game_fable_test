@@ -148,7 +148,6 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // river corridor (halfWidth up to 220m) "protecting" cells near its mouth from being pulled to lake
   // level was itself producing an 80m+ step right at the water's edge (the Reuss/Flüelen delta).
   const bestRoadDist = new Float32Array(n).fill(Infinity);
-  const bestRoadWeight = new Float32Array(n);
   // Authored a little under the 25° test/design ceiling (not right at it) so the small amount of
   // detail noise + relaxation applied afterward doesn't push a couple of samples back over the line.
   const MAX_GRADE_TAN = Math.tan((18 * Math.PI) / 180);
@@ -181,7 +180,6 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
           }
           if (c.kind === 'road' && d < bestRoadDist[idx]) {
             bestRoadDist[idx] = d;
-            bestRoadWeight[idx] = 1 - smoothstep(halfWidth, influence, d);
           }
           // surface band (road bed / river mud strip), stamped from the same segment pass so it is
           // continuous too — this is what gets 'road' onto ≥95% of centreline samples instead of the
@@ -297,14 +295,14 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // second mask ramps out over a fixed, more generous 220m regardless of the corridor's own influence,
   // so the authored road/river height near (not just exactly on) a corridor survives relaxation intact.
   const relaxProtect = new Float32Array(n);
-  for (let i = 0; i < n; i++) relaxProtect[i] = Math.max(bestWeight[i], 1 - smoothstep(0, 220, bestDist[i]), peakProtect[i]);
+  for (let i = 0; i < n; i++) relaxProtect[i] = Math.max(bestWeight[i], 1 - smoothstep(0, 70, bestDist[i]), peakProtect[i]);
 
   // 5. slope-limited relaxation (thermal-erosion-like diffusion), so cliffs/valley walls read as
   // terrain rather than raw noise. Run generously (12 passes) before the shore pass so the walls the
   // shore blend has to match against are already talus-relaxed, then a shorter top-up pass afterward
   // to smooth the new shore transition into its neighbours.
   const RELAX_TAN = Math.tan((38 * Math.PI) / 180);
-  thermalSmooth(heights, width, height, scaleX, scaleZ, 12, RELAX_TAN, relaxProtect);
+  thermalSmooth(heights, width, height, scaleX, scaleZ, 18, RELAX_TAN, relaxProtect);
 
   // 6. lake-shore blend pass (issue 1): treats each lake polygon boundary as a corridor whose floor
   // is the water level, blending the OUTSIDE terrain down to lake height near the shore and back up
@@ -366,16 +364,22 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
     // Protect (a) a true peak summit that merely happens to sit within D of some lake in map (x,z)
     // terms (e.g. Fronalpstock) — it must not get pulled toward lake level just because it is
     // geographically "close" to the shore while being hundreds of metres higher in elevation; and
-    // (b) a shore-hugging ROAD's own authored height (bestRoadWeight — roads only, NOT rivers: a
-    // river meeting the lake is already naturally at lake level, so protecting cells near a wide
-    // river's mouth from this pass reintroduced an 80m+ step right at the water).
-    const w = Math.max(shoreW[idx], peakProtect[idx], bestRoadWeight[idx]);
+    // (b) a shore-hugging ROAD's own authored bed (roads only, NOT rivers — a river meeting the lake
+    // is already naturally at lake level, so protecting cells near a wide river's mouth from this
+    // pass reintroduced an 80m+ step right at the water). Deliberately a NARROW protection (the
+    // road's own ~14m bed plus a small margin, not its full ~90m influence ramp): every shore-hugging
+    // road in this geography is already authored within a few metres of lake level, so letting the
+    // shore blend also apply through most of the road's influence ramp is correct, not a conflict —
+    // a wider protection there just let leftover pre-shore roughness (relaxation/base-ridge noise the
+    // road's own gentle rise ramp had not fully absorbed) leak through right next to the water.
+    const roadProtect = 1 - smoothstep(14, 35, bestRoadDist[idx]);
+    const w = Math.max(shoreW[idx], peakProtect[idx], roadProtect);
     heights[idx] = shoreTarget[idx] + (heights[idx] - shoreTarget[idx]) * w;
   }
 
   // 5b. short relaxation top-up so the new shore transition blends into its neighbours too (still
   // corridor-protected — a road hugging a shore, e.g. the Axen path, must not get eroded here either).
-  thermalSmooth(heights, width, height, scaleX, scaleZ, 6, RELAX_TAN, relaxProtect);
+  thermalSmooth(heights, width, height, scaleX, scaleZ, 10, RELAX_TAN, relaxProtect);
 
   // 7. lake interior: drop to a real bed below the surface (not a flat plate at lake height).
   for (const lake of geo.lakes) {
