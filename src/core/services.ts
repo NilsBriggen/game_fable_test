@@ -291,6 +291,7 @@ export interface PartyService {
   skillMod(id: EntityId, skill: SkillId): number;
   attrMod(id: EntityId, attr: keyof Attributes): number;
   grantSkillXp(id: EntityId, skill: SkillId, amount: number): { leveled: boolean; newLevel?: number };
+  spendAttributePoint(id: EntityId, attr: keyof Attributes): boolean;
   hasPerk(id: EntityId, perk: string): boolean;
   takePerk(id: EntityId, perk: string): boolean;
   availablePerks(id: EntityId): string[];

@@ -52,18 +52,29 @@
     },
     "save": {
       "owner": "builder:save",
-      "status": "built",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
+      "status": "fix-round",
+      "score": 7,
+      "fixRounds": 1,
+      "openIssues": [
+        "quicksave clobbers manual slot 1",
+        "new-game autosave not state-gated",
+        "missing chapter/encounter/fast-travel autosave triggers",
+        "thumbnail blank without render-before-grab",
+        "load() success path untested",
+        "combat serialize() null yields misleading save",
+        "failed load before world touched dumps to title",
+        "importJson uses live calendar; no shape validation",
+        "no in-flight guard save/load"
+      ],
       "notes": "8 unit tests; 5000-entity save = 212 KB gzip; awaiting critic"
     },
     "party": {
       "owner": "builder:party",
-      "status": "in-progress",
+      "status": "built",
       "score": null,
       "fixRounds": 0,
-      "openIssues": []
+      "openIssues": [],
+      "notes": "25 unit tests; 49 items, 52 perks, 19 skills, 23 archetypes; awaiting critic"
     },
     "exploration": {
       "owner": "builder:exploration",
@@ -101,7 +112,18 @@
       "openIssues": []
     }
   },
-  "coreChanges": [],
+  "coreChanges": [
+    {
+      "from": "critic:save",
+      "change": "ExplorationEvents['fast-travel'], SaveMeta.createdAt, QUICKSAVE_SLOT=6, SaveFile.weather/season, load convention in \u00a75.7",
+      "status": "applied"
+    },
+    {
+      "from": "builder:party (requests/party-1.md)",
+      "change": "Character.unspentAttributePoints + PartyService.spendAttributePoint",
+      "status": "applied"
+    }
+  ],
   "escalations": [],
   "harness": {
     "lastRun": null,

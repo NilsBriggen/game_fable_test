@@ -24,10 +24,12 @@ export interface CharacterC {
   level: number;
   /** derived on load: unconscious/bleeding */
   down: boolean;
+  /** +1 every 3 character levels; spent via PartyService.spendAttributePoint */
+  unspentAttributePoints: number;
 }
 export const Character = defineComponent<CharacterC>('Character', () => ({
   attributes: { strength: 10, agility: 10, endurance: 10, wits: 10, presence: 10 },
-  hp: 20, hpMax: 20, morale: 60, moraleMax: 60, fatigue: 0, archetype: 'peasant', level: 1, down: false,
+  hp: 20, hpMax: 20, morale: 60, moraleMax: 60, fatigue: 0, archetype: 'peasant', level: 1, down: false, unspentAttributePoints: 0,
 }));
 
 export interface SkillsC { levels: Record<SkillId, { level: number; xp: number }> }
