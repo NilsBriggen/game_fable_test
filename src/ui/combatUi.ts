@@ -58,7 +58,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -(((clientY - rect.top) / rect.height) * 2 - 1));
     raycaster.setFromCamera(ndc, ctx.gfx.camera);
     // pass 1: rough plane at the grid origin's height
-    const originY = ctx.services.tryGet('combat')?.cellToWorld({ q: (view.grid.cols - 1) / 2, r: (view.grid.rows - 1) / 2 }).y ?? 0;
+    const originY = ctx.services.tryGet('combat')?.cellToWorld({ q: Math.round((view.grid.cols - 1) / 2), r: Math.round((view.grid.rows - 1) / 2) }).y ?? 0;
     const p1 = new Vector3();
     if (!raycaster.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), -originY), p1)) return null;
     let cell = worldToCell(p1.x, p1.z, view.grid);
