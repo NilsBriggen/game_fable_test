@@ -108,10 +108,11 @@
     },
     "ui": {
       "owner": "builder:ui",
-      "status": "in-progress",
+      "status": "built",
       "score": null,
       "fixRounds": 0,
-      "openIssues": []
+      "openIssues": [],
+      "notes": "16 helper tests; no screenshots yet (harness queue); integrator capturing 6 UI scenarios for the critic"
     },
     "act1-content": {
       "owner": "builder:quest",
