@@ -248,6 +248,16 @@ class ExplorationServiceImpl implements ExplorationService {
       const t = this.ctx.world.get(playerId, Transform)!;
       this.playerMesh.position.set(t.x, t.y, t.z);
       this.playerMesh.rotation.y = t.yaw;
+      // settlement LOD: every village inside the 3 km streaming ring used to render at full detail (3.2 M
+      // tris in one Altdorf frame); beyond 1.2 km a village is a few pixels — hide it, and only nearby
+      // ones cast shadows (each cascade re-renders its casters)
+      for (const m of this.settlementsGroup.children) {
+        const c = (m.userData as { settlement?: { x: number; z: number } }).settlement;
+        if (!c) continue;
+        const d2 = (c.x - t.x) * (c.x - t.x) + (c.z - t.z) * (c.z - t.z);
+        m.visible = d2 < 1200 * 1200;
+        m.castShadow = d2 < 400 * 400;
+      }
       animateWalkCycle(this.playerMesh, speed, dt);
     }
     this.cameraRig.update(dt);

@@ -76,7 +76,7 @@ function collectBaked(obj: Object3D, x: number, y: number, z: number, yaw: numbe
 
 /** Merges each material's accumulated geometry into one static mesh and adds it to `propsRoot` — the
  *  actual draw-call reduction: N buildings sharing a material become 1 draw call, not N×(meshes/building). */
-function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, clusterName = 'settlements'): void {
+function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, clusterName = 'settlements', cx = 0, cz = 0): void {
   for (const [mat, geos] of byMat) {
     if (geos.length === 0) continue;
     let merged: BufferGeometry | null = null;
@@ -89,6 +89,7 @@ function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, cl
     const mesh = new Mesh(merged, mat);
     mesh.name = clusterName;
     mesh.castShadow = true;
+    mesh.userData.settlement = { x: cx, z: cz }; // distance culling in ExplorationImpl.update
     mesh.receiveShadow = true;
     merged.computeBoundingSphere();
     propsRoot.add(mesh);
@@ -111,7 +112,7 @@ export function buildSettlements(content: ContentRegistry, world: WorldService, 
       const y = world.heightAt(m.x, m.z) + (m.dy ?? 0);
       collectBaked(obj, m.x, y, m.z, m.yaw ?? 0, m.scale ?? 1, byMat);
     }
-    emitMerged(byMat, propsRoot, poi.id);
+    emitMerged(byMat, propsRoot, poi.id, poi.x, poi.z);
     colliders.push(...buildColliders(layout));
   }
 

@@ -2,10 +2,10 @@
  * Bootstrap. Owns the game-state machine transitions, the frame loop and the harness API.
  * ARCHITECTURE.md §6–7. Integrator-owned.
  */
-import { Frustum, Matrix4, Mesh, Object3D, Raycaster, Vector3 } from 'three';
+import { Bone, Box3, Frustum, Matrix4, Mesh, Object3D, Raycaster, SkinnedMesh, Vector3 } from 'three';
 import { GameContext } from '@core/context';
 import type { GameState } from '@core/state';
-import { Name, Transform } from '@core/components';
+import { MeshRef, Name, Transform } from '@core/components';
 import { loadContent } from './content';
 import * as worldMod from './world';
 import * as saveMod from './save';
@@ -446,7 +446,7 @@ function stats() {
 }
 
 /** Rendered ground under the player vs the height function: a mismatch here is why figures sink or float. */
-function groundProbe(): { x: number; z: number; heightAt: number; meshY: number | null; delta: number | null } | null {
+function groundProbe(): Record<string, number | null> | null {
   const ex = ctx.services.tryGet('exploration');
   const world = ctx.services.tryGet('world');
   const pid = ex?.getPlayer() ?? null;
@@ -458,7 +458,37 @@ function groundProbe(): { x: number; z: number; heightAt: number; meshY: number 
   const hits = ray.intersectObject(terrain, true).filter((h) => h.object.name !== 'terrain-far');
   const meshY = hits.length ? hits[0].point.y : null;
   const h = world.heightAt(t.x, t.z);
-  return { x: Math.round(t.x), z: Math.round(t.z), heightAt: Math.round(h * 100) / 100, meshY: meshY === null ? null : Math.round(meshY * 100) / 100, delta: meshY === null ? null : Math.round((meshY - h) * 100) / 100 };
+  // the player figure itself: its object's world y and the lowest rendered vertex (skinned = bone-space approx)
+  const ref = ctx.world.get(pid, MeshRef)?.object as Object3D | undefined;
+  let figureY: number | null = null, figureMinY: number | null = null;
+  let hipsY: number | null = null, skinnedMinY: number | null = null;
+  if (ref) {
+    ref.updateMatrixWorld(true);
+    figureY = ref.getWorldPosition(new Vector3()).y;
+    const box = new Box3().setFromObject(ref); figureMinY = box.min.y;
+    // the posed figure: lowest skinned vertex (sampled) and the hips bone, in world space
+    const tmp = new Vector3(), acc = new Vector3(), bm = new Matrix4();
+    ref.traverse((o) => {
+      const b = o as Bone;
+      if ((b as unknown as { isBone?: boolean }).isBone && /hips$/i.test(o.name)) hipsY = o.getWorldPosition(new Vector3()).y;
+      const m = o as SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      const g = m.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+      const sk = m.skeleton; sk.update();
+      for (let i = 0; i < pos.count; i += 5) {
+        acc.set(0, 0, 0);
+        for (let k = 0; k < 4; k++) {
+          const w = sw.getComponent(i, k); if (w === 0) continue;
+          const bi = si.getComponent(i, k);
+          bm.multiplyMatrices(sk.bones[bi].matrixWorld, sk.boneInverses[bi]);
+          tmp.fromBufferAttribute(pos, i).applyMatrix4(m.bindMatrix).applyMatrix4(bm);
+          acc.addScaledVector(tmp, w);
+        }
+        if (skinnedMinY === null || acc.y < skinnedMinY) skinnedMinY = acc.y;
+      }
+    });
+  }
+  return { x: Math.round(t.x), z: Math.round(t.z), transformY: Math.round(t.y * 100) / 100, heightAt: Math.round(h * 100) / 100, meshY: meshY === null ? null : Math.round(meshY * 100) / 100, delta: meshY === null ? null : Math.round((meshY - h) * 100) / 100, figureY: figureY === null ? null : Math.round(figureY * 100) / 100, figureMinY: figureMinY === null ? null : Math.round(figureMinY * 100) / 100, hipsY: hipsY === null ? null : Math.round(hipsY * 100) / 100, skinnedMinY: skinnedMinY === null ? null : Math.round(skinnedMinY * 100) / 100 };
 }
 
 /** Triangles per top-level scene group, frustum-culled like the renderer (a budget overrun's first question). */
