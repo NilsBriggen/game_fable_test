@@ -390,7 +390,7 @@ const minorCast: NpcDef[] = [
   minor('npc.niklaus-planzer', 'Niklaus', 'Planzer', 'poi.amsteg', 'saeumer', 'saeumer', { description: 'An Amsteg muleteer, the last easy stop before the Schöllenen.', dialogueRoot: 'dlg.saeumer-escort' }),
   // ---- Andermatt / Gotthard ----
   minor('npc.balz-truttmann', 'Balz', 'Truttmann', 'poi.andermatt', 'uri', 'herder', { description: 'An Ursern herder, sure-footed on the high Gotthard meadows.' }),
-  minor('npc.bruder-gion', 'Bruder', 'Gion', 'poi.gotthard', 'einsiedeln', 'monk', { schedule: monkSchedule(), description: 'A hospice brother keeping the fire lit for travellers crossing the pass.' }),
+  minor('npc.bruder-gion', 'Bruder', 'Gion', 'poi.gotthard', 'none', 'monk', { schedule: monkSchedule(), description: 'A hospice brother keeping the fire lit for travellers crossing the pass.' }),
   // ---- Schwyz ----
   minor('npc.ruodi-kälin', 'Ruodi', 'Kälin', 'poi.schwyz', 'schwyz', 'innkeeper', { description: "Keeper of the Schwyz tavern, where the Landsgemeinde men argue after the meadow disperses." }),
   minor('npc.mechthild-betschart', 'Mechthild', 'Betschart', 'poi.schwyz', 'schwyz', 'woman-peasant', { description: 'A Schwyz farmwife running her household\'s dairy trade.' }),

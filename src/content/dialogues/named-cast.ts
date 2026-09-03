@@ -154,7 +154,7 @@ export const namedCastDialogues: DialogueDef[] = [
         choices: [{ text: '"Walter Fürst says there will be a meeting."', next: 'meeting' }],
       },
       meeting: { speaker: 'npc.werner-von-attinghausen', text: 'There will be. Steinen, or near it — word will reach you. Go carefully, and go quietly; not every ear on the road loves us.', end: true },
-      'prologue-other': { speaker: 'npc.werner-von-attinghausen', text: 'Uri answers to no bailiff while I hold the Landammann\'s staff, {player}. That much I intend to keep true.', end: true },
+      'prologue-other': { speaker: 'npc.werner-von-attinghausen', text: 'Uri answers to no bailiff while the Attinghausen name still carries weight in the valley, {player}. That much I intend to keep true.', end: true },
       ch1: {
         speaker: 'npc.werner-von-attinghausen', text: 'I counsel patience where Werner Stauffacher counsels the sword, {player}. Which of us is right, the years ahead will show — I only hope the showing costs us little.',
         variants: [
