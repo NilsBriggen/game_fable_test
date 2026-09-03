@@ -121,13 +121,13 @@
     },
     "ui": {
       "owner": "integrator (fixes)",
-      "status": "critic-round-2",
-      "score": 6,
-      "fixRounds": 1,
+      "status": "critic-round-3",
+      "score": 7,
+      "fixRounds": 2,
       "openIssues": [
-        "active-combat HUD not yet captured on a stable tree"
+        "player-turn HUD frame pending capture (engine stepAi seam fixed)"
       ],
-      "notes": "critic 6/10 round 1; integrator fixed issues 1-18 except creation preview from party.derived"
+      "notes": "critic 6\u21927; all 26 findings fixed; one capture outstanding"
     },
     "act1-content": {
       "owner": "builder:quest",

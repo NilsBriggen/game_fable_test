@@ -1751,7 +1751,7 @@ export class CombatEngineImpl implements CombatService {
 
   stepAi(): void {
     const u = this.activeUnitId !== null ? this.units.get(this.activeUnitId) : undefined;
-    if (!u) return;
+    if (!u) { if (this.phase === 'active') this.advance(); return; } // between turns: move to the next unit
     try { decideAndAct(this, u, this.host.rng); } catch (err) { console.error('[combat] stepAi threw', err); }
     this.activeUnitId = null;
     this.advance();
