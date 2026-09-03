@@ -94,7 +94,7 @@ const mandated: PoiDef[] = [
     kind: 'village', historical: true,
     population: { peasant: 5, 'woman-peasant': 2, herder: 2, child: 2, monk: 1 },
     note: 'Bürglen as an Uri village is H; its association with Wilhelm Tell\'s household is L. See LORE.md §5.',
-    description: 'A Schächental-mouth village under Uri\'s Landenberg — home, tradition says, to Wilhelm Tell.',
+    description: 'A Schächental-mouth village of Uri at the foot of the valley — home, tradition says, to Wilhelm Tell.',
   }),
   fromGazetteer('fluelen', {
     kind: 'port', historical: true, discoverRadius: 110,

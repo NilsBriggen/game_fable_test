@@ -1,0 +1,8 @@
+# Lore sweep — pois.ts / gazetteer.ts / geography.ts
+
+| file:line | class | LORE § | problem | fix |
+|---|---|---|---|---|
+| gazetteer.ts:34-35 | a | §3 uri-gotthard row | Andermatt & Hospental (Ursern) both get `owner: 'uri'`, but LORE says Ursern is "a separate valley community under the Disentis abbey" — not Uri's. Contrast with Weggis/Vitznau (`owner:'luzern'`, not the region's habsburg) and Rotzberg/Landenberg (`owner:'habsburg'`, not unterwalden) — those correctly deviate from the region owner per LORE; Andermatt/Hospental don't. | Set `owner: 'none'` for both (no Disentis faction exists), per the file's own pattern. |
+| pois.ts:97 | a | §2/§3/§5 (Landenberg = Sarnen/Obwalden bailiff castle; a habsburg holding) | Bürglen (a Uri village) description reads "under Uri's Landenberg" — Landenberg is explicitly the Obwalden/Sarnen bailiff's seat everywhere else in LORE (§3 unterwalden-obwalden, §5 npc.beringer-von-landenberg), not a Uri jurisdiction; Uri's bailiff figure in the narrative is Gessler. | Reword to "under Uri's rule" or reference Gessler, not Landenberg. |
+
+Only 2 concrete violations found (both class a). No class b/c/d/e violations: POI `historical` flags match §10's convention exactly (Tellsplatte/Hohle Gasse/Zwing Uri/Melchtal-as-home = `legend`, other real places = `true`), the 10 invented minor POIs match §10's register exactly, no banned anachronisms (Kapellbrücke, "Switzerland", windlass-crossbow) appear, and spot-checked shore/road neighbour orderings (Axen path, Sattel–Ägeri road, Urnersee west shore) are consistent with the stated +X east / +Z south convention.
