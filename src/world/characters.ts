@@ -214,7 +214,7 @@ export function mixamoClipFor(anim: CharacterAnim, weapon: WeaponKind, seed: num
     case 'hit': return { name: sword ? 'Sword_And_Shield_Impact' : seed % 2 === 0 ? 'Hit_Reaction' : 'Hit_To_Body', loop: false };
     case 'down': return { name: 'Falling_Down', loop: false };
     case 'dead': return { name: 'Falling_Down', loop: false, hold: true };
-    case 'brace': return { name: sword ? 'Sword_And_Shield_Block' : 'Standing_Block_Idle', loop: true };
+    case 'brace': return { name: sword ? 'Blocking' : 'Standing_Block_Idle', loop: true };
     case 'talk': return { name: 'Talking', loop: false };
     case 'cheer': return { name: 'Cheering', loop: true };
     default: return { name: 'Idle', loop: true };
