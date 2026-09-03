@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "note": "Character-art assets (src/world/characters.ts). `textures`: Poly Haven maps for the procedural fallback body (`maps` limits an entry to a subset of `profile`). `models`: Mixamo characters (FBX with embedded textures) converted to GLB by tools/assets/fbx2glb.mjs; `tex` is the texture long edge. `clips`: Mixamo bones-only animation GLBs copied verbatim. Every entry lists url, author, licence as found, and the committed file sizes; `node tools/assets/fetch-characters.mjs` reproduces the files and rewrites public/assets/CREDITS-characters.md.",
+  "sources": {
+    "polyhaven": {
+      "name": "Poly Haven",
+      "licence": "CC0-1.0",
+      "home": "https://polyhaven.com/",
+      "api": "https://api.polyhaven.com/files/{ASSET}",
+      "fileTemplate": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/{ASSET}/{ASSET}_{MAP}_1k.jpg"
+    },
+    "kaykit": {
+      "name": "KayKit",
+      "author": "Kay Lousberg (www.kaylousberg.com)",
+      "licence": "CC0-1.0",
+      "home": "https://kaylousberg.itch.io/kaykit-character-animations"
+    },
+    "mixamoCharacters": {
+      "name": "Mixamo characters (Hugging Face dataset GbotHQ/mixamo-characters)",
+      "author": "Adobe Mixamo (character artists as credited in the file names, e.g. 'Knight D Pelegrini'); dataset uploaded by GbotHQ",
+      "licence": "Adobe Mixamo terms (via Hugging Face dataset; no licence file in the dataset)",
+      "home": "https://huggingface.co/datasets/GbotHQ/mixamo-characters",
+      "fileTemplate": "https://huggingface.co/datasets/GbotHQ/mixamo-characters/resolve/main/{NAME}.fbx"
+    },
+    "mixamoClips": {
+      "name": "Mixamo animation clips (Hugging Face dataset Leeoo/mixamo-rigs-clips)",
+      "author": "Adobe Mixamo; dataset uploaded by Leeoo",
+      "licence": "Adobe Mixamo terms (via Hugging Face dataset; no licence file in the dataset)",
+      "home": "https://huggingface.co/datasets/Leeoo/mixamo-rigs-clips",
+      "fileTemplate": "https://huggingface.co/datasets/Leeoo/mixamo-rigs-clips/resolve/main/anim/{CLIP}.glb"
+    }
+  },
+  "profile": {
+    "diff": {
+      "map": "diff",
+      "size": 1024,
+      "q": 0.86
+    },
+    "nor": {
+      "map": "nor_gl",
+      "size": 1024,
+      "q": 0.9
+    },
+    "rough": {
+      "map": "rough",
+      "size": 512,
+      "q": 0.8
+    }
+  },
+  "textures": [
+    {
+      "id": "wool",
+      "asset": "poly_wool_herringbone",
+      "source": "polyhaven",
+      "url": "https://polyhaven.com/a/poly_wool_herringbone",
+      "author": "colormass (photography), Rico Cilliers (processing) / Poly Haven",
+      "licence": "CC0-1.0",
+      "use": "every woven layer of a character: tunic, gown, hose, hood, hats, apron, surcoat, gambeson (the vertex colour carries the dye; the map is neutral grey, 27 cm herringbone twill)",
+      "target": "public/assets/characters/textures/wool",
+      "files": {
+        "diff": "assets/characters/textures/wool/diff.jpg",
+        "nor": "assets/characters/textures/wool/nor.jpg",
+        "rough": "assets/characters/textures/wool/rough.jpg"
+      },
+      "sizes": {
+        "diff": 239836,
+        "nor": 277476,
+        "rough": 36902
+      }
+    },
+    {
+      "id": "hide",
+      "asset": "leather_white",
+      "source": "polyhaven",
+      "url": "https://polyhaven.com/a/leather_white",
+      "author": "Rob Tuytel / Poly Haven",
+      "licence": "CC0-1.0",
+      "use": "the organic layer: skin (fine grain reads as pores), hair and beard, turnshoes, belts, pouches, wooden hafts and the horse (neutral off-white, 30 cm)",
+      "target": "public/assets/characters/textures/hide",
+      "maps": [
+        "diff",
+        "nor"
+      ],
+      "files": {
+        "diff": "assets/characters/textures/hide/diff.jpg",
+        "nor": "assets/characters/textures/hide/nor.jpg"
+      },
+      "sizes": {
+        "diff": 215127,
+        "nor": 142845
+      }
+    }
+  ],
+  "credited": [
+    {
+      "id": "rig-medium",
+      "source": "kaykit",
+      "url": "https://kaylousberg.itch.io/kaykit-character-animations",
+      "author": "Kay Lousberg (www.kaylousberg.com)",
+      "licence": "CC0-1.0",
+      "use": "Rig_Medium animation clips (idle/walk/run/attack/hit/death/…), re-packed as public/assets/characters/rig-medium.anims.bin by tools/assets/fetch.mjs",
+      "files": [
+        "public/assets/characters/rig-medium.anims.bin",
+        "public/assets/characters/KayKit-License.txt"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "id": "peasant-man",
+      "name": "Peasant Man",
+      "tex": 512,
+      "use": "bearded peasant in tunic and hose: peasant, herder, fisher, boatman, saeumer, elder, innkeeper base",
+      "file": "assets/characters/models/peasant-man.glb",
+      "size": 1852188
+    },
+    {
+      "id": "peasant-girl",
+      "name": "Peasant Girl",
+      "tex": 512,
+      "use": "young woman in a long dress and apron: woman-peasant base",
+      "file": "assets/characters/models/peasant-girl.glb",
+      "size": 2167764
+    },
+    {
+      "id": "castle-guard-01",
+      "name": "Castle Guard 01",
+      "tex": 512,
+      "use": "guard in gambeson and kettle-hat style helmet: Confederate militia, abbey men-at-arms, bailiff guards",
+      "file": "assets/characters/models/castle-guard-01.glb",
+      "size": 1946632
+    },
+    {
+      "id": "castle-guard-02",
+      "name": "Castle Guard 02",
+      "tex": 512,
+      "use": "guard in mail and surcoat: Habsburg footmen, sergeants, crossbowmen (surcoat tinted red/white)",
+      "file": "assets/characters/models/castle-guard-02.glb",
+      "size": 1898088
+    },
+    {
+      "id": "knight-d-pelegrini",
+      "name": "Knight D Pelegrini",
+      "tex": 1024,
+      "use": "armoured knight: Habsburg knight on foot; sergeants' alternative",
+      "file": "assets/characters/models/knight-d-pelegrini.glb",
+      "size": 5209580
+    },
+    {
+      "id": "vanguard-t-choonyung",
+      "name": "Vanguard By T. Choonyung",
+      "tex": 1024,
+      "use": "armoured fighter: raubritter",
+      "file": "assets/characters/models/vanguard-t-choonyung.glb",
+      "size": 10560904
+    }
+  ],
+  "clips": {
+    "names": [
+      "Idle",
+      "Standing_Idle",
+      "Standing_Idle_02",
+      "Standing_Idle_03",
+      "Walking",
+      "Running",
+      "Running_Tired",
+      "Jogging",
+      "Sword_And_Shield_Idle",
+      "Sword_And_Shield_Slash",
+      "Sword_And_Shield_Attack",
+      "Sword_And_Shield_Block",
+      "Sword_And_Shield_Impact",
+      "Sword_And_Shield_Death",
+      "Sword_And_Shield_Walk",
+      "Great_Sword_Idle",
+      "Great_Sword_Slash",
+      "Great_Sword_Walk",
+      "Stabbing",
+      "Two_Hand_Sword_Combo",
+      "Two_Handed_Sword_Death",
+      "Hit_Reaction",
+      "Hit_To_Body",
+      "Falling_Down",
+      "Death",
+      "Talking",
+      "Cheering",
+      "Aiming",
+      "Reloading",
+      "Sitting_Idle",
+      "Praying",
+      "Standing_Block_Idle"
+    ],
+    "sizes": {
+      "Idle": 94348,
+      "Standing_Idle": 61632,
+      "Standing_Idle_02": 136392,
+      "Standing_Idle_03": 130444,
+      "Walking": 59088,
+      "Running": 55080,
+      "Running_Tired": 166932,
+      "Jogging": 82852,
+      "Sword_And_Shield_Idle": 105804,
+      "Sword_And_Shield_Slash": 61632,
+      "Sword_And_Shield_Attack": 78532,
+      "Sword_And_Shield_Block": 15,
+      "Sword_And_Shield_Impact": 46348,
+      "Sword_And_Shield_Death": 77764,
+      "Sword_And_Shield_Walk": 53156,
+      "Great_Sword_Idle": 45512,
+      "Great_Sword_Slash": 102400,
+      "Great_Sword_Walk": 58252,
+      "Stabbing": 78612,
+      "Two_Hand_Sword_Combo": 97312,
+      "Two_Handed_Sword_Death": 79448,
+      "Hit_Reaction": 84972,
+      "Hit_To_Body": 54856,
+      "Falling_Down": 65404,
+      "Death": 92220,
+      "Talking": 134120,
+      "Cheering": 75220,
+      "Aiming": 61272,
+      "Reloading": 105804,
+      "Sitting_Idle": 177112,
+      "Praying": 314508,
+      "Standing_Block_Idle": 61972
+    }
+  },
+  "notShipped": "Converted and inspected but not shipped (too heavy for a crowd / modern dress): Remy 35 k tris, Brian 43 k, Leonard 50 k, Roth 50 k, Timmy 31 k; Ely 14.8 k and Kachujin 12.6 k held back until player creation carries a sex. Sporty Granny 10.7 k (cartoon tracksuit)."
+}
