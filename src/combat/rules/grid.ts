@@ -126,15 +126,23 @@ export function buildGrid(
   const sampler = enc.heightOverride ? PRESETS[enc.heightOverride]() : undefined;
   // An authored relief is relative: it sits on the real ground at the encounter's origin (the Hohle
   // Gasse and the abbey gate floated 15 m over the hillside when their 0-based heights were used raw).
-  let base = 0;
-  if (sampler && world) { try { base = world.heightAt(enc.location.x, enc.location.z); } catch { base = 0; } }
+  // The relief is added on top of the real ground under each cell (minus the relief's own floor), so a
+  // sunken road on a hillside follows the hill instead of hanging off it; without a world it is used raw.
+  let reliefFloor = 0;
+  if (sampler && world) {
+    let mn = Infinity;
+    for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) mn = Math.min(mn, sampler(q, r, cols, rows).height);
+    reliefFloor = Number.isFinite(mn) ? mn : 0;
+  }
   const cells: CellView[] = [];
   for (let r = 0; r < rows; r++) {
     for (let q = 0; q < cols; q++) {
       let cell: CellView;
       if (sampler) {
         const s = sampler(q, r, cols, rows);
-        cell = { q, r, height: base + s.height, surface: s.surface, passable: s.passable, cover: s.cover, difficult: s.difficult || DIFFICULT_SURFACES.has(s.surface) };
+        let ground = 0;
+        if (world) { const { x, z } = cellToWorldXZ(q, r, grid); try { ground = world.heightAt(x, z); } catch { ground = 0; } }
+        cell = { q, r, height: world ? ground + (s.height - reliefFloor) : s.height, surface: s.surface, passable: s.passable, cover: s.cover, difficult: s.difficult || DIFFICULT_SURFACES.has(s.surface) };
       } else if (world) {
         const { x, z } = cellToWorldXZ(q, r, grid);
         try {
