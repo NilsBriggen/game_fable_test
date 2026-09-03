@@ -52,7 +52,8 @@ page.on('response', (r) => { if (r.status() >= 400) consoleErrors.push(`HTTP ${r
 const shots = [];
 await page.exposeFunction('__shot', async (name) => {
   const file = path.join(OUT, `${name}.png`);
-  try { await page.screenshot({ path: file, timeout: 180000 }); shots.push(path.relative(root, file)); } catch (e) { shots.push(`FAILED ${name}: ${e.message}`); }
+  // 25 s cap: one stalled capture (the 6th dialogue shot hung for the rest of the beat) must not freeze the driver
+  try { await page.screenshot({ path: file, timeout: 25000 }); shots.push(path.relative(root, file)); } catch (e) { shots.push(`FAILED ${name}: ${e.message}`); }
 });
 await page.goto(`${URL_BASE}/?harness=1`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.__harness && window.__harness.ready, null, { timeout: 120000 });

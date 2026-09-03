@@ -220,6 +220,9 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
         if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-start`);
         await combat.runScript([{ type: 'auto', rounds: beat.combatRounds ?? 40 }]);
         if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-end`);
+        // a player would click the result panel's Continue; the driver dismisses it (it otherwise sits over every later beat)
+        await nextFrame();
+        ui?.combat.hide();
         // a lost fight: let the quest's lose branch run
       }
       if (ctx.state.state === 'gameover') { note = 'party wiped (gameover)'; break; }
