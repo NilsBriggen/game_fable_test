@@ -65,14 +65,14 @@ await page.evaluate(() => window.__harness.ready);
 console.log(`renderer: ${await page.evaluate(() => window.__harness.stats().renderer)}`);
 
 const started = Date.now();
-const result = await page.evaluate(async (pick) => {
+const DLG_SHOTS = args.includes('--dialogue-shots'); // per-node shots cost up to 25 s each under load; beats are always captured
+const result = await page.evaluate(async ({ pick, dlgShots }) => {
   const h = window.__harness;
   const before = { e: h.console.errors.length, w: h.console.warnings.length };
-  const DLG_SHOTS = args.includes('--dialogue-shots'); // per-node shots cost up to 25 s each under load; beats are always captured
-  const r = await h.runAct1Playthrough({ pick, screenshot: (name) => (DLG_SHOTS || !name.startsWith('dlg-')) ? window.__shot(name) : Promise.resolve(), maxSecondsPerBeat: 150 });
+  const r = await h.runAct1Playthrough({ pick, screenshot: (name) => (dlgShots || !name.startsWith('dlg-')) ? window.__shot(name) : Promise.resolve(), maxSecondsPerBeat: 150 });
   const st = h.stats();
   return { ...r, errors: h.console.errors.slice(before.e), warnings: h.console.warnings.slice(before.w), drawCalls: st.drawCalls, heapMB: st.heapMB, state: st.state };
-}, PICK);
+}, { pick: PICK, dlgShots: DLG_SHOTS });
 const report = { generatedAt: new Date().toISOString(), pick: PICK, durationSec: Math.round((Date.now() - started) / 1000), ...result, pageErrors, consoleErrorsFromBrowser: consoleErrors, screenshots: shots };
 report.completed = result.log.every((b) => b.ok);
 await writeFile(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
