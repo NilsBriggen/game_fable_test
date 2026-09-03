@@ -40,15 +40,18 @@ async function acquireLock() {
   const t0 = Date.now();
   while (true) {
     for (const slot of SLOTS) {
-      try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; return; } catch {}
-      try { const age = Date.now() - fs.statSync(slot).mtimeMs; if (age > 45 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); } catch {}
+      try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; startHeartbeat(); return; } catch {}
+      try { const age = Date.now() - fs.statSync(slot).mtimeMs; if (age > 3 * 60 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); // heartbeat below keeps a live run's slot fresh } catch {}
     }
     if (Date.now() - t0 > 240 * 60 * 1000) { console.error('harness: could not acquire lock after 240 min'); process.exit(3); }
     if ((Date.now() - t0) % 60000 < 2500) console.log('harness: waiting for another run to finish…');
     await new Promise((r) => setTimeout(r, 2000));
   }
 }
-function releaseLock() { if (LOCK) { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} } }
+// a 40-min-per-scenario run used to lose its slot to the 45-min stale rule and a second run piled on
+let lockHeartbeat = null;
+function startHeartbeat() { lockHeartbeat = setInterval(() => { try { const now = new Date(); fs.utimesSync(LOCK, now, now); } catch {} }, 5 * 60 * 1000); lockHeartbeat.unref?.(); }
+function releaseLock() { if (lockHeartbeat) clearInterval(lockHeartbeat); if (LOCK) { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} } }
 await acquireLock();
 for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { releaseLock(); if (sig !== 'exit') process.exit(130); });
 

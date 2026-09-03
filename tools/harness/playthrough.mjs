@@ -32,13 +32,14 @@ const t0 = Date.now();
 while (!LOCK) {
   for (const slot of SLOTS) {
     try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; break; } catch {}
-    try { if (Date.now() - fs.statSync(slot).mtimeMs > 45 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); } catch {}
+    try { if (Date.now() - fs.statSync(slot).mtimeMs > 3 * 60 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); // heartbeat below keeps a live run's slot fresh } catch {}
   }
   if (LOCK) break;
   if (Date.now() - t0 > 240 * 60 * 1000) { console.error("playthrough: lock timeout"); process.exit(3); }
   await new Promise((r) => setTimeout(r, 2000));
 }
-const release = () => { if (LOCK) { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} } };
+const lockHeartbeat = setInterval(() => { try { const now = new Date(); fs.utimesSync(LOCK, now, now); } catch {} }, 5 * 60 * 1000); lockHeartbeat.unref?.();
+const release = () => { clearInterval(lockHeartbeat); if (LOCK) { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} } };
 for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { release(); if (sig !== 'exit') process.exit(130); });
 
 async function waitHttp(url, ms) { const s = Date.now(); while (Date.now() - s < ms) { try { if ((await fetch(url)).ok) return true; } catch {} await new Promise((r) => setTimeout(r, 300)); } return false; }
