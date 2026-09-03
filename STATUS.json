@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-09-02T11:30:00Z",
-  "wave": 1,
+  "updatedAt": "2026-09-03T23:18:45Z",
+  "wave": "visual-2 + final gate",
   "waves": {
     "1": {
       "status": "save 9, party 8 passed; world in art/geometry rework",
@@ -58,17 +58,17 @@
       "fixRounds": 1,
       "openIssues": [
         "lake shores vertical walls (trench)",
-        "roads/rivers stamped as sparse discs; passes 85\u00b0; road 0% of map",
-        "peaks additive \u2192 cameras underground, black frames",
+        "roads/rivers stamped as sparse discs; passes 85°; road 0% of map",
+        "peaks additive → cameras underground, black frames",
         "valley walls sheer, sawtooth jag, no triplanar",
         "no vegetation beyond 900 m",
         "settlement pads bare islands",
         "region polygons overlap",
-        "tests use 256\u00b2 grid",
+        "tests use 256² grid",
         "events not emitted",
         "no streaming-hitch evidence"
       ],
-      "notes": "fresh builder fix round 1: geometry tests 107/111 (4 red: urnersee 6.6m, zugersee 24.4m, lauerzersee 14m shore steps; sattel-road 29\u00b0); free-altdorf 430 calls, free-schoellenen 148 calls; seelisberg scenario not completed under contention"
+      "notes": "fresh builder fix round 1: geometry tests 107/111 (4 red: urnersee 6.6m, zugersee 24.4m, lauerzersee 14m shore steps; sattel-road 29°); free-altdorf 430 calls, free-schoellenen 148 calls; seelisberg scenario not completed under contention"
     },
     "save": {
       "owner": "builder:save",
@@ -76,7 +76,7 @@
       "score": 9,
       "fixRounds": 1,
       "openIssues": [],
-      "notes": "29 unit tests; critic 7\u21929; polish applied; combat contract: isActive()/serialize() valid before request-state combat"
+      "notes": "29 unit tests; critic 7→9; polish applied; combat contract: isActive()/serialize() valid before request-state combat"
     },
     "party": {
       "owner": "builder:party",
@@ -84,7 +84,7 @@
       "score": 8,
       "fixRounds": 1,
       "openIssues": [],
-      "notes": "50 unit tests; critic 5\u21928; polish applied; chapter ids prologue-1291/ch1-1307/ch2-1314 must be adopted by quest builder"
+      "notes": "50 unit tests; critic 5→8; polish applied; chapter ids prologue-1291/ch1-1307/ch2-1314 must be adopted by quest builder"
     },
     "exploration": {
       "owner": "integrator (fixes)",
@@ -98,7 +98,7 @@
         "overlapping discover discs (N4)",
         "crowd should drive CharacterHandle.setSpeed once spawnCharacter is stable (N5)"
       ],
-      "notes": "62 tests + 41 critic probes; critic 7\u21928"
+      "notes": "62 tests + 41 critic probes; critic 7→8"
     },
     "combat": {
       "owner": "builder:combat",
@@ -109,7 +109,7 @@
         "AI no proactive Disengage/OA avoidance (minor)",
         "quay preset water side cosmetic"
       ],
-      "notes": "79 tests; critic 5\u21927\u21928; polish applied; Morgarten disciplined 75% vs charger 17%"
+      "notes": "79 tests; critic 5→7→8; polish applied; Morgarten disciplined 75% vs charger 17%"
     },
     "quest": {
       "owner": "builder:quest",
@@ -117,7 +117,7 @@
       "score": 8,
       "fixRounds": 2,
       "openIssues": [],
-      "notes": "66 tests; critic 5\u21927\u21928; polish applied"
+      "notes": "66 tests; critic 5→7→8; polish applied"
     },
     "ui": {
       "owner": "integrator (fixes)",
@@ -131,7 +131,7 @@
         "creation preview not from party.derived",
         "trade stock not per merchant"
       ],
-      "notes": "16 tests + 29 critic probes; critic 6\u21927\u21928"
+      "notes": "16 tests + 29 critic probes; critic 6→7→8"
     },
     "act1-content": {
       "owner": "builder:quest",
@@ -142,26 +142,24 @@
       "notes": "scored with quest: compliance audit clean; legend/history framing correct"
     },
     "assets-characters": {
-      "owner": "builder:art (opus)",
-      "status": "in-progress",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
-      "notes": "rigged characters via spawnCharacter, buildings/props under existing model ids, item meshes, terrain texture fetch"
+      "status": "wave 2 done",
+      "summary": "Mixamo bodies (7) + 32 clips via Hugging Face, procedural fallback, per-seed dyes",
+      "evidence": "tools/harness/out/wave2/*.png"
     },
     "world-look": {
-      "owner": "builder:world-look (opus)",
-      "status": "in-progress",
-      "score": null,
-      "fixRounds": 0,
-      "openIssues": [],
-      "notes": "PBR splat, real trees/grass, sky/atmosphere, water, styled map"
+      "status": "wave 2 done, budget pass pending capture",
+      "summary": "PBR splat, sky/moon, water, tiered vegetation, trodden village ground"
+    },
+    "buildings-props": {
+      "status": "wave 2 done",
+      "summary": "MegaKit town house/tavern assembler, Poly Haven props, per-village ≈0.2 M tris",
+      "evidence": "tools/harness/out/wave2/*.png"
     }
   },
   "coreChanges": [
     {
       "from": "critic:save",
-      "change": "ExplorationEvents['fast-travel'], SaveMeta.createdAt, QUICKSAVE_SLOT=6, SaveFile.weather/season, load convention in \u00a75.7",
+      "change": "ExplorationEvents['fast-travel'], SaveMeta.createdAt, QUICKSAVE_SLOT=6, SaveFile.weather/season, load convention in §5.7",
       "status": "applied"
     },
     {
@@ -171,7 +169,7 @@
     },
     {
       "from": "critic:party",
-      "change": "DerivedStats.ammo, PartyEvents['character-level-up'], addMember\u2192boolean, PartyService.invalidate(id?)",
+      "change": "DerivedStats.ammo, PartyEvents['character-level-up'], addMember→boolean, PartyService.invalidate(id?)",
       "status": "applied"
     },
     {
@@ -181,7 +179,7 @@
     },
     {
       "from": "builder:quest (requests/quest-2.md)",
-      "change": "canonical encounter\u2192quest/stage map relayed to exploration; hunenberg-warning flag relayed to combat",
+      "change": "canonical encounter→quest/stage map relayed to exploration; hunenberg-warning flag relayed to combat",
       "status": "relayed"
     },
     {
@@ -208,5 +206,49 @@
     "total": null,
     "renderer": null,
     "note": "dialogue-gessler-hat: err=0 warn=0 but 5295 draw calls (exploration WIP)"
+  },
+  "finalGate": {
+    "act1Playthrough": {
+      "first": {
+        "completed": true,
+        "beats": "18/18",
+        "fights": 4,
+        "party": 4,
+        "errors": 0,
+        "warnings": 1,
+        "durationSec": 2486,
+        "report": "tools/harness/out/playthrough-first/report.md",
+        "note": "warning was a saved 404 in place of the brace clip; fixed (Blocking.glb)"
+      },
+      "last": {
+        "completed": true,
+        "beats": "18/18",
+        "fights": 4,
+        "party": 4,
+        "errors": 0,
+        "warnings": 1,
+        "durationSec": 2313,
+        "report": "tools/harness/out/playthrough-last/report.md"
+      },
+      "driver": "window.__harness.runAct1Playthrough (auto-dialogue, auto-combat, recruits the three companions, waits for streaming to settle)"
+    },
+    "bugHunt": {
+      "sheets": "tools/critic/bughunt/*.md",
+      "findings": 17,
+      "fixed": 17,
+      "probes": "tools/critic/probes/**"
+    },
+    "loreSweep": {
+      "sheets": "tools/critic/lore-sweep/*.md",
+      "findings": 2,
+      "fixed": 2
+    },
+    "budgets": {
+      "status": "pending verification capture after settlement LOD + vegetation trim",
+      "before": "8–11 M tris (3 M budget), heap 1.0 GB",
+      "sources": "settlements within 3 km 3.2 M, vegetation 1.45 M, terrain 0.39 M, characters 0.13 M (Altdorf split)"
+    },
+    "blindComparison": "pending",
+    "worldCriticRound2": "pending (stood down until the visual wave verified)"
   }
 }
