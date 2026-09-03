@@ -1,28 +1,318 @@
 {
-  "note": "World-look builder assets. All CC0. Fetched + packed by tools/assets/fetch-world.mjs. Every entry lists url, licence, author and the target path it ends up in.",
+  "note": "World-look builder assets (wave 2). All CC0. Fetched + packed by tools/assets/fetch-world.mjs. Every entry lists url, licence, author and the target path it ends up in. Terrain layers come from ambientCG; the vegetation cut-outs (needle sprigs, leaves, grass blades, ferns) are cropped out of Poly Haven's CC0 tree/plant texture sets — the Poly Haven MESHES are not used (fir_tree_01 alone is 7.0 M triangles / a 478 MB .bin, three orders of magnitude over the whole vegetation budget), only their photographic alpha cut-outs, which are what a card-based tree actually needs.",
   "licence": "CC0 1.0 Universal (public domain dedication)",
-  "author": "Lennart Demes / ambientCG.com",
-  "homepage": "https://ambientcg.com/",
   "layerSize": 512,
-  "jpegQuality": { "albedo": 0.9, "normal": 0.94, "orm": 0.88 },
+  "foliageCell": 256,
+  "jpegQuality": {
+    "albedo": 0.9,
+    "normal": 0.94,
+    "orm": 0.88
+  },
+  "sources": {
+    "ambientcg": {
+      "author": "Lennart Demes / ambientCG.com",
+      "homepage": "https://ambientcg.com/",
+      "licence": "CC0 1.0",
+      "url": "https://ambientcg.com/get?file={name}_1K-JPG.zip"
+    },
+    "polyhaven": {
+      "author": "Poly Haven (Rob Tuytel, Rico Cilliers et al.)",
+      "homepage": "https://polyhaven.com/",
+      "licence": "CC0 1.0",
+      "url": "resolved per asset from https://api.polyhaven.com/files/{asset} (the map key and the file stem disagree per set)",
+      "api": "https://api.polyhaven.com"
+    }
+  },
   "terrainLayers": [
-    { "layer": 0, "id": "grass", "asset": "Grass001", "url": "https://ambientcg.com/get?file=Grass001_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer0", "note": "lush lowland pasture" },
-    { "layer": 1, "id": "meadow", "asset": "Grass004", "url": "https://ambientcg.com/get?file=Grass004_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer1", "note": "drier, yellower alpine meadow" },
-    { "layer": 2, "id": "forest", "asset": "Ground023", "url": "https://ambientcg.com/get?file=Ground023_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer2", "note": "needle/leaf litter forest floor" },
-    { "layer": 3, "id": "rock", "asset": "Rocks011", "url": "https://ambientcg.com/get?file=Rocks011_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer3", "note": "pale grey limestone cliff (Axen, Mythen, Pilatus)" },
-    { "layer": 4, "id": "scree", "asset": "Gravel022", "url": "https://ambientcg.com/get?file=Gravel022_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer4", "note": "talus / scree fans" },
-    { "layer": 5, "id": "snow", "asset": "Snow006", "url": "https://ambientcg.com/get?file=Snow006_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer5", "note": "old snow above the snow line" },
-    { "layer": 6, "id": "mud", "asset": "Ground047", "url": "https://ambientcg.com/get?file=Ground047_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer6", "note": "damp river gravel, lake shore, marsh" },
-    { "layer": 7, "id": "road", "asset": "Ground078", "url": "https://ambientcg.com/get?file=Ground078_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/terrain/{albedo,normal,orm}-array.jpg#layer7", "note": "beaten earth track / village ground" }
+    {
+      "layer": 0,
+      "id": "grass",
+      "asset": "Grass001",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "lush lowland pasture (Talboden, Rütli meadow)"
+    },
+    {
+      "layer": 1,
+      "id": "meadow",
+      "asset": "Grass004",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "drier, yellower alpine meadow above the villages"
+    },
+    {
+      "layer": 2,
+      "id": "forest",
+      "asset": "Ground023",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "needle/leaf litter with sticks and pebbles. Deliberately the neutral brown-grey set, not the warm Ground082L: the shader tints the forest floor toward the canopy colour, and starting from an orange litter made a spruce wood read as a ploughed field between the trunks."
+    },
+    {
+      "layer": 3,
+      "id": "rock",
+      "asset": "Rock051",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "bedded pale limestone with lichen — the Kalkalpen the Axen, the Mythen and the Fronalpstock are made of"
+    },
+    {
+      "layer": 4,
+      "id": "scree",
+      "asset": "Rocks024L",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "flat angular limestone plates: real talus, not rounded pebbles (was Gravel022)"
+    },
+    {
+      "layer": 5,
+      "id": "snow",
+      "asset": "Snow006",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "old wind-packed snow above the snow line"
+    },
+    {
+      "layer": 6,
+      "id": "mud",
+      "asset": "Ground109",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "damp brown river-bank mud with embedded stones (Reuss, Muota, Engelberger Aa)"
+    },
+    {
+      "layer": 7,
+      "id": "yard",
+      "asset": "Ground081",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "village ground: beaten earth with stones trodden into it — the Dorfplatz surface (was Ground078, a saturated yellow gravel)"
+    },
+    {
+      "layer": 8,
+      "id": "track",
+      "asset": "Ground051",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "note": "dark rutted cart track: the worn line where a road enters a village and the mule tracks between them"
+    }
   ],
   "vegetation": [
-    { "id": "bark-conifer", "asset": "Bark012", "url": "https://ambientcg.com/get?file=Bark012_1K-JPG.zip", "licence": "CC0 1.0", "author": "ambientCG", "target": "public/assets/textures/vegetation/bark-conifer.jpg + bark-conifer-n.jpg", "note": "spruce/fir trunk bark" }
+    {
+      "id": "bark-conifer",
+      "asset": "Bark012",
+      "source": "ambientcg",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "target": "public/assets/textures/vegetation/bark-conifer.jpg + bark-conifer-n.jpg",
+      "note": "spruce/fir trunk bark"
+    },
+    {
+      "id": "bark-broadleaf",
+      "asset": "Bark007",
+      "source": "ambientcg",
+      "licence": "CC0 1.0",
+      "author": "ambientCG",
+      "target": "public/assets/textures/vegetation/bark-broadleaf.jpg + bark-broadleaf-n.jpg",
+      "note": "smooth pale beech bark"
+    }
+  ],
+  "foliage": [
+    {
+      "id": "conifer-sprig",
+      "source": "polyhaven",
+      "asset": "fir_tree_01",
+      "maps": {
+        "diff": "twig_diff",
+        "alpha": "twig_alpha"
+      },
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "note": "photographic fir/spruce needle sprigs; split per connected alpha blob and re-composed into the spruce, fir, larch, mountain-pine and bare-twig atlas cells (pine_tree_01's own twig sheet is 90% cones and bark plates, so it is not used)"
+    },
+    {
+      "id": "broadleaf",
+      "source": "polyhaven",
+      "asset": "shrub_01",
+      "maps": {
+        "diff": "Diffuse",
+        "alpha": "Alpha"
+      },
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "note": "single ovate leaves (green and autumn) composed into the beech leaf-cluster cells"
+    },
+    {
+      "id": "broadleaf-b",
+      "source": "polyhaven",
+      "asset": "tree_small_02",
+      "maps": {
+        "diff": "leaves_diff",
+        "alpha": "leaves_alpha"
+      },
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "note": "second leaf shape so a beech wood is not one leaf repeated"
+    },
+    {
+      "id": "grass-blade",
+      "source": "polyhaven",
+      "asset": "grass_medium_02",
+      "maps": {
+        "diff": "Diffuse",
+        "alpha": "Alpha"
+      },
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "note": "individual grass blades for the near-camera tufts"
+    },
+    {
+      "id": "grass-dry",
+      "source": "polyhaven",
+      "asset": "grass_medium_02",
+      "maps": {
+        "diff": "dry_diff",
+        "alpha": "Alpha"
+      },
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "note": "the same blades, sun-bleached: alpine meadow and late-season pasture"
+    },
+    {
+      "id": "fern",
+      "source": "polyhaven",
+      "asset": "fern_02",
+      "maps": {
+        "diff": "Diffuse",
+        "alpha": "Alpha"
+      },
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "note": "fern fronds — forest-floor clutter"
+    }
   ],
   "outputs": {
     "terrainAlbedoArray": "public/assets/textures/terrain/albedo-array.jpg",
     "terrainNormalArray": "public/assets/textures/terrain/normal-array.jpg",
     "terrainOrmArray": "public/assets/textures/terrain/orm-array.jpg",
+    "foliageAtlas": "public/assets/textures/vegetation/foliage-atlas.png",
+    "groundCoverAtlas": "public/assets/textures/vegetation/groundcover-atlas.png",
     "barkAlbedo": "public/assets/textures/vegetation/bark-conifer.jpg",
-    "barkNormal": "public/assets/textures/vegetation/bark-conifer-n.jpg"
+    "barkNormal": "public/assets/textures/vegetation/bark-conifer-n.jpg",
+    "barkPaleAlbedo": "public/assets/textures/vegetation/bark-broadleaf.jpg",
+    "barkPaleNormal": "public/assets/textures/vegetation/bark-broadleaf-n.jpg",
+    "rockMeshDir": "public/assets/models/vegetation/"
+  },
+  "foliageAtlasCells": {
+    "note": "4x3 grid of 256px cells in foliage-atlas.png (1024x768 RGBA); row 0 = conifer sprigs, row 1 = broadleaf clusters + bare twigs, row 2 = trunk bark tiles (pre-repeated 1x3 so one cell covers a whole trunk).",
+    "spruce": [
+      0,
+      0
+    ],
+    "fir": [
+      1,
+      0
+    ],
+    "larch": [
+      2,
+      0
+    ],
+    "pine": [
+      3,
+      0
+    ],
+    "beech": [
+      0,
+      1
+    ],
+    "beechAutumn": [
+      1,
+      1
+    ],
+    "alder": [
+      2,
+      1
+    ],
+    "bare": [
+      3,
+      1
+    ],
+    "bark": [
+      0,
+      2
+    ],
+    "barkPale": [
+      1,
+      2
+    ]
+  },
+  "groundCoverAtlasCells": {
+    "note": "2x2 grid of 256px cells in groundcover-atlas.png.",
+    "grass": [
+      0,
+      0
+    ],
+    "grassDry": [
+      1,
+      0
+    ],
+    "fern": [
+      0,
+      1
+    ],
+    "herb": [
+      1,
+      1
+    ]
+  },
+  "rocks": [
+    {
+      "id": "rock-boulder",
+      "source": "polyhaven",
+      "asset": "boulder_01",
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "target": "public/assets/models/vegetation/rock-boulder.json",
+      "note": "lichened glacial erratic; the raw scan is ~70 k triangles, decimated here to a few hundred"
+    },
+    {
+      "id": "rock-block",
+      "source": "polyhaven",
+      "asset": "rock_07",
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "target": "public/assets/models/vegetation/rock-block.json",
+      "note": "angular broken block — the shape a limestone scree fan is made of"
+    },
+    {
+      "id": "rock-stone",
+      "source": "polyhaven",
+      "asset": "rock_09",
+      "licence": "CC0 1.0",
+      "author": "Poly Haven",
+      "target": "public/assets/models/vegetation/rock-stone.json",
+      "note": "hand-sized stone for near-field clutter and village yards"
+    }
+  ],
+  "rockTexture": {
+    "id": "rock-scan",
+    "source": "polyhaven",
+    "asset": "rock_07",
+    "maps": {
+      "diff": "Diffuse",
+      "nor": "nor_gl"
+    },
+    "licence": "CC0 1.0",
+    "author": "Poly Haven",
+    "target": "public/assets/models/vegetation/rock-scan-diff.jpg + rock-scan-nor.jpg",
+    "note": "shared albedo/normal for every scattered stone"
+  },
+  "decimation": {
+    "targetTris": {
+      "rock-boulder": 640,
+      "rock-block": 460,
+      "rock-stone": 260
+    },
+    "method": "vertex clustering on a uniform grid over the mesh bounding box, cell representative = mean of its vertices; degenerate triangles dropped; normals recomputed area-weighted"
   }
 }

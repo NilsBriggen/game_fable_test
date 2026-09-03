@@ -9,6 +9,20 @@
       "home": "https://ambientcg.com/",
       "urlTemplate": "https://ambientcg.com/get?file={ASSET}_1K-JPG.zip"
     },
+    "polyhaven": {
+      "name": "Poly Haven",
+      "author": "Poly Haven (Rob Tuytel, Rico Cilliers et al.)",
+      "licence": "CC0-1.0",
+      "home": "https://polyhaven.com/textures",
+      "kind": "files",
+      "urlTemplate": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/{ASSET}/{ASSET}_{MAP}_1k.jpg",
+      "homeTemplate": "https://polyhaven.com/a/{ASSET}",
+      "maps": {
+        "diff": "diff",
+        "nor": "nor_gl",
+        "rough": "rough"
+      }
+    },
     "kaykit": {
       "name": "KayKit",
       "author": "Kay Lousberg (www.kaylousberg.com)",
@@ -72,19 +86,27 @@
     },
     {
       "id": "shingle",
-      "source": "ambientcg",
-      "asset": "WoodSiding013",
+      "source": "polyhaven",
+      "asset": "roof_slates_02",
       "profile": "prop",
       "target": "public/assets/textures/props/shingle",
-      "use": "wooden shingle roofs"
+      "use": "wooden shingle / stone-slab roofs (Schindeldach): houses, church, castle, wells"
     },
     {
       "id": "stone-block",
       "source": "ambientcg",
-      "asset": "Bricks100",
+      "asset": "Bricks066",
       "profile": "prop",
       "target": "public/assets/textures/props/stone-block",
-      "use": "church, castle, stone bridge masonry"
+      "use": "dressed ashlar: quoins, window and door surrounds, tower and keep dressings, stone bridge voussoirs"
+    },
+    {
+      "id": "masonry",
+      "source": "polyhaven",
+      "asset": "old_stone_wall",
+      "profile": "prop",
+      "target": "public/assets/textures/props/masonry",
+      "use": "coursed rubble wall faces (Bruchsteinmauerwerk): church nave and tower, castle keep, curtain wall, town wall"
     },
     {
       "id": "drystone",

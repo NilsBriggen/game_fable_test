@@ -1,22 +1,28 @@
 /**
- * Texture supply. Terrain: three CC0 PBR DataArrayTextures (albedo / normal / AO+roughness), 8 layers,
- * decoded from one packed 512x4096 JPEG each (tools/assets/fetch-world.mjs, CREDITS-world.md).
- * Vegetation: CC0 bark + canvas alpha cut-outs. Props: the original procedural canvas textures.
+ * Texture supply. Terrain: three CC0 PBR DataArrayTextures (albedo / normal / AO+roughness), NINE
+ * layers, decoded from one packed 512x4608 JPEG each (tools/assets/fetch-world.mjs, CREDITS-world.md).
+ * Vegetation cut-outs live in src/world/look/foliage.ts; props keep the procedural canvas tiles below.
  */
 import {
-  CanvasTexture, ClampToEdgeWrapping, DataArrayTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter,
-  LinearSRGBColorSpace, NoColorSpace, RGBAFormat, RepeatWrapping, SRGBColorSpace, Texture, TextureLoader,
+  CanvasTexture, DataArrayTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter,
+  NoColorSpace, RGBAFormat, RepeatWrapping, SRGBColorSpace, Texture,
   UnsignedByteType,
 } from 'three';
 import { valueNoise2D, fbm2D } from './noise';
 
 const ASSET_BASE = 'assets/textures';
 
-/** Layer order must match world-manifest.json terrainLayers. */
+/**
+ * Layer order must match world-manifest.json terrainLayers.
+ *
+ * `yard` and `track` are two layers, not one: a village square is dry beaten earth with stones
+ * trodden into it, a cart road is dark rutted mud, and blending between them along the road's own
+ * distance field is what makes the lane entering a village read as a lane.
+ */
 export const TERRAIN_LAYER = {
-  grass: 0, meadow: 1, forest: 2, rock: 3, scree: 4, snow: 5, mud: 6, road: 7,
+  grass: 0, meadow: 1, forest: 2, rock: 3, scree: 4, snow: 5, mud: 6, yard: 7, track: 8,
 } as const;
-export const TERRAIN_LAYER_COUNT = 8;
+export const TERRAIN_LAYER_COUNT = 9;
 const LAYER_PX = 512;
 
 function newCanvas(size: number, h = size): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
@@ -89,7 +95,7 @@ export function getTerrainArrays(): TerrainArrays {
     t.magFilter = LinearFilter;
     t.minFilter = LinearMipmapLinearFilter;
     t.generateMipmaps = true;
-    t.anisotropy = 8;
+    t.anisotropy = 16;   // grazing-angle slopes are the whole game; take whatever the driver allows
     return t;
   };
   const albedo = mk(126, 134, 104);
@@ -145,292 +151,9 @@ export function macroVariationTexture(size = 256): DataTexture {
   return t;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Vegetation cut-outs (canvas, alpha-tested)
-// ---------------------------------------------------------------------------------------------
-
-const canvasCache = new Map<string, CanvasTexture>();
-
-function cached(key: string, make: () => CanvasTexture): CanvasTexture {
-  const hit = canvasCache.get(key);
-  if (hit) return hit;
-  const t = make();
-  canvasCache.set(key, t);
-  return t;
-}
-
-/** One conifer branch sprig, flat: woody stem + needle combs. Alpha cut-out for foliage cards. */
-function needleSprayCanvas(kind: 'spruce' | 'fir' | 'larch' | 'pine' = 'spruce'): HTMLCanvasElement {
-  {
-    const S = 256;
-    const { canvas, ctx } = newCanvas(S);
-    ctx.clearRect(0, 0, S, S);
-    const base = kind === 'spruce' ? [30, 62, 38] : kind === 'fir' ? [40, 78, 52] : kind === 'larch' ? [96, 128, 56] : [46, 82, 48];
-    const needleLen = kind === 'larch' ? 0.055 : 0.085;
-    const rows = kind === 'larch' ? 34 : 26;
-    // woody stem down the middle of the card
-    ctx.strokeStyle = 'rgba(62,46,30,0.95)';
-    ctx.lineWidth = 3.5;
-    ctx.beginPath(); ctx.moveTo(S * 0.5, S); ctx.lineTo(S * 0.5, S * 0.06); ctx.stroke();
-    let seed = kind.length * 7 + 3;
-    const rnd = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    for (let r = 0; r < rows; r++) {
-      const t = r / rows;
-      const y = S * (0.95 - t * 0.9);
-      const spread = S * 0.46 * (1 - t * 0.8) + S * 0.05;
-      // side twigs: 2 per row, each carrying a comb of needles
-      for (const dir of [-1, 1]) {
-        const twigLen = spread * (0.7 + rnd() * 0.35);
-        const droop = kind === 'spruce' ? 0.28 : 0.12;
-        const x1 = S * 0.5 + dir * twigLen;
-        const y1 = y + twigLen * droop;
-        ctx.strokeStyle = 'rgba(58,44,28,0.9)';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath(); ctx.moveTo(S * 0.5, y); ctx.lineTo(x1, y1); ctx.stroke();
-        const n = Math.round(10 + rnd() * 6);
-        for (let i = 0; i < n; i++) {
-          const u = (i + 0.4) / n;
-          const bx = S * 0.5 + (x1 - S * 0.5) * u;
-          const by = y + (y1 - y) * u;
-          for (const side of [-1, 1]) {
-            const ang = (dir > 0 ? -0.35 : Math.PI + 0.35) + side * (0.75 + rnd() * 0.45);
-            const len = S * needleLen * (0.6 + rnd() * 0.7);
-            const shade = 0.72 + rnd() * 0.5;
-            ctx.strokeStyle = `rgba(${Math.round(base[0] * shade)},${Math.round(base[1] * shade)},${Math.round(base[2] * shade)},1)`;
-            ctx.lineWidth = kind === 'larch' ? 1.1 : 1.7;
-            ctx.beginPath();
-            ctx.moveTo(bx, by);
-            ctx.lineTo(bx + Math.cos(ang) * len, by + Math.sin(ang) * len);
-            ctx.stroke();
-          }
-        }
-      }
-    }
-    return canvas;
-  }
-}
-
-/** Beech/maple leaf cluster card: overlapping ovate leaves with gaps and midribs. */
-function broadleafCanvas(season: 'summer' | 'autumn' = 'summer'): HTMLCanvasElement {
-  {
-    const S = 256;
-    const { canvas, ctx } = newCanvas(S);
-    ctx.clearRect(0, 0, S, S);
-    let seed = season === 'autumn' ? 991 : 17;
-    const rnd = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    ctx.strokeStyle = 'rgba(64,48,30,0.9)';
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(S * 0.5, S); ctx.lineTo(S * 0.5, S * 0.2); ctx.stroke();
-    for (let i = 0; i < 46; i++) {
-      const t = rnd();
-      const cx = S * 0.5 + (rnd() - 0.5) * S * 0.84;
-      const cy = S * (0.92 - t * 0.86) + (rnd() - 0.5) * 18;
-      const rx = S * (0.055 + rnd() * 0.045);
-      const ry = rx * (1.5 + rnd() * 0.5);
-      const rot = (rnd() - 0.5) * 2.4;
-      const shade = 0.7 + rnd() * 0.55;
-      const col = season === 'autumn' ? [172, 116, 42] : [74, 106, 46];
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(rot);
-      ctx.fillStyle = `rgb(${Math.round(col[0] * shade)},${Math.round(col[1] * shade)},${Math.round(col[2] * shade)})`;
-      ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = `rgba(${Math.round(col[0] * shade * 0.6)},${Math.round(col[1] * shade * 0.6)},${Math.round(col[2] * shade * 0.6)},0.85)`;
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(0, -ry); ctx.lineTo(0, ry); ctx.stroke();
-      ctx.restore();
-    }
-    return canvas;
-  }
-}
-
-/** A tuft of grass blades (alpha) for the near-camera instanced ground cover. */
-export function grassTuftTexture(): CanvasTexture {
-  return cached('grassTuft', () => {
-    const S = 128;
-    const { canvas, ctx } = newCanvas(S);
-    ctx.clearRect(0, 0, S, S);
-    let seed = 4242;
-    const rnd = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    for (let i = 0; i < 22; i++) {
-      const x0 = S * (0.12 + rnd() * 0.76);
-      const h = S * (0.45 + rnd() * 0.5);
-      const bend = (rnd() - 0.5) * S * 0.42;
-      const w = 2 + rnd() * 2.4;
-      const shade = 0.55 + rnd() * 0.6;
-      const grad = ctx.createLinearGradient(0, S, 0, S - h);
-      grad.addColorStop(0, `rgb(${Math.round(54 * shade)},${Math.round(76 * shade)},${Math.round(34 * shade)})`);
-      grad.addColorStop(1, `rgb(${Math.round(118 * shade)},${Math.round(150 * shade)},${Math.round(66 * shade)})`);
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = w;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(x0, S);
-      ctx.quadraticCurveTo(x0 + bend * 0.35, S - h * 0.55, x0 + bend, S - h);
-      ctx.stroke();
-    }
-    const tex = new CanvasTexture(canvas);
-    tex.colorSpace = SRGBColorSpace;
-    tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
-    return tex;
-  });
-}
-
-/**
- * One 1024x512 atlas for every tree: 4x2 cells of 256px.
- * row0: spruce needles | fir needles | larch needles | beech leaves
- * row1: conifer bark   | pale bark   | pine needles  | autumn leaves
- * Bark cells start procedural and are repainted from the CC0 Bark012 JPEG when it decodes.
- */
-export const TREE_CELL = {
-  spruce: [0, 0], fir: [1, 0], larch: [2, 0], beech: [3, 0],
-  bark: [0, 1], barkPale: [1, 1], pine: [2, 1], beechAutumn: [3, 1],
-} as const;
-export type TreeCell = keyof typeof TREE_CELL;
-
-let treeAtlas: CanvasTexture | null = null;
-export function treeAtlasTexture(): CanvasTexture {
-  if (treeAtlas) return treeAtlas;
-  const C = 256;
-  const { canvas, ctx } = newCanvas(C * 4, C * 2);
-  ctx.clearRect(0, 0, C * 4, C * 2);
-  const put = (cell: TreeCell, src: HTMLCanvasElement) => {
-    const [cx, cy] = TREE_CELL[cell];
-    ctx.clearRect(cx * C, cy * C, C, C);
-    ctx.drawImage(src, cx * C, cy * C);
-  };
-  put('spruce', needleSprayCanvas('spruce'));
-  put('fir', needleSprayCanvas('fir'));
-  put('larch', needleSprayCanvas('larch'));
-  put('pine', needleSprayCanvas('pine'));
-  put('beech', broadleafCanvas('summer'));
-  put('beechAutumn', broadleafCanvas('autumn'));
-  put('bark', proceduralBarkCanvas(0.0));
-  put('barkPale', proceduralBarkCanvas(0.45));
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
-  tex.anisotropy = 4;
-  treeAtlas = tex;
-  // upgrade the two bark cells to the real CC0 photo when it arrives (2x2 repeats per cell)
-  const img = new Image();
-  img.onload = () => {
-    for (const cell of ['bark', 'barkPale'] as TreeCell[]) {
-      const [cx, cy] = TREE_CELL[cell];
-      ctx.save();
-      ctx.globalAlpha = 1;
-      for (let ry = 0; ry < 2; ry++) for (let rx = 0; rx < 2; rx++) ctx.drawImage(img, cx * C + rx * C / 2, cy * C + ry * C / 2, C / 2, C / 2);
-      if (cell === 'barkPale') { ctx.globalCompositeOperation = 'lighten'; ctx.fillStyle = 'rgba(190,180,160,0.45)'; ctx.fillRect(cx * C, cy * C, C, C); }
-      ctx.restore();
-    }
-    tex.needsUpdate = true;
-  };
-  img.onerror = () => { /* keep the procedural bark */ };
-  img.src = `${ASSET_BASE}/vegetation/bark-conifer.jpg`;
-  return tex;
-}
-
-/** UV rect (u0, v0, du, dv) of one atlas cell; v is flipped because canvas y grows downward. */
-export function treeCellUv(cell: TreeCell): [number, number, number, number] {
-  const [cx, cy] = TREE_CELL[cell];
-  return [cx * 0.25, 1 - (cy + 1) * 0.5, 0.25, 0.5];
-}
-
-/** 2x2 atlas of tree silhouettes (256px cells) for the far-LOD billboard impostors. */
-export const IMPOSTOR_CELL = { spruce: [0, 0], fir: [1, 0], larch: [0, 1], beech: [1, 1] } as const;
-export type ImpostorCell = keyof typeof IMPOSTOR_CELL;
-
-let impostorAtlas: CanvasTexture | null = null;
-export function treeImpostorAtlas(): CanvasTexture {
-  if (impostorAtlas) return impostorAtlas;
-  const C = 256;
-  const { canvas, ctx } = newCanvas(C * 2);
-  ctx.clearRect(0, 0, C * 2, C * 2);
-  const draw = (cell: ImpostorCell) => {
-    const [gx, gy] = IMPOSTOR_CELL[cell];
-    ctx.save();
-    ctx.translate(gx * C, gy * C);
-    let seed = cell.length * 131 + 7;
-    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const trunk = cell === 'beech' ? 0.42 : 0.94;
-    ctx.fillStyle = '#3a2a1c';
-    ctx.fillRect(C * 0.5 - C * 0.016, C * trunk, C * 0.032, C * (1 - trunk));
-    if (cell === 'beech') {
-      for (let i = 0; i < 90; i++) {
-        const a = rnd() * Math.PI * 2, r = Math.pow(rnd(), 0.55) * C * 0.34;
-        const x = C * 0.5 + Math.cos(a) * r, y = C * 0.42 + Math.sin(a) * r * 0.82;
-        const sh = 0.55 + rnd() * 0.5 + (1 - y / C) * 0.15;
-        ctx.fillStyle = `rgb(${Math.round(58 * sh)},${Math.round(92 * sh)},${Math.round(40 * sh)})`;
-        ctx.beginPath(); ctx.arc(x, y, C * (0.035 + rnd() * 0.035), 0, Math.PI * 2); ctx.fill();
-      }
-    } else {
-      const tiers = cell === 'larch' ? 7 : 8;
-      const wide = cell === 'fir' ? 0.36 : cell === 'larch' ? 0.26 : 0.40;
-      for (let i = 0; i < tiers; i++) {
-        const t = i / (tiers - 1);
-        const yT = C * (0.04 + t * 0.74), yB = yT + C * 0.19;
-        const hw = C * wide * (0.22 + t * 0.78);
-        const sh = 0.5 + t * 0.32;
-        const base = cell === 'larch' ? [86, 116, 52] : cell === 'fir' ? [36, 74, 46] : [26, 60, 34];
-        ctx.fillStyle = `rgb(${Math.round(base[0] * sh)},${Math.round(base[1] * sh)},${Math.round(base[2] * sh)})`;
-        ctx.beginPath();
-        ctx.moveTo(C * 0.5, yT);
-        for (let k = -6; k <= 6; k++) {
-          const u = k / 6;
-          ctx.lineTo(C * 0.5 + u * hw * (0.86 + rnd() * 0.3), yB - Math.abs(u) * C * 0.03);
-        }
-        ctx.closePath(); ctx.fill();
-      }
-    }
-    ctx.restore();
-  };
-  (Object.keys(IMPOSTOR_CELL) as ImpostorCell[]).forEach(draw);
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
-  impostorAtlas = tex;
-  return tex;
-}
-
-/** UV rect (u0, v0, du, dv) of one impostor cell. */
-export function impostorCellUv(cell: ImpostorCell): [number, number, number, number] {
-  const [cx, cy] = IMPOSTOR_CELL[cell];
-  return [cx * 0.5, 1 - (cy + 1) * 0.5, 0.5, 0.5];
-}
-
-function proceduralBarkCanvas(pale: number): HTMLCanvasElement {
-  const S = 256;
-  const { canvas, ctx } = newCanvas(S);
-  const base = [78 + pale * 90, 60 + pale * 84, 44 + pale * 76];
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const groove = Math.abs(Math.sin(x * 0.13 + valueNoise2D(x * 0.02, y * 0.08, 12) * 3.4));
-      const n = 0.5 + 0.5 * fbm2D(x, y, { octaves: 3, frequency: 0.16, seed: 71 });
-      const k = 0.45 + 0.55 * groove * n;
-      ctx.fillStyle = `rgb(${Math.round(base[0] * k)},${Math.round(base[1] * k)},${Math.round(base[2] * k)})`;
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
-  return canvas;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Bark (CC0 Bark012, packed to 256² by tools/assets/fetch-world.mjs)
-// ---------------------------------------------------------------------------------------------
-
-let barkPair: { map: Texture; normalMap: Texture } | null = null;
-export function barkTextures(): { map: Texture; normalMap: Texture } {
-  if (barkPair) return barkPair;
-  const loader = new TextureLoader();
-  const map = loader.load(`${ASSET_BASE}/vegetation/bark-conifer.jpg`);
-  map.colorSpace = SRGBColorSpace;
-  map.wrapS = map.wrapT = RepeatWrapping;
-  const normalMap = loader.load(`${ASSET_BASE}/vegetation/bark-conifer-n.jpg`);
-  normalMap.colorSpace = LinearSRGBColorSpace;
-  normalMap.wrapS = normalMap.wrapT = RepeatWrapping;
-  barkPair = { map, normalMap };
-  return barkPair;
-}
+// Vegetation cut-outs, the tree atlas and the billboard impostors moved to src/world/look/foliage.ts
+// and src/world/look/impostor.ts when they stopped being canvas drawings and became re-composed
+// photographs; this file keeps the terrain arrays, the macro-variation field and the prop tiles.
 
 // ---------------------------------------------------------------------------------------------
 // Legacy procedural canvas textures (props — models.ts, owned by the asset builder — and the map)
@@ -671,16 +394,11 @@ export function waterNormalTexture(variant: 0 | 1 = 0, size = 256): CanvasTextur
 export function disposeAllTextures(): void {
   for (const p of cache.values()) { p.map.dispose(); p.normalMap.dispose(); }
   cache.clear();
-  for (const t of canvasCache.values()) t.dispose();
-  canvasCache.clear();
   macroTex?.dispose(); macroTex = null;
   if (terrainArrays) {
     terrainArrays.albedo.dispose(); terrainArrays.normal.dispose(); terrainArrays.orm.dispose();
     terrainArrays = null;
   }
-  if (barkPair) { barkPair.map.dispose(); barkPair.normalMap.dispose(); barkPair = null; }
-  treeAtlas?.dispose(); treeAtlas = null;
-  impostorAtlas?.dispose(); impostorAtlas = null;
 }
 
 export type { Texture };

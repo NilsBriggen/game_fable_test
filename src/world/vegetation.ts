@@ -1,31 +1,52 @@
 /**
- * Vegetation: one global InstancedMesh per species per LOD tier, populated from the chunks the
- * terrain streamer has active. Three tiers — full mesh under 95 m, reduced mesh under 250 m,
+ * Vegetation: one global InstancedMesh pool per species per LOD tier, populated from the chunks the
+ * terrain streamer has active. Three tiers — full mesh under 70 m, reduced mesh under 250 m,
  * billboard impostor beyond (ARCHITECTURE §5.1) — chosen from the real camera distance rather than
- * the terrain's own chunk LOD, plus a grass-tuft pool that only fills the chunks within 80 m of the
- * camera and scree boulders on rock. Only the near tier casts shadows: CSM re-draws every caster
- * once per cascade, so a shadow from a tree 300 m away costs three passes for a pixel.
+ * the terrain's own chunk LOD, plus ground cover (grass tufts, ferns, herbs, loose stones) in the
+ * near ring. Only the near tier casts shadows: CSM re-draws every caster once per cascade, so a
+ * shadow from a tree 300 m away costs three passes for something a pixel wide.
+ *
  * Placement is deterministic per chunk (hash of seed + chunk coords) from surface, slope and height,
- * and nothing is planted above the tree line (LORE §3: 1500 m a.s.l. -> game h 355).
+ * nothing is planted above the tree line (LORE §3: 1500 m a.s.l. -> game h 355), and a low-frequency
+ * "glade" field thins the canopy in patches so a wood has clearings to walk through instead of being
+ * a uniform lawn of trunks.
+ *
+ * Two runtime properties this file is careful about, both from the wave-2 bug hunt
+ * (tools/critic/bughunt/world-runtime.md #3 and #6):
+ *
+ *  * **Pools grow instead of dropping.** Two adjacent all-forest chunks at full tier want ~2 680
+ *    spruce between them; a fixed 2 600-slot pool silently handed back `null` and the trees simply
+ *    stopped appearing, with no log. Pools now reallocate (matrices and colours copied) when they
+ *    run out, and only warn if they hit the hard ceiling.
+ *  * **`update()` allocates nothing.** It runs every frame from the `world-stream` system; the old
+ *    version built a `Set` and two array spreads per frame whether or not anything had changed.
  */
-import { DynamicDrawUsage, Group, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three';
+import { Color, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3, type BufferGeometry } from 'three';
 import { Rng, hashString } from '@core/rng';
 import type { TerrainManager } from './terrain';
 import { FOREST_MAX_H } from './heightmodel';
-import { buildTreeGeometry, treeImpostor, treeMaterial, grassTuft, type TreeKind } from './treeGeometry';
+import { fbm2D } from './noise';
+import { buildTreeGeometry, treeImpostor, treeMaterial, groundCover, type TreeKind } from './treeGeometry';
 import { getViewPosition, registerCsmMaterial } from './shadowCsm';
-import { buildSplatMask, splatMaskReady } from './terrainMaterial';
-import { boulderGeometry, rockMaterial } from './propGeometry';
+import { buildSplatMask, splatMaskReady, getTerrainMaterial } from './terrainMaterial';
+import { rockGeometry, rockScanMaterial, type RockKind } from './look/rocks';
 
 type Tier = 'full' | 'mid' | 'impostor';
 
-const SPACING: Record<Tier, number> = { full: 8.5, mid: 11, impostor: 13 };
-const IMPOSTOR_SPACING_FAR = 24;
+const SPACING: Record<Tier, number> = { full: 8.0, mid: 9.5, impostor: 12 };
+/** Chunks the terrain itself has dropped to LOD2/3 are ≥900 m away; thin the forest there.
+ *  Tighter than the 24 m it used to be — that is what made a wooded slope read as scattered
+ *  individual trees from across the Urnersee — but not so tight that a whole valley of overlapping
+ *  alpha-tested billboards becomes the frame's dominant cost. */
+const IMPOSTOR_SPACING_FAR = 17;
 /** Tier by distance from the camera to the nearest point of the chunk, not by terrain chunk LOD:
  *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m. */
 const TIER_DIST = { full: 70, mid: 250 };
-const GRASS_RADIUS = 80;
-const GRASS_SPACING = 2.6;
+/** Grass tufts; the ring the bar cares about ("near-field ground within 40 m") plus a margin. */
+const GRASS_RADIUS = 52;
+const GRASS_SPACING = 2.4;
+/** Stones, ferns and herbs — the bar's "small clutter within 40 m". */
+const CLUTTER_RADIUS = 40;
 
 /** Treeline in game metres (LORE §3: real 1500 m a.s.l. -> h≈355). */
 const TREELINE = FOREST_MAX_H;
@@ -34,79 +55,143 @@ const TREE_SPECIES: { kind: TreeKind; weight: number }[] = [
   { kind: 'spruce', weight: 0.5 }, { kind: 'fir', weight: 0.19 }, { kind: 'larch', weight: 0.13 }, { kind: 'beech', weight: 0.18 },
 ];
 
+/** Per-pool starting capacity. Sized from the measured worst case, then allowed to grow. */
+const CAPACITY: Record<string, number> = { full: 4200, mid: 6000, impostor: 26000, rock: 2400, cover: 9000 };
+const HARD_CAP = 70000;
+
 interface Pool {
+  key: string;
   mesh: InstancedMesh;
   capacity: number;
   free: number[];
   /** InstancedMesh renders [0, count); with a free-list the live slots can be scattered, so track
    * the highest index ever handed out. Freed slots below it get a zero-scale matrix. */
   highWater: number;
+  casts: boolean;
+  /** per-instance tint (grass/foliage colour variation) */
+  tinted: boolean;
 }
+
+interface Alloc { poolKey: string; index: number }
 
 const tmpMat = new Matrix4();
 const tmpPos = new Vector3();
 const tmpQuat = new Quaternion();
 const tmpTilt = new Quaternion();
 const tmpScale = new Vector3();
+const tmpColor = new Color();
+/** registerCsmMaterial() wraps onBeforeCompile; the tree/impostor/cover materials are shared
+ *  singletons across ~12 pools and their factories already register themselves, so without this
+ *  every pool would wrap the same material's compile hook again. */
+const csmRegistered = new WeakSet<MeshStandardMaterial>();
 const UP = new Vector3(0, 1, 0);
 const tiltAxis = new Vector3();
 
 export class VegetationManager {
   readonly group = new Group();
   private pools = new Map<string, Pool>();
-  private chunkAlloc = new Map<string, { poolKey: string; index: number }[]>();
+  private chunkAlloc = new Map<string, Alloc[]>();
   private chunkTier = new Map<string, Tier | 'grass' | 'none'>();
-  private chunkGrass = new Map<string, { poolKey: string; index: number }[]>();
+  private chunkGrass = new Map<string, Alloc[]>();
   private maskKicked = false;
+  private overflowWarned = false;
+  /** reused across frames: update() must not allocate (bughunt world-runtime #6) */
+  private activeKeys = new Set<string>();
+  private dirtyPools = new Set<Pool>();
 
   constructor(private seed: number, private terrain: TerrainManager) {
     this.group.name = 'vegetation';
   }
 
-  private poolFor(key: string, capacity: number, build: () => { geometry: any; material: MeshStandardMaterial }, casts = true): Pool {
+  private poolFor(key: string, capacity: number, build: () => { geometry: BufferGeometry; material: MeshStandardMaterial }, casts = true, tinted = false): Pool {
     let p = this.pools.get(key);
     if (p) return p;
     const { geometry, material } = build();
-    registerCsmMaterial(material);
+    if (!csmRegistered.has(material)) { csmRegistered.add(material); registerCsmMaterial(material); }
+    const mesh = this.makeMesh(key, geometry, material, capacity, casts);
+    this.group.add(mesh);
+    const free: number[] = [];
+    for (let i = capacity - 1; i >= 0; i--) free.push(i);
+    p = { key, mesh, capacity, free, highWater: 0, casts, tinted };
+    this.pools.set(key, p);
+    return p;
+  }
+
+  private makeMesh(key: string, geometry: BufferGeometry, material: MeshStandardMaterial, capacity: number, casts: boolean): InstancedMesh {
     const mesh = new InstancedMesh(geometry, material, capacity);
     mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     mesh.count = 0;
     mesh.castShadow = casts;
     mesh.receiveShadow = true;
     mesh.name = `veg-${key}`;
+    mesh.frustumCulled = true;
+    return mesh;
+  }
+
+  /**
+   * Reallocate a full pool at 1.7x. Slot indices are preserved, so every Alloc already handed out
+   * stays valid; only the InstancedMesh object is replaced.
+   */
+  private grow(pool: Pool): boolean {
+    if (pool.capacity >= HARD_CAP) {
+      if (!this.overflowWarned) {
+        this.overflowWarned = true;
+        console.warn(`[world] vegetation pool ${pool.key} hit the ${HARD_CAP} instance ceiling; some plants will not be placed`);
+      }
+      return false;
+    }
+    const next = Math.min(HARD_CAP, Math.ceil(pool.capacity * 1.7));
+    const old = pool.mesh;
+    const mesh = this.makeMesh(pool.key, old.geometry as BufferGeometry, old.material as MeshStandardMaterial, next, pool.casts);
+    mesh.instanceMatrix.array.set(old.instanceMatrix.array as Float32Array);
+    if (old.instanceColor) {
+      const arr = new Float32Array(next * 3).fill(1);
+      arr.set(old.instanceColor.array as Float32Array);
+      mesh.instanceColor = new InstancedBufferAttribute(arr, 3);
+      mesh.instanceColor.setUsage(DynamicDrawUsage);
+      mesh.instanceColor.needsUpdate = true;
+    }
+    mesh.count = old.count;
+    this.group.remove(old);
+    old.dispose();
     this.group.add(mesh);
-    const free: number[] = [];
-    for (let i = capacity - 1; i >= 0; i--) free.push(i);
-    p = { mesh, capacity, free, highWater: 0 };
-    this.pools.set(key, p);
-    return p;
+    for (let i = next - 1; i >= pool.capacity; i--) pool.free.push(i);
+    pool.mesh = mesh;
+    pool.capacity = next;
+    this.dirtyPools.add(pool);
+    return true;
   }
 
   private treePool(kind: TreeKind, tier: Tier): Pool {
-    if (tier === 'impostor') return this.poolFor(`tree.${kind}.impostor`, 26000, () => treeImpostor(kind), false);
+    if (tier === 'impostor') return this.poolFor(`tree.${kind}.impostor`, CAPACITY.impostor, () => treeImpostor(kind), false);
     const lod: 0 | 1 = tier === 'full' ? 0 : 1;
     // Only the near tier casts: CSM re-draws every caster once per cascade, so shadows from trees
     // past ~100 m cost three extra passes for something a pixel wide.
-    return this.poolFor(`tree.${kind}.${tier}`, tier === 'full' ? 2600 : 3600,
-      () => ({ geometry: buildTreeGeometry(kind, new Rng(7 + lod), lod), material: treeMaterial() }), tier === 'full');
+    return this.poolFor(`tree.${kind}.${tier}`, tier === 'full' ? CAPACITY.full : CAPACITY.mid,
+      () => ({ geometry: buildTreeGeometry(kind, new Rng(7 + lod), lod), material: treeMaterial() }), tier === 'full', true);
   }
-  private rockPool(size: 'large' | 'small'): Pool {
-    return this.poolFor(`rock.${size}`, 1200, () => ({ geometry: boulderGeometry(size === 'large' ? 1.7 : 0.55), material: rockMaterial() }));
+  private rockPool(size: RockKind): Pool {
+    // Real decimated photogrammetry scans (look/rocks.ts); the geometry object is filled in place
+    // when the JSON lands, so the pool can be created before the fetch resolves.
+    return this.poolFor(`rock.${size}`, CAPACITY.rock, () => ({ geometry: rockGeometry(size), material: rockScanMaterial() }), size !== 'pebble');
   }
-  private grassPool(): Pool {
-    return this.poolFor('grass.tuft', 14000, () => grassTuft(), false);
+  private coverPool(kind: 'grass' | 'grassDry' | 'fern' | 'herb'): Pool {
+    const shape: Record<string, [number, number, number]> = {
+      grass: [3, 0.7, 0.62], grassDry: [3, 0.72, 0.66], fern: [3, 1.05, 0.85], herb: [2, 0.5, 0.42],
+    };
+    const [blades, w, h] = shape[kind];
+    return this.poolFor(`cover.${kind}`, CAPACITY.cover, () => groundCover(kind, blades, w, h), false, true);
   }
-
-  private dirtyPools = new Set<Pool>();
 
   private alloc(pool: Pool): number | null {
-    if (!pool.free.length) return null;
-    const idx = pool.free.pop()!;
+    if (!pool.free.length && !this.grow(pool)) return null;
+    const idx = pool.free.pop();
+    if (idx === undefined) return null;
     if (idx + 1 > pool.highWater) pool.highWater = idx + 1;
     return idx;
   }
 
-  private setInstance(pool: Pool, index: number, x: number, y: number, z: number, yaw: number, scale: number, lean = 0, leanDir = 0): void {
+  private setInstance(pool: Pool, index: number, x: number, y: number, z: number, yaw: number, scale: number, lean = 0, leanDir = 0, scaleY = scale): void {
     tmpPos.set(x, y, z);
     tmpQuat.setFromAxisAngle(UP, yaw);
     if (lean > 0.001) {
@@ -114,10 +199,18 @@ export class VegetationManager {
       tmpTilt.setFromAxisAngle(tiltAxis, lean);
       tmpQuat.premultiply(tmpTilt);
     }
-    tmpScale.set(scale, scale, scale);
+    tmpScale.set(scale, scaleY, scale);
     tmpMat.compose(tmpPos, tmpQuat, tmpScale);
     pool.mesh.setMatrixAt(index, tmpMat);
     this.dirtyPools.add(pool);
+  }
+
+  /** Per-instance tint. Multiplies the geometry's own vertex colours (three's instancing_color chunk). */
+  private setTint(pool: Pool, index: number, r: number, g: number, b: number): void {
+    if (!pool.tinted) return;
+    tmpColor.setRGB(r, g, b);
+    pool.mesh.setColorAt(index, tmpColor);
+    if (pool.mesh.instanceColor) pool.mesh.instanceColor.needsUpdate = true;
   }
 
   /** Called every frame by the world 'always' system after terrain streaming. */
@@ -131,11 +224,14 @@ export class VegetationManager {
       buildSplatMask((x, z) => this.terrain.surfaceIdAt(x, z), this.terrain.cpuWidth, this.terrain.cpuHeight, (x, z) => this.terrain.heightAt(x, z));
     }
     const active = this.terrain.listActiveChunks();
-    const activeKeys = new Set(active.map((c) => c.key));
-    for (const key of [...this.chunkAlloc.keys()]) if (!activeKeys.has(key)) this.freeChunk(key);
-    for (const key of [...this.chunkGrass.keys()]) if (!activeKeys.has(key)) this.freeGrass(key);
+    this.activeKeys.clear();
+    for (let i = 0; i < active.length; i++) this.activeKeys.add(active[i].key);
+    // Map iteration tolerates deletion of the entry currently being visited, so this needs no copy.
+    for (const key of this.chunkAlloc.keys()) if (!this.activeKeys.has(key)) this.freeChunk(key);
+    for (const key of this.chunkGrass.keys()) if (!this.activeKeys.has(key)) this.freeGrass(key);
 
-    for (const c of active) {
+    for (let i = 0; i < active.length; i++) {
+      const c = active[i];
       // distance from the camera to the nearest point of this 500 m chunk
       const ddx = Math.max(c.originX - camX, 0, camX - (c.originX + 500));
       const ddz = Math.max(c.originZ - camZ, 0, camZ - (c.originZ + 500));
@@ -146,12 +242,9 @@ export class VegetationManager {
         this.chunkTier.set(c.key, tier);
         this.populateChunk(c.key, c.cx, c.cz, c.originX, c.originZ, tier, c.lod);
       }
-      // grass only in the chunks that overlap the 80 m ring around the camera
-      const dx = Math.max(c.originX - camX, 0, camX - (c.originX + 500));
-      const dz = Math.max(c.originZ - camZ, 0, camZ - (c.originZ + 500));
-      const near = Math.hypot(dx, dz) < GRASS_RADIUS;
+      const near = d < GRASS_RADIUS;
       const hasGrass = this.chunkGrass.has(c.key);
-      if (near && !hasGrass) this.populateGrass(c.key, c.cx, c.cz, c.originX, c.originZ, camX, camZ);
+      if (near && !hasGrass) this.populateGround(c.key, c.cx, c.cz, c.originX, c.originZ, camX, camZ);
       else if (!near && hasGrass) this.freeGrass(c.key);
     }
     for (const p of this.dirtyPools) {
@@ -162,7 +255,7 @@ export class VegetationManager {
     this.dirtyPools.clear();
   }
 
-  private release(list: { poolKey: string; index: number }[] | undefined): void {
+  private release(list: Alloc[] | undefined): void {
     if (!list) return;
     for (const a of list) {
       const pool = this.pools.get(a.poolKey);
@@ -185,11 +278,27 @@ export class VegetationManager {
     this.chunkGrass.delete(key);
   }
 
+  /**
+   * How wintry the world currently is, read from the terrain material's own live snow uniform
+   * (sky.ts writes it from the season and the weather). Ground cover and foliage tint follow it:
+   * a scene whose ground is under snow with bright summer grass tufts standing in it and green
+   * beeches behind them is worse than no ground cover at all.
+   */
+  private snowiness(): number {
+    return Math.min(1, Number(getTerrainMaterial().uniforms.uSnowDepth.value) || 0);
+  }
+
+  /** Low-frequency clearing field: 0 in a glade, 1 in closed canopy. ~120 m features. */
+  private glade(x: number, z: number): number {
+    const n = fbm2D(x, z, { octaves: 2, frequency: 0.0082, seed: 9001 });
+    return Math.min(1, Math.max(0, (n + 0.42) * 1.35));
+  }
+
   private populateChunk(key: string, cx: number, cz: number, originX: number, originZ: number, tier: Tier, lod: number): void {
     const rng = new Rng(hashString(`${this.seed}:veg:${cx}:${cz}`) >>> 0);
     const spacing = tier === 'impostor' && lod >= 2 ? IMPOSTOR_SPACING_FAR : SPACING[tier];
     const size = 500;
-    const allocs: { poolKey: string; index: number }[] = [];
+    const allocs: Alloc[] = [];
     for (let gz = 0; gz < size; gz += spacing) {
       for (let gx = 0; gx < size; gx += spacing) {
         const x = originX + gx + (rng.next() - 0.5) * spacing * 0.85;
@@ -204,8 +313,8 @@ export class VegetationManager {
         if (slope > 0.72) continue;
 
         let treeChance = 0, rockChance = 0;
-        if (surface === 'forest') { treeChance = tier === 'impostor' ? 0.8 : 0.78; rockChance = 0.010; }
-        else if (surface === 'grass' || surface === 'meadow') { treeChance = tier === 'impostor' ? 0.025 : 0.05; rockChance = 0.008; }
+        if (surface === 'forest') { treeChance = 0.86 * (0.35 + 0.65 * this.glade(x, z)); rockChance = 0.010; }
+        else if (surface === 'grass' || surface === 'meadow') { treeChance = tier === 'impostor' ? 0.03 : 0.05; rockChance = 0.008; }
         else if (surface === 'scree' || surface === 'rock') { treeChance = y < TREELINE * 0.8 ? 0.03 : 0; rockChance = 0.06; }
         else if (surface === 'mud') { treeChance = 0.03; }
 
@@ -213,23 +322,29 @@ export class VegetationManager {
         if (roll < treeChance) {
           // mountain pine takes over the last 15% below the treeline; beech drops out above ~2/3
           const alt = y / TREELINE;
-          let kind: TreeKind;
-          if (alt > 0.85) kind = 'pine';
-          else kind = pickSpecies(rng, alt);
+          const kind: TreeKind = alt > 0.85 ? 'pine' : pickSpecies(rng, alt);
           const pool = this.treePool(kind, tier);
           const idx = this.alloc(pool);
           if (idx !== null) {
-            const scale = (0.78 + rng.next() * 0.5) * (1 - 0.25 * Math.max(0, alt - 0.6));
+            const scale = (0.8 + rng.next() * 0.5) * (1 - 0.25 * Math.max(0, alt - 0.6));
+            // a stand is not one tree stamped N times: vary the height/width ratio too
+            const scaleY = scale * (0.86 + rng.next() * 0.34);
             const lean = tier === 'impostor' ? 0 : Math.min(slope * 0.35, 0.16);
-            this.setInstance(pool, idx, x, y, z, rng.next() * Math.PI * 2, scale, lean, rng.next() * Math.PI * 2);
-            allocs.push({ poolKey: pool.mesh.name.slice(4), index: idx });
+            this.setInstance(pool, idx, x, y, z, rng.next() * Math.PI * 2, scale, lean, rng.next() * Math.PI * 2, scaleY);
+            // foliage tint: cooler/darker in the shade of a closed stand, warmer on an open edge,
+            // and drained toward grey-brown once the snow uniform says it is winter
+            const t = 0.86 + rng.next() * 0.26;
+            const wnt = this.snowiness();
+            const r = t * (0.94 + rng.next() * 0.12), g = t, b = t * (0.9 + rng.next() * 0.14);
+            this.setTint(pool, idx, r * (1 + wnt * 0.35), g * (1 - wnt * 0.22), b * (1 - wnt * 0.05));
+            allocs.push({ poolKey: pool.key, index: idx });
           }
         } else if (roll < treeChance + rockChance) {
           const pool = this.rockPool(rng.next() < 0.4 ? 'large' : 'small');
           const idx = this.alloc(pool);
           if (idx !== null) {
             this.setInstance(pool, idx, x, y, z, rng.next() * Math.PI * 2, 0.6 + rng.next() * 0.9);
-            allocs.push({ poolKey: pool.mesh.name.slice(4), index: idx });
+            allocs.push({ poolKey: pool.key, index: idx });
           }
         }
       }
@@ -237,26 +352,66 @@ export class VegetationManager {
     this.chunkAlloc.set(key, allocs);
   }
 
-  private populateGrass(key: string, cx: number, cz: number, originX: number, originZ: number, camX: number, camZ: number): void {
+  /**
+   * Ground cover in the near ring: grass tufts on pasture, ferns and stones in the wood, herbs on
+   * the meadow, loose pebbles on scree and on the village yard. This is what the near-field bar is
+   * about — bare ground within 40 m reads as a painted texture no matter how good the texture is.
+   */
+  private populateGround(key: string, cx: number, cz: number, originX: number, originZ: number, camX: number, camZ: number): void {
     const rng = new Rng(hashString(`${this.seed}:grass:${cx}:${cz}`) >>> 0);
-    const pool = this.grassPool();
-    const allocs: { poolKey: string; index: number }[] = [];
+    const allocs: Alloc[] = [];
+    const step = GRASS_SPACING;
     const x0 = Math.max(originX, camX - GRASS_RADIUS), x1 = Math.min(originX + 500, camX + GRASS_RADIUS);
     const z0 = Math.max(originZ, camZ - GRASS_RADIUS), z1 = Math.min(originZ + 500, camZ + GRASS_RADIUS);
-    for (let z = z0; z < z1; z += GRASS_SPACING) {
-      for (let x = x0; x < x1; x += GRASS_SPACING) {
-        const px = x + (rng.next() - 0.5) * GRASS_SPACING;
-        const pz = z + (rng.next() - 0.5) * GRASS_SPACING;
-        if (Math.hypot(px - camX, pz - camZ) > GRASS_RADIUS) continue;
-        if (rng.next() > 0.55) continue;
+    for (let z = z0; z < z1; z += step) {
+      for (let x = x0; x < x1; x += step) {
+        const px = x + (rng.next() - 0.5) * step;
+        const pz = z + (rng.next() - 0.5) * step;
+        const dist = Math.hypot(px - camX, pz - camZ);
+        if (dist > GRASS_RADIUS) continue;
+        const roll = rng.next();
         const surface = this.terrain.surfaceAt(px, pz);
-        if (surface !== 'grass' && surface !== 'meadow') continue;
-        if (this.terrain.slopeAt(px, pz) > 0.7) continue;
+        if (surface === 'water') continue;
+        const slope = this.terrain.slopeAt(px, pz);
+        if (slope > 0.75) continue;
+        const y = this.terrain.heightAt(px, pz);
+
+        let pool: Pool | null = null;
+        let scale = 0.8 + rng.next() * 0.7;
+        let tintR = 1, tintG = 1, tintB = 1;
+        const winter = this.snowiness();
+        if (surface === 'grass' || surface === 'meadow') {
+          // winter thins the sward to stubble poking through the snow
+          if (roll > 0.62 - winter * 0.42) continue;
+          const dry = surface === 'meadow' || y > 150 || winter > 0.25;
+          pool = this.coverPool(dry && (winter > 0.25 || rng.next() < 0.55) ? 'grassDry' : 'grass');
+          // real pasture is not one green: spread the tufts over a yellow-to-blue-green range
+          const k = rng.next();
+          tintR = 0.78 + k * 0.5; tintG = 0.86 + rng.next() * 0.3; tintB = 0.7 + (1 - k) * 0.42;
+          if (winter > 0.25) { tintR = 1.05 + k * 0.25; tintG = 1.0 + k * 0.2; tintB = 0.92 + k * 0.2; scale *= 0.7; }
+        } else if (surface === 'forest') {
+          if (dist > CLUTTER_RADIUS || roll > 0.34 - winter * 0.26) continue;
+          pool = rng.next() < 0.55 ? this.coverPool('fern') : this.coverPool('herb');
+          tintR = 0.8 + rng.next() * 0.25; tintG = 0.85 + rng.next() * 0.28; tintB = 0.75 + rng.next() * 0.25;
+          if (winter > 0.25) { tintR *= 1.3; tintG *= 1.05; tintB *= 0.95; }
+          scale *= 0.9;
+        } else if (surface === 'scree' || surface === 'rock' || surface === 'mud') {
+          if (dist > CLUTTER_RADIUS || roll > 0.30) continue;
+          pool = this.rockPool('pebble');
+          scale = 0.5 + rng.next() * 1.1;
+        } else if (surface === 'settlement' || surface === 'road') {
+          // a village yard is trodden earth with stones and weeds pushed to its edges
+          if (dist > CLUTTER_RADIUS || roll > 0.13) continue;
+          pool = rng.next() < 0.62 ? this.rockPool('pebble') : this.coverPool('herb');
+          scale = 0.45 + rng.next() * 0.7;
+          tintR = 0.8; tintG = 0.82; tintB = 0.66;
+        }
+        if (!pool) continue;
         const idx = this.alloc(pool);
         if (idx === null) break;
-        const y = this.terrain.heightAt(px, pz);
-        this.setInstance(pool, idx, px, y - 0.05, pz, rng.next() * Math.PI * 2, 0.7 + rng.next() * 0.7);
-        allocs.push({ poolKey: 'grass.tuft', index: idx });
+        this.setInstance(pool, idx, px, y - 0.05, pz, rng.next() * Math.PI * 2, scale);
+        this.setTint(pool, idx, tintR, tintG, tintB);
+        allocs.push({ poolKey: pool.key, index: idx });
       }
     }
     this.chunkGrass.set(key, allocs);

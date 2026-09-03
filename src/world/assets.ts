@@ -1,6 +1,6 @@
 /**
  * Downloaded-asset access for the model/character library: the shared CC0 PBR material set
- * (public/assets/textures/props/**, ambientCG) and the CC0 animation-clip pack
+ * (public/assets/textures/props/**, ambientCG + Poly Haven) and the CC0 animation-clip pack
  * (public/assets/characters/rig-medium.anims.bin, KayKit). See public/assets/CREDITS-models.md.
  *
  * Materials are cached per look: `src/exploration/settlements.ts` merges settlement geometry by
@@ -16,7 +16,7 @@ import { registerCsmMaterial } from './shadowCsm';
 const BASE = 'assets/textures/props';
 
 export type PropTexId =
-  | 'wood-log' | 'wood-plank' | 'shingle' | 'stone-block' | 'drystone' | 'plaster'
+  | 'wood-log' | 'wood-plank' | 'shingle' | 'stone-block' | 'masonry' | 'drystone' | 'plaster'
   | 'iron' | 'thatch' | 'rock' | 'wool' | 'leather' | 'chainmail';
 
 const loader = new TextureLoader();

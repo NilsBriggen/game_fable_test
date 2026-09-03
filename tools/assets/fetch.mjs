@@ -83,17 +83,28 @@ async function convertJpeg(src, dst, size, q) {
 
 async function fetchTexture(entry) {
   const src = manifest.sources[entry.source];
-  const url = src.urlTemplate.replace('{ASSET}', entry.asset);
   const profile = manifest.textureProfiles[entry.profile];
   const targetDir = path.join(root, entry.target);
   const done = Object.keys(profile).every((k) => fs.existsSync(path.join(targetDir, `${k}.jpg`)));
+  // Poly Haven serves one JPEG per map (no archive); ambientCG serves a zip of the whole set.
+  const perMap = src.kind === 'files';
+  const url = perMap ? src.homeTemplate.replace(/{ASSET}/g, entry.asset) : src.urlTemplate.replace('{ASSET}', entry.asset);
   if (done && !FORCE) { recordTexture(entry, url, src, profile); return; }
-  const zip = await download(url, `${entry.asset}.zip`);
-  const dir = unzip(zip, path.join(CACHE, entry.asset));
-  for (const [out, spec] of Object.entries(profile)) {
-    const file = fs.readdirSync(dir).find((f) => f.endsWith(`_${spec.src}.jpg`));
-    if (!file) throw new Error(`${entry.asset}: no ${spec.src} map`);
-    await convertJpeg(path.join(dir, file), path.join(targetDir, `${out}.jpg`), spec.size, spec.q);
+  if (perMap) {
+    for (const [out, spec] of Object.entries(profile)) {
+      const mapName = (src.maps ?? {})[out] ?? spec.src;
+      const fileUrl = src.urlTemplate.replace(/{ASSET}/g, entry.asset).replace('{MAP}', mapName);
+      const got = await download(fileUrl, `${entry.asset}-${out}.jpg`);
+      await convertJpeg(got, path.join(targetDir, `${out}.jpg`), spec.size, spec.q);
+    }
+  } else {
+    const zip = await download(url, `${entry.asset}.zip`);
+    const dir = unzip(zip, path.join(CACHE, entry.asset));
+    for (const [out, spec] of Object.entries(profile)) {
+      const file = fs.readdirSync(dir).find((f) => f.endsWith(`_${spec.src}.jpg`));
+      if (!file) throw new Error(`${entry.asset}: no ${spec.src} map`);
+      await convertJpeg(path.join(dir, file), path.join(targetDir, `${out}.jpg`), spec.size, spec.q);
+    }
   }
   recordTexture(entry, url, src, profile);
 }
@@ -255,6 +266,20 @@ function packAnims(entry, dir) {
 
 async function fetchCharacters(entry) {
   const src = manifest.sources[entry.source];
+  const target0 = path.join(root, entry.target);
+  // The itch.io download flow needs a live session; when the packed clip file is already committed
+  // (and no --force), record its provenance from the manifest and skip the network entirely, so
+  // `node tools/assets/fetch.mjs` can still regenerate CREDITS-models.md offline.
+  if (fs.existsSync(target0) && !FORCE) {
+    const pageUrl0 = `https://${entry.itch.user}.itch.io/${entry.itch.slug}`;
+    credits.push({ file: entry.target.replace(/^public\//, ''), url: pageUrl0, author: src.author, licence: src.licence, bytes: fs.statSync(target0).size, note: 'Rig_Medium animation clips, re-packed' });
+    if (entry.licenceFile && fs.existsSync(path.join(root, entry.licenceFile.target))) {
+      const lt0 = path.join(root, entry.licenceFile.target);
+      credits.push({ file: entry.licenceFile.target.replace(/^public\//, ''), url: pageUrl0, author: src.author, licence: src.licence, bytes: fs.statSync(lt0).size, note: 'upstream licence text' });
+    }
+    log('characters: already committed, skipping download');
+    return;
+  }
   const { url, page: pageUrl } = await itchDownload(entry.itch);
   const zip = await download(url, entry.itch.file);
   const dir = unzip(zip, path.join(CACHE, entry.id));

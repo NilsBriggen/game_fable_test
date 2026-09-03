@@ -1,15 +1,25 @@
 /**
- * The single terrain material. One MeshStandardMaterial, splat-blended in onBeforeCompile from three
- * CC0 PBR DataArrayTextures (8 layers) against a 2048x2176 surface-weight mask baked from the CPU
- * height model. Triplanar sampling on slopes past ~30 degrees, macro variation (varying tile scale
- * plus a drifting projection rotation) so nothing repeats at 500 m, a live snow line softened by
- * slope, wet shores keyed to whichever lake is nearest, and the aerial-perspective haze that sky.ts
- * drives and that vegetation and water share through FOG_UNIFORMS / ATMOSPHERE.
+ * The single terrain material. One MeshStandardMaterial, splat-blended in onBeforeCompile from
+ * three CC0 PBR DataArrayTextures (9 layers) against the two surface-weight masks baked in
+ * `look/splat.ts`. Triplanar on slopes, macro variation so nothing repeats at 500 m, an analytic
+ * near-field detail noise so nothing is flat at 3 m either, a live snow line softened by slope, wet
+ * shores keyed to whichever lake is nearest, and the aerial-perspective haze that sky.ts drives and
+ * that vegetation and water share through FOG_UNIFORMS / ATMOSPHERE.
+ *
+ * The two things that make the *ground* read rather than just be textured:
+ *
+ *  * **Roads and yards are reconstructed, not painted.** The mask is 7.8 m per texel; a cart track
+ *    is 3 m wide. `look/splat.ts` stores distance-to-road and a smooth village-pad falloff instead of
+ *    a road/settlement weight, and the shader thresholds them per pixel — so a track is crisp at any
+ *    zoom, its width breathes, grass creeps raggedly back into the yard, and the lane entering a
+ *    village is a lane instead of a 7.8 m staircase of gravel.
+ *  * **Slope wins over classification.** A 45° face is limestone whatever the height model called
+ *    it. Without that, every cliff in the Axen and the Schöllenen wore stretched pasture.
  */
-import { Color, DataTexture, FrontSide, LinearFilter, LinearMipmapLinearFilter, MeshStandardMaterial, RGBAFormat, UnsignedByteType, Vector2, Vector3 } from 'three';
+import { Color, DataTexture, FrontSide, MeshStandardMaterial, RGBAFormat, UnsignedByteType, Vector2, Vector3 } from 'three';
 import { MAP_BOUNDS } from '@content/gazetteer';
-import { lakeLevelAt } from './lakes';
 import { getTerrainArrays, macroVariationTexture, TERRAIN_LAYER } from './textures';
+import { bakeSplatMasks, ROAD_RANGE, type SplatMasks } from './look/splat';
 import { getActiveCsm } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
 
@@ -59,6 +69,26 @@ vec3 aerialPerspective(vec3 col, vec3 worldPos, vec3 viewVec) {
 }
 `;
 
+/**
+ * Analytic value noise. Deliberately not another texture lookup: the near-field grain needs
+ * features of a few centimetres AND no visible repeat, and a 256² tile driven at that frequency
+ * repeats every ~2 m, which is precisely the "visible tiling at 3 m" this is here to kill.
+ */
+const NOISE_DECL = /* glsl */ `
+float hash21(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i), b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0)), d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+`;
+
 export function applyAerialFog(shader: { vertexShader: string; fragmentShader: string; uniforms: any }): void {
   Object.assign(shader.uniforms, FOG_UNIFORMS);
   if (!shader.vertexShader.includes('vFogWorldPos')) {
@@ -72,55 +102,19 @@ export function applyAerialFog(shader: { vertexShader: string; fragmentShader: s
 }
 
 // ---------------------------------------------------------------------------------------------
-// Splat mask: 7 surface weights over the whole map, baked once from the CPU surface grid.
-//   A.rgba = grass, meadow, forest, rock      B.rgb = scree, mud, road
+// Splat mask (baked in look/splat.ts; see the channel contract there)
 // ---------------------------------------------------------------------------------------------
 
-/** heightmodel SURFACE_IDS index -> (mask texture 0|1, channel 0..3), or null to fall back to grass. */
-const SURFACE_TO_MASK: Record<number, [0 | 1, number]> = {
-  0: [0, 0],  // grass
-  8: [0, 1],  // meadow
-  2: [0, 2],  // forest
-  1: [0, 3],  // rock
-  3: [1, 0],  // scree
-  5: [1, 1],  // mud
-  4: [1, 1],  // water -> wet shore under the lake surface
-  6: [1, 2],  // road
-  7: [1, 2],  // settlement -> trampled earth
-  9: [0, 0],  // snow (never baked; the shader adds it live)
-};
-
-let maskA: DataTexture | null = null;
-let maskB: DataTexture | null = null;
+let masks: SplatMasks | null = null;
 let maskBuilt = false;
 
+/** All-zero placeholder: every weight 0 means the derived grass channel is 1, so the terrain is
+ *  pasture until the real mask bakes. Left on the DataTexture default NEAREST filters on purpose —
+ *  a mip filter on a texture with no mip chain is an incomplete texture and samples black. */
 function emptyMask(): DataTexture {
-  const t = new DataTexture(new Uint8Array([255, 0, 0, 0]), 1, 1, RGBAFormat, UnsignedByteType);
+  const t = new DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, RGBAFormat, UnsignedByteType);
   t.needsUpdate = true;
   return t;
-}
-
-/** Metres of height above the lake surface over which the shore stays visibly wet. */
-const SHORE_WET_M = 9;
-
-/**
- * Coarse "what height is the nearest lake surface here" field, from the integrator's exact
- * nearest-polygon lookup (requests/worldlook-1.md). NaN means no shoreline within range, so those
- * texels get no wet band at all. The nine lakes sit at five different levels — the Ägerisee is 97
- * game-metres above the Vierwaldstättersee — which a single uLakeLevel scalar cannot express.
- */
-function nearestLakeLevelGrid(cw: number, ch: number): Float32Array {
-  const out = new Float32Array(cw * ch);
-  const sx = (MAP_BOUNDS.maxX - MAP_BOUNDS.minX) / (cw - 1);
-  const sz = (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) / (ch - 1);
-  for (let gz = 0; gz < ch; gz++) {
-    const wz = MAP_BOUNDS.minZ + gz * sz;
-    for (let gx = 0; gx < cw; gx++) {
-      const lvl = lakeLevelAt(MAP_BOUNDS.minX + gx * sx, wz, 260);
-      out[gz * cw + gx] = lvl === null ? NaN : lvl;
-    }
-  }
-  return out;
 }
 
 /** Bake the mask from a surface-id sampler (vegetation.ts calls this once the CPU grid exists). */
@@ -132,49 +126,15 @@ export function buildSplatMask(
 ): void {
   if (maskBuilt) return;
   maskBuilt = true;
-  const n = gridW * gridH;
-  const a = new Uint8Array(new ArrayBuffer(n * 4));
-  const b = new Uint8Array(new ArrayBuffer(n * 4));
-  const sx = (MAP_BOUNDS.maxX - MAP_BOUNDS.minX) / (gridW - 1);
-  const sz = (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) / (gridH - 1);
-  const CW = 128, CH = 136;
-  const lakeLvl = heightAt ? nearestLakeLevelGrid(CW, CH) : null;
-  for (let gz = 0; gz < gridH; gz++) {
-    const wz = MAP_BOUNDS.minZ + gz * sz;
-    const cz = Math.min(CH - 1, Math.round((gz / (gridH - 1)) * (CH - 1)));
-    for (let gx = 0; gx < gridW; gx++) {
-      const i = gz * gridW + gx;
-      const wx = MAP_BOUNDS.minX + gx * sx;
-      const slot = SURFACE_TO_MASK[surfaceIdAt(wx, wz)] ?? SURFACE_TO_MASK[0];
-      (slot[0] === 0 ? a : b)[i * 4 + slot[1]] = 255;
-      if (lakeLvl && heightAt) {
-        // B.a = 1 right at the water line of whichever lake is nearest, 0 SHORE_WET_M above it
-        const lvl = lakeLvl[cz * CW + Math.min(CW - 1, Math.round((gx / (gridW - 1)) * (CW - 1)))];
-        if (lvl === lvl) {   // NaN = nothing to be wet next to
-          const above = heightAt(wx, wz) - lvl;
-          const wet = above < -2 ? 1 : 1 - Math.min(1, Math.max(0, above / SHORE_WET_M));
-          b[i * 4 + 3] = Math.round(wet * 255);
-        }
-      }
-    }
-  }
-  const mk = (data: Uint8Array<ArrayBuffer>): DataTexture => {
-    const t = new DataTexture(data, gridW, gridH, RGBAFormat, UnsignedByteType);
-    t.magFilter = LinearFilter;
-    t.minFilter = LinearMipmapLinearFilter;
-    t.generateMipmaps = true;
-    t.needsUpdate = true;
-    return t;
-  };
-  const ta = mk(a), tb = mk(b);
+  const next = bakeSplatMasks(surfaceIdAt, gridW, gridH, heightAt);
+  masks?.a.dispose();
+  masks?.b.dispose();
+  masks = next;
   if (handle) {
-    handle.uniforms.tMaskA.value?.dispose?.();
-    handle.uniforms.tMaskB.value?.dispose?.();
-    handle.uniforms.tMaskA.value = ta;
-    handle.uniforms.tMaskB.value = tb;
+    handle.uniforms.tMaskA.value = next.a;
+    handle.uniforms.tMaskB.value = next.b;
     handle.uniforms.uMaskTexel.value.set(1 / gridW, 1 / gridH);
   }
-  maskA = ta; maskB = tb;
 }
 
 export function splatMaskReady(): boolean { return maskBuilt; }
@@ -194,16 +154,17 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
     tAlbedo: { value: arrays.albedo },
     tNormal: { value: arrays.normal },
     tOrm: { value: arrays.orm },
-    tMaskA: { value: maskA ?? emptyMask() },
-    tMaskB: { value: maskB ?? emptyMask() },
+    tMaskA: { value: masks?.a ?? emptyMask() },
+    tMaskB: { value: masks?.b ?? emptyMask() },
     tMacro: { value: macroVariationTexture() },
     uMaskMin: { value: new Vector2(MAP_BOUNDS.minX, MAP_BOUNDS.minZ) },
     uMaskSpan: { value: new Vector2(MAP_BOUNDS.maxX - MAP_BOUNDS.minX, MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) },
     uMaskTexel: { value: new Vector2(1 / 2048, 1 / 2176) },
+    uRoadRange: { value: ROAD_RANGE },
     uSnowLine: { value: 900 },
     uSnowDepth: { value: 0 },      // weather: extra whitening at any altitude (0..1)
     uSeasonTint: { value: new Color(0x9fb862) },
-    uAltitudeTint: { value: new Color(0xb7bd7e) }, // pasture drifts to this dry sage above the villages
+    uAltitudeTint: { value: new Color(0xa8bc78) }, // pasture drifts to this alpine sage above the villages
     uWetness: { value: 0 },        // rain darkens + glosses the ground
     uDirectScale: { value: 1 },   // see the CSM note on registerCsmMaterial below
     ...FOG_UNIFORMS,
@@ -223,10 +184,11 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         uniform sampler2DArray tAlbedo, tNormal, tOrm;
         uniform sampler2D tMaskA, tMaskB, tMacro;
         uniform vec2 uMaskMin, uMaskSpan, uMaskTexel;
-        uniform float uSnowLine, uSnowDepth, uWetness, uDirectScale;
+        uniform float uSnowLine, uSnowDepth, uWetness, uDirectScale, uRoadRange;
         uniform vec3 uSeasonTint, uAltitudeTint;
         varying vec3 vWorldPos;
         ${FOG_DECL}
+        ${NOISE_DECL}
 
         /**
          * Detail normal around the geometric normal, with an analytic tangent frame. Perturbing
@@ -241,7 +203,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           return normalize(N + (T * mapN.x + B * mapN.y) * strength);
         }
 
-        // Splat accumulator. Deliberately a macro over named scalars rather than a float w[8] with
+        // Splat accumulator. Deliberately a macro over named scalars rather than a float w[9] with
         // a for loop and a TILE[i] lookup: dynamically indexed local/const arrays, in a shader that
         // CSM has also filled with unrolled per-cascade light loops, miscompile on the software
         // rasteriser the harness uses and the whole terrain comes back black.
@@ -274,6 +236,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       .replace('#include <map_fragment>', /* glsl */ `
         {
           vec3 nrm = normalize(vNormal);
+          float viewDist = length(vWorldPos - cameraPosition);
           vec2 muv = (vWorldPos.xz - uMaskMin) / uMaskSpan;
           vec3 macro = texture2D(tMacro, vWorldPos.xz * 0.0022).rgb;
           // warp the mask lookup by a texel so the 7.8 m grid never shows as straight edges
@@ -281,27 +244,107 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           vec4 mA = texture2D(tMaskA, muv);
           vec4 mB = texture2D(tMaskB, muv);
 
-          float w0 = mA.r, w1 = mA.g, w2 = mA.b, w3 = mA.a;
-          float w4 = mB.r, w6 = mB.g, w7 = mB.b;
+          // Near-field grain: a 30 cm octave out to 60 m and a 12 cm one only in the first few
+          // metres. The fine octave has to die that fast — once one pixel covers more than its
+          // feature size it stops being detail and starts being noise that crawls when you walk.
+          // Distance alone is the wrong fade for the analytic grain below. A slope seen at a grazing
+          // angle is close to the camera AND covers metres of ground per pixel, and un-mipmapped
+          // noise sampled at that rate aliases into long streaks running away from the viewer —
+          // which is exactly what the Rütli bank and the Schwyz square were doing. Fade by the real
+          // screen-space footprint instead, so the grain switches off the moment one pixel is wider
+          // than the features it is trying to draw.
+          float foot = max(fwidth(vWorldPos.x), fwidth(vWorldPos.z));   // metres of ground per pixel
+          float nearK = (1.0 - smoothstep(10.0, 60.0, viewDist)) * (1.0 - smoothstep(0.07, 0.22, foot));
+          float fineK = (1.0 - smoothstep(3.0, 16.0, viewDist)) * (1.0 - smoothstep(0.025, 0.075, foot));
+          // grainC drives the track width and the yard edge, so it is needed at any range; the two
+          // fine octaves are only ever weighted by nearK/fineK, so past 60 m they are pure cost.
+          float grainC = vnoise(vWorldPos.xz * 0.55);
+          float grainA = 0.5, grainB = 0.5;
+          if (nearK > 0.01) {
+            grainA = vnoise(vWorldPos.xz * 3.1);
+            grainB = fineK > 0.01 ? vnoise(vWorldPos.xz * 8.3) : 0.5;
+          }
 
-          // altitude drift: pasture below the villages becomes alpine meadow above them
-          float alp = smoothstep(90.0, 230.0, vWorldPos.y);
+          float w1 = mA.r;   // alpine meadow
+          float w2 = mA.g;   // forest floor
+          float w3 = mA.b;   // rock
+          float w4 = mA.a;   // scree
+          float w6 = mB.r;   // mud / wet shore
+          float yardF = mB.g;                          // smooth village-pad falloff, 1 at the centre
+          float roadDist = (1.0 - mB.b) * uRoadRange;  // metres to the nearest road centreline
+          float roadVergeMax = 11.0;   // beyond this no verge/track can exist, so skip the noise
+
+          // ---- cart track, reconstructed from the distance field ----------------------------
+          // The width breathes between ~1.8 and ~3.6 m along the road, so it reads as something worn
+          // by carts rather than surveyed. The verge is the wider band of scuffed ground beside it.
+          float halfW = 2.7 + (grainC - 0.5) * 1.7 + (macro.g - 0.5) * 0.8;
+          float w8 = 1.0 - smoothstep(halfW, halfW + 1.6, roadDist);
+          float verge = (1.0 - smoothstep(halfW + 1.2, halfW + 6.0, roadDist)) * (0.45 + 0.35 * grainC);
+
+          // ---- village yard: grass creeps raggedly back in at the edges ----------------------
+          // Only villages and road verges need the second yard octave; everywhere else (which is
+          // almost the whole map) the branch is skipped.
+          float yardNoise = 0.5;
+          if (yardF > 0.002 || roadDist < roadVergeMax) yardNoise = grainC * 0.65 + vnoise(vWorldPos.xz * 0.17) * 0.35;
+          float w7 = yardF * smoothstep(0.10, 0.62, yardF + (yardNoise - 0.5) * 0.62);
+          w7 = max(w7, verge);
+          // hollows in the yard hold dung and rainwater; the same field, thresholded high
+          float puddle = smoothstep(0.66, 0.86, yardNoise) * w7 * 0.85;
+          w6 = max(w6, puddle);
+          w7 = max(0.0, w7 - puddle);
+          w7 = max(0.0, w7 - w8);
+
+          // Altitude drift: pasture below the villages becomes alpine meadow above them. The band
+          // starts well above the valley floors — at 90 m it caught the Seelisberg terrace and every
+          // slope above Brunnen, and turned the whole middle distance the colour of dead hay.
+          float alp = smoothstep(160.0, 330.0, vWorldPos.y);
+
+          // ---- slope wins over classification ------------------------------------------------
+          // A 40-60 degree face is bare limestone whatever the height model called it; below that a
+          // band of loose scree collects. Without this every cliff wore stretched pasture.
+          float rockify = smoothstep(0.78, 0.52, nrm.y);
+          float screeify = smoothstep(0.90, 0.74, nrm.y) * (1.0 - rockify) * 0.75;
+          float soften = 1.0 - max(rockify, screeify);
+          w1 *= soften; w2 *= soften; w6 *= soften; w7 *= soften; w8 *= soften;
+          w3 = max(w3 * soften, rockify);
+          w4 = max(w4 * soften, screeify);
+
+          // Trodden ground REPLACES what was there rather than blending with it. Without this the
+          // splat normalises a forest road to 1 part litter, 1 part track and the lane disappears
+          // into the wood it runs through.
+          float trodden = clamp(max(w7, w8), 0.0, 1.0);
+          float keepNat = 1.0 - trodden * 0.92;
+          w1 *= keepNat; w2 *= keepNat; w3 *= keepNat; w4 *= keepNat; w6 *= keepNat;
+
+          // grass is the remainder: seven weights plus wetness do not fit in eight channels, and
+          // they sum to one, so this is the one that never had to be stored
+          float used = w1 + w2 + w3 + w4 + w6 + w7 + w8;
+          float w0 = max(0.0, 1.0 - used);
           float toMeadow = w0 * alp;
           w0 -= toMeadow; w1 += toMeadow;
 
-          // snow: by altitude, softened by slope (steep faces shed it) and by the weather override
+          // snow: by altitude, softened by slope (steep faces shed it) and by the weather override.
+          // The line itself is ragged — a straight contour of snow across a whole massif is the
+          // single most artificial thing a mountain can do.
           float slopeShed = smoothstep(0.42, 0.82, nrm.y);
-          float w5 = clamp(smoothstep(uSnowLine - 70.0, uSnowLine + 45.0, vWorldPos.y) + uSnowDepth, 0.0, 1.0);
+          float lineWobble = (macro.b - 0.5) * 90.0 + (grainC - 0.5) * 18.0;
+          float w5 = clamp(smoothstep(uSnowLine - 70.0 + lineWobble, uSnowLine + 45.0 + lineWobble, vWorldPos.y) + uSnowDepth, 0.0, 1.0);
           w5 *= slopeShed * (0.72 + 0.28 * macro.b);
 
-          float wsum = max(1e-4, w0 + w1 + w2 + w3 + w4 + w6 + w7);
+          float wsum = max(1e-4, w0 + w1 + w2 + w3 + w4 + w6 + w7 + w8);
           float keep = (1.0 - w5) / wsum;
-          w0 *= keep; w1 *= keep; w2 *= keep; w3 *= keep; w4 *= keep; w6 *= keep; w7 *= keep;
+          w0 *= keep; w1 *= keep; w2 *= keep; w3 *= keep; w4 *= keep; w6 *= keep; w7 *= keep; w8 *= keep;
 
-          // Triplanar. §5.1 asks for it past 30 degrees (n.y = 0.866); the ramp starts earlier, at
-          // ~23 degrees, because the flat projection is already visibly stretching into vertical
-          // streaks on the 25-30 degree meadow banks above the Urnersee, and is full by ~57.
-          float steep = smoothstep(0.92, 0.55, nrm.y);
+          // Triplanar. The weight follows 1 - n.y^3 rather than a smoothstep band, so a 20 degree
+          // bank already takes 15% of the side projection and a 45 degree one two thirds of it —
+          // the flat projection stretches as 1/n.y, and letting it run alone up to ~35 degrees is
+          // what smeared the meadow banks above the Urnersee into vertical streaks.
+          // The 0.12 floor matters for cost, not looks: the SPLAT macro skips its three extra
+          // projected samples entirely when steep is 0, so leaving a hair of side projection on the
+          // valley floors (where 1 - n.y^3 is 0.02-0.10) would triple the texture fetches of every
+          // flat fragment in the game for a stretch of 1.001x that nobody can see.
+          float ny = max(nrm.y, 0.0);
+          float steep = clamp((1.0 - ny * ny * ny) * 1.14 - 0.14, 0.0, 1.0);
           // De-tiling, both derivative-safe: a low-frequency uv shift (a translation leaves the uv
           // derivative untouched) and a blend with the same layer sampled 4.2x larger.
           vec2 detileOff = (macro.rg - 0.5) * 9.0;
@@ -311,11 +354,12 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           SPLAT(0, 5.0, w0)    // grass
           SPLAT(1, 6.0, w1)    // alpine meadow
           SPLAT(2, 4.5, w2)    // forest floor
-          SPLAT(3, 7.0, w3)    // rock
-          SPLAT(4, 4.0, w4)    // scree
+          SPLAT(3, 7.0, w3)    // limestone
+          SPLAT(4, 3.2, w4)    // scree
           SPLAT(5, 8.0, w5)    // snow
-          SPLAT(6, 4.5, w6)    // mud / shore
-          SPLAT(7, 4.0, w7)    // road
+          SPLAT(6, 4.0, w6)    // mud / shore
+          SPLAT(7, 3.4, w7)    // village yard
+          SPLAT(8, 2.6, w8)    // cart track
           float inv = 1.0 / max(1e-4, gWAcc);
           vec3 albedo = gAlbAcc * inv;
           gMapN = normalize((gNrmAcc * inv) * 2.0 - 1.0);
@@ -328,8 +372,21 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo = mix(albedo, albedo * tint * 1.85, greenW * 0.88);
 
           // A spruce stand seen from across the Urnersee has to read as forest between the trunks,
-          // not as the bare litter texture: darken the forest-floor layer toward the canopy colour.
-          albedo = mix(albedo, albedo * vec3(0.60, 0.70, 0.52), w2 * 0.78);
+          // not as the bare litter texture. Desaturate the litter first and only then tint it toward
+          // the canopy: multiplying a warm brown by a green just gives a duller warm brown, which is
+          // how the wooded slopes ended up the colour of ploughed earth.
+          float litterLum = dot(albedo, vec3(0.30, 0.59, 0.11));
+          albedo = mix(albedo, mix(albedo, vec3(litterLum), 0.55) * vec3(0.52, 0.66, 0.44), w2 * 0.82);
+
+          // limestone is grey-white, not the green-grey the season tint would drag it toward, and a
+          // cliff face is brighter on its bedding ledges than in the joints
+          albedo = mix(albedo, albedo * vec3(1.06, 1.05, 1.02) * (0.86 + 0.30 * grainC), w3 * 0.7);
+
+          // The yard set (Ground081) is a pale grey-beige path gravel out of the box; a village
+          // trodden by cattle and emptied of chamber pots is browner and duller than that.
+          albedo = mix(albedo, albedo * vec3(0.84, 0.77, 0.63), w7 * 0.75);
+          // the track is packed and darker than the yard it cuts through
+          albedo *= mix(1.0, 0.74 + 0.16 * grainA, w8 * 0.9);
 
           // old snow is not white paper: cool it, and keep the macro field visible through it so a
           // snowfield still reads as a surface with form rather than a blown-out sheet
@@ -339,8 +396,21 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo *= mix(vec3(0.82), vec3(1.18), macro.b);
           albedo = mix(albedo, albedo * vec3(1.06, 1.0, 0.9), (macro.g - 0.5) * 0.5 + 0.25);
 
+          // near-field grain: without it every ground layer is a smooth wash within a few metres of
+          // the camera whatever its texture resolution, because one 512px tile covers 3-5 m
+          albedo *= mix(1.0, 0.82 + 0.38 * grainA, nearK * 0.85) * mix(1.0, 0.86 + 0.28 * grainB, fineK * 0.7);
+          if (nearK > 0.02) {
+            // central-difference gradient of the same field, so the bumps the shading shows line up
+            // with the bumps the albedo shows instead of being an unrelated wobble
+            vec2 pn = vWorldPos.xz * 3.1;
+            float gx = vnoise(pn + vec2(0.7, 0.0)) - vnoise(pn - vec2(0.7, 0.0));
+            float gz = vnoise(pn + vec2(0.0, 0.7)) - vnoise(pn - vec2(0.0, 0.7));
+            gMapN.xy += vec2(gx, gz) * nearK * 1.1;
+            gMapN = normalize(gMapN);
+          }
+
           // shore + rain wetting: darker, smoother, slightly bluer.
-          // mB.a is baked "height above the nearest lake surface" (see buildSplatMask), so this is
+          // mB.a is baked "height above the nearest lake surface" (see look/splat.ts), so this is
           // correct for the Aegerisee at +97 as well as for the Vierwaldstaettersee at 0.
           float shore = smoothstep(0.35, 0.95, mB.a);
           float wet = clamp(max(shore, uWetness) * (1.0 - w5), 0.0, 1.0);
@@ -348,6 +418,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
           gRough = clamp(mix(orm.y, 0.42, wet), 0.05, 1.0);   // wet earth is damp, not a mirror
+          gRough = mix(gRough, gRough * 0.86, w8);            // a packed track has a slight sheen
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
       `)
@@ -362,7 +433,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       `)
       .replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>
-        normal = perturbNormalFromMap(normal, gMapN, 0.55);
+        normal = perturbNormalFromMap(normal, gMapN, 0.62);
       `)
       .replace('#include <dithering_fragment>', `
         gl_FragColor.rgb = aerialPerspective(gl_FragColor.rgb, vWorldPos, vWorldPos - cameraPosition);
@@ -401,7 +472,7 @@ export { TERRAIN_LAYER };
 export function disposeTerrainMaterial(): void {
   if (!handle) return;
   handle.material.dispose();
-  maskA?.dispose(); maskB?.dispose();
-  maskA = maskB = null; maskBuilt = false;
+  masks?.a.dispose(); masks?.b.dispose();
+  masks = null; maskBuilt = false;
   handle = null;
 }

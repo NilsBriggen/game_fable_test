@@ -7,11 +7,16 @@ import { Float32BufferAttribute, SphereGeometry, type MeshStandardMaterial } fro
 import { propMat } from './models';
 
 const cache = new Map<string, SphereGeometry>();
+/** Segment counts by size class: a metre-scale boulder is walked past and needs a silhouette, a
+ *  hand-sized stone in a scatter pool never does. Vegetation keeps thousands of these live
+ *  (CAPACITY.rock per size class, src/world/vegetation.ts), so the small classes are the cheapest
+ *  triangles in the scene to hand back — 20 instead of 70 each. */
 export function boulderGeometry(baseRadius: number): SphereGeometry {
   const key = baseRadius.toFixed(2);
   const hit = cache.get(key);
   if (hit) return hit;
-  const geo = new SphereGeometry(baseRadius, 7, 6);
+  const [wSeg, hSeg] = baseRadius >= 0.8 ? [7, 6] : baseRadius >= 0.35 ? [6, 4] : [5, 3];
+  const geo = new SphereGeometry(baseRadius, wSeg, hSeg);
   const pos = geo.attributes.position as Float32BufferAttribute;
   // deterministic jitter (fixed pattern reused by every instance; per-instance variety comes from scale/rotation)
   for (let i = 0; i < pos.count; i++) {

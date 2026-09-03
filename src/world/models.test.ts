@@ -20,12 +20,13 @@ beforeAll(() => {
 });
 
 const BUILDINGS = [
-  'house.blockbau', 'house.stone', 'barn', 'church', 'chapel', 'monastery',
-  'castle.keep', 'castle.wall', 'castle.tower', 'letzi.wall', 'palisade',
+  'house.blockbau', 'house.stone', 'barn', 'granary', 'church', 'chapel', 'monastery',
+  'castle.keep', 'castle.wall', 'castle.tower', 'ruin.wall', 'letzi.wall', 'palisade',
   'bridge.wood', 'bridge.stone', 'mill', 'boat',
 ];
 const WEAPONS = ['weapon.spiess', 'weapon.halberd', 'weapon.crossbow', 'weapon.sword', 'weapon.dagger', 'weapon.staff', 'shield.heater', 'shield.buckler'];
-const PROPS = ['cross', 'hayrack', 'fence', 'well', 'gallows.pole', 'campfire', 'tent', 'cart', 'signpost', 'rock.large', 'rock.small', 'stump'];
+const PROPS = ['cross', 'hayrack', 'fence', 'well', 'woodpile', 'trough', 'market.stall', 'gallows.pole',
+  'campfire', 'tent', 'cart', 'signpost', 'rock.large', 'rock.small', 'stump'];
 
 function stats(obj: Object3D): { meshes: number; tris: number; mats: Set<Material> } {
   let meshes = 0, tris = 0;
@@ -44,21 +45,59 @@ function stats(obj: Object3D): { meshes: number; tris: number; mats: Set<Materia
 describe('model library budgets', () => {
   const lib = new ModelLibrary(1234);
 
-  it('every building and prop stays within 6 draw calls and 8k triangles', () => {
+  // 7 meshes = 7 materials at most per model. Exploration merges by material *per POI*
+  // (src/exploration/settlements.ts), so a whole village costs one draw call per material it uses —
+  // roughly a dozen — not one per building. 12k triangles is the per-model ceiling; the village-level
+  // budget is asserted separately below.
+  it('every building and prop stays within 7 draw calls and 12k triangles', () => {
     const variants: [string, string | undefined][] = [...[...BUILDINGS, ...PROPS, ...WEAPONS].map((i) => [i, undefined] as [string, undefined]),
       ['house.blockbau', 'inn'], ['house.blockbau', 'large'], ['house.blockbau', 'small'], ['house.stone', 'large']];
     for (const [id, variant] of variants) {
       const s = stats(lib.spawn(id, { variant }));
-      expect(s.meshes, `${id}/${variant ?? '-'}: ${s.meshes} meshes`).toBeLessThanOrEqual(6);
-      expect(s.tris, `${id}: ${Math.round(s.tris)} tris`).toBeLessThanOrEqual(8000);
+      expect(s.meshes, `${id}/${variant ?? '-'}: ${s.meshes} meshes`).toBeLessThanOrEqual(7);
+      expect(s.tris, `${id}: ${Math.round(s.tris)} tris`).toBeLessThanOrEqual(12000);
       expect(s.meshes, `${id} produced no geometry`).toBeGreaterThan(0);
     }
   });
 
-  it('all buildings together share at most 8 materials (exploration merges per material)', () => {
+  it('all buildings together share at most 9 materials (exploration merges per material)', () => {
     const all = new Set<Material>();
     for (const id of BUILDINGS) for (const m of stats(lib.spawn(id)).mats) all.add(m);
-    expect(all.size, `${all.size} distinct building materials`).toBeLessThanOrEqual(8);
+    expect(all.size, `${all.size} distinct building materials`).toBeLessThanOrEqual(9);
+  });
+
+  // A village as src/exploration/layout.ts lays one out: a well, a church, 14 farmhouses (one of them
+  // the inn), fences, hay racks and a wayside cross. Budget (owner's brief): ≤ 400 draw calls and
+  // ≤ 1.2 M triangles for the whole village after the per-POI merge.
+  it('a full village stays inside 400 draw calls and 1.2 M triangles after the per-material merge', () => {
+    const recipe: [string, string | undefined, number][] = [
+      ['well', undefined, 1], ['church', undefined, 1], ['house.blockbau', 'inn', 1],
+      ['house.blockbau', undefined, 13], ['fence', undefined, 9], ['hayrack', undefined, 6],
+      ['cross', undefined, 1],
+    ];
+    let tris = 0;
+    const mats = new Set<Material>();
+    for (const [id, variant, n] of recipe) {
+      for (let i = 0; i < n; i++) {
+        const s = stats(lib.spawn(id, { variant, seed: i }));
+        tris += s.tris;
+        for (const m of s.mats) mats.add(m);
+      }
+    }
+    expect(mats.size, `${mats.size} merged draw calls for the village`).toBeLessThanOrEqual(400);
+    expect(tris, `${Math.round(tris)} village triangles`).toBeLessThanOrEqual(1_200_000);
+  });
+
+  it('every model sits on the ground: nothing floats and nothing but a footing is buried', () => {
+    // settlements.ts places each model's origin on heightAt, so y = 0 must be the contact plane.
+    // Buildings deliberately carry a footing ~2 m below grade for downhill spawns; nothing may float.
+    for (const id of [...BUILDINGS, ...PROPS]) {
+      if (id === 'boat') continue;   // boats float, by design (layout puts them on the water)
+      const box = new Box3().setFromObject(lib.spawn(id));
+      expect(box.min.y, `${id} floats: lowest point at y=${box.min.y.toFixed(2)}`).toBeLessThanOrEqual(0.06);
+      expect(box.min.y, `${id} is buried: lowest point at y=${box.min.y.toFixed(2)}`).toBeGreaterThan(-2.6);
+      expect(box.max.y, `${id} has no height`).toBeGreaterThan(0.1);
+    }
   });
 
   it('every mesh carries position/normal/uv/colour, so per-material merging stays uniform', () => {
@@ -76,8 +115,11 @@ describe('model library budgets', () => {
   it('footprints match what exploration/layout.ts assumes', () => {
     const expected: Record<string, [number, number]> = {   // [max width, max depth] in metres
       'house.blockbau': [10.5, 9.5], 'house.stone': [11.5, 9.5], barn: [13, 10], church: [12, 22],
+      granary: [5, 5], 'ruin.wall': [8, 5],
       'castle.wall': [9, 4], 'letzi.wall': [9, 3], palisade: [9, 2], 'bridge.stone': [15, 5],
-      'castle.keep': [15, 15], 'castle.tower': [8, 8], chapel: [7, 9],
+      // the keep's depth includes the outer timber stair to its raised entrance; layoutCastle puts the
+      // corner towers 16 m out, so the stair has clearance
+      'castle.keep': [15, 16.5], 'castle.tower': [9, 9], chapel: [7, 9],
     };
     for (const [id, [w, d]] of Object.entries(expected)) {
       for (let i = 0; i < 8; i++) {          // houses jitter per spawn: every draw must still fit
@@ -219,3 +261,4 @@ describe('per-entity seed', () => {
     expect(new Set([await cloth(1), await cloth(2), await cloth(3), await cloth(4)]).size).toBeGreaterThan(1);
   });
 });
+

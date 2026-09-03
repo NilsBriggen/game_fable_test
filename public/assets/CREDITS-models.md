@@ -4,7 +4,7 @@ All third-party assets below are CC0 1.0 (public domain dedication) — no attri
 it is given anyway. Regenerate this file and every asset with `node tools/assets/fetch.mjs`
 (manifest: `tools/assets/manifest.json`).
 
-Total committed asset bytes: **4.25 MB** in 38 files.
+Total committed asset bytes: **4.87 MB** in 41 files.
 
 | File | Content | Source | Author | Licence | Size |
 |---|---|---|---|---|---|
@@ -22,18 +22,21 @@ Total committed asset bytes: **4.25 MB** in 38 files.
 | `assets/textures/props/leather/diff.jpg` | Leather037 diff | [ambientcg.com](https://ambientcg.com/get?file=Leather037_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 21 KB |
 | `assets/textures/props/leather/nor.jpg` | Leather037 nor | [ambientcg.com](https://ambientcg.com/get?file=Leather037_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 49 KB |
 | `assets/textures/props/leather/rough.jpg` | Leather037 rough | [ambientcg.com](https://ambientcg.com/get?file=Leather037_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 64 KB |
+| `assets/textures/props/masonry/diff.jpg` | old_stone_wall diff | [polyhaven.com](https://polyhaven.com/a/old_stone_wall) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 277 KB |
+| `assets/textures/props/masonry/nor.jpg` | old_stone_wall nor | [polyhaven.com](https://polyhaven.com/a/old_stone_wall) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 100 KB |
+| `assets/textures/props/masonry/rough.jpg` | old_stone_wall rough | [polyhaven.com](https://polyhaven.com/a/old_stone_wall) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 6 KB |
 | `assets/textures/props/plaster/diff.jpg` | Plaster003 diff | [ambientcg.com](https://ambientcg.com/get?file=Plaster003_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 372 KB |
 | `assets/textures/props/plaster/nor.jpg` | Plaster003 nor | [ambientcg.com](https://ambientcg.com/get?file=Plaster003_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 60 KB |
 | `assets/textures/props/plaster/rough.jpg` | Plaster003 rough | [ambientcg.com](https://ambientcg.com/get?file=Plaster003_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 11 KB |
 | `assets/textures/props/rock/diff.jpg` | Rock035 diff | [ambientcg.com](https://ambientcg.com/get?file=Rock035_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 268 KB |
 | `assets/textures/props/rock/nor.jpg` | Rock035 nor | [ambientcg.com](https://ambientcg.com/get?file=Rock035_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 125 KB |
 | `assets/textures/props/rock/rough.jpg` | Rock035 rough | [ambientcg.com](https://ambientcg.com/get?file=Rock035_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 50 KB |
-| `assets/textures/props/shingle/diff.jpg` | WoodSiding013 diff | [ambientcg.com](https://ambientcg.com/get?file=WoodSiding013_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 186 KB |
-| `assets/textures/props/shingle/nor.jpg` | WoodSiding013 nor | [ambientcg.com](https://ambientcg.com/get?file=WoodSiding013_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 27 KB |
-| `assets/textures/props/shingle/rough.jpg` | WoodSiding013 rough | [ambientcg.com](https://ambientcg.com/get?file=WoodSiding013_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 36 KB |
-| `assets/textures/props/stone-block/diff.jpg` | Bricks100 diff | [ambientcg.com](https://ambientcg.com/get?file=Bricks100_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 116 KB |
-| `assets/textures/props/stone-block/nor.jpg` | Bricks100 nor | [ambientcg.com](https://ambientcg.com/get?file=Bricks100_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 28 KB |
-| `assets/textures/props/stone-block/rough.jpg` | Bricks100 rough | [ambientcg.com](https://ambientcg.com/get?file=Bricks100_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 24 KB |
+| `assets/textures/props/shingle/diff.jpg` | roof_slates_02 diff | [polyhaven.com](https://polyhaven.com/a/roof_slates_02) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 265 KB |
+| `assets/textures/props/shingle/nor.jpg` | roof_slates_02 nor | [polyhaven.com](https://polyhaven.com/a/roof_slates_02) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 76 KB |
+| `assets/textures/props/shingle/rough.jpg` | roof_slates_02 rough | [polyhaven.com](https://polyhaven.com/a/roof_slates_02) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 42 KB |
+| `assets/textures/props/stone-block/diff.jpg` | Bricks066 diff | [ambientcg.com](https://ambientcg.com/get?file=Bricks066_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 234 KB |
+| `assets/textures/props/stone-block/nor.jpg` | Bricks066 nor | [ambientcg.com](https://ambientcg.com/get?file=Bricks066_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 39 KB |
+| `assets/textures/props/stone-block/rough.jpg` | Bricks066 rough | [ambientcg.com](https://ambientcg.com/get?file=Bricks066_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 17 KB |
 | `assets/textures/props/thatch/diff.jpg` | ThatchedRoof001A diff | [ambientcg.com](https://ambientcg.com/get?file=ThatchedRoof001A_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 246 KB |
 | `assets/textures/props/thatch/nor.jpg` | ThatchedRoof001A nor | [ambientcg.com](https://ambientcg.com/get?file=ThatchedRoof001A_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 64 KB |
 | `assets/textures/props/thatch/rough.jpg` | ThatchedRoof001A rough | [ambientcg.com](https://ambientcg.com/get?file=ThatchedRoof001A_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 35 KB |
