@@ -13,7 +13,7 @@ import { CSM } from 'three/examples/jsm/csm/CSM.js';
 import type { Season } from '@core/clock';
 import type { Weather } from '@core/services';
 import { setActiveCsm, setViewPosition } from './shadowCsm';
-import { getTerrainMaterial, ATMOSPHERE, FOG_UNIFORMS } from './terrainMaterial';
+import { getTerrainMaterial, refreshTerrainMaterial, ATMOSPHERE, FOG_UNIFORMS } from './terrainMaterial';
 import { snowLineFor } from './heightmodel';
 import { fbm2D } from './noise';
 
@@ -294,10 +294,9 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     camera, parent: scene, cascades: 3, mode: 'practical',
     shadowMapSize: 2048, lightIntensity: 2.2, maxFar: 600,
     lightDirection: new Vector3(0.4, -0.7, 0.3).normalize(),
-    lightNear: 1, lightFar: 2200, lightMargin: 220,
+    lightNear: 1, lightFar: 2000, lightMargin: 200,
   });
   (csm as any).fade = true;
-  for (const l of csm.lights) { l.shadow.bias = -0.0004; l.shadow.normalBias = 0.55; }
   setActiveCsm(csm);
 
   scene.fog = new FogExp2(0xbfd2e0, 0.00016);
@@ -479,6 +478,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
   applySun();
 
   let clock = 0;
+  let frames = 0;
   return {
     group,
     csm,
@@ -497,11 +497,17 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     },
     update(dt: number, glRenderer: WebGLRenderer) {
       clock += dt;
+      // See refreshTerrainMaterial(): the terrain program built on frame 0 has no directional light.
+      if (frames === 2 || frames === 30 || frames === 120 || frames === 300) refreshTerrainMaterial();
+      frames++;
       camera.updateMatrixWorld(true);
       setViewPosition(camera.position.x, camera.position.y, camera.position.z);
       // Sky/cloud/star domes ride with the camera so they stay at "infinity" across a 17 km map.
       group.position.set(camera.position.x, camera.position.y, camera.position.z);
       cloudTex.offset.x = (clock * 0.0016) % 1;
+      // CSM refreshes CSM_cascades/cameraNear/shadowFar ONLY inside updateFrustums(); update() alone
+      // leaves them stale, and stale cascade bounds put the whole landscape in permanent shadow.
+      csm.updateFrustums();
       csm.update();
       glRenderer.toneMappingExposure = exposure;
 

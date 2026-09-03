@@ -89,7 +89,7 @@ export function getTerrainArrays(): TerrainArrays {
     t.magFilter = LinearFilter;
     t.minFilter = LinearMipmapLinearFilter;
     t.generateMipmaps = true;
-    t.anisotropy = 4;
+    t.anisotropy = 8;
     return t;
   };
   const albedo = mk(126, 134, 104);

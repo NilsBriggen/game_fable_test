@@ -755,8 +755,9 @@ export function clipFor(anim: CharacterAnim, weapon: WeaponKind, seed: number, s
       if (weapon === 'staff') return { name: seed % 3 === 0 ? 'Working_A' : 'Melee_2H_Idle', loop: true };
       if (twoHand) return { name: 'Melee_2H_Idle', loop: true };
       if (weapon === 'sword' || weapon === 'lance') return { name: 'Melee_Unarmed_Idle', loop: true };
-      // civilians get a spread of standing poses so a village square is not a row of identical statues
-      return { name: ['Idle_A', 'Idle_B', 'Working_A', 'Idle_A', 'Holding_B'][seed % 5], loop: true };
+      // Empty hands: only the two neutral standing idles. `Working_A`/`Holding_B` shape the hands around
+      // an object and extend the arm, which reads as reaching into thin air when nothing is held.
+      return { name: seed % 2 === 0 ? 'Idle_A' : 'Idle_B', loop: true };
     case 'walk': return { name: seed % 3 === 0 ? 'Walking_C' : 'Walking_A', loop: true };
     case 'run': return { name: 'Running_A', loop: true };
     case 'flee': return { name: 'Running_B', loop: true };

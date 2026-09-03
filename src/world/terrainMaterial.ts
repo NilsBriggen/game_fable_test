@@ -1,14 +1,16 @@
 /**
  * The single terrain material. One MeshStandardMaterial, splat-blended in onBeforeCompile from three
  * CC0 PBR DataArrayTextures (8 layers) against a 2048x2176 surface-weight mask baked from the CPU
- * height model. Biplanar sampling on slopes, macro variation, live snow line, wet shores, and the
- * aerial-perspective fog that sky.ts drives (and vegetation/water share via TERRAIN_FOG_*).
+ * height model. Triplanar sampling on slopes past ~30 degrees, macro variation (varying tile scale
+ * plus a drifting projection rotation) so nothing repeats at 500 m, a live snow line softened by
+ * slope, wet shores keyed to whichever lake is nearest, and the aerial-perspective haze that sky.ts
+ * drives and that vegetation and water share through FOG_UNIFORMS / ATMOSPHERE.
  */
 import { Color, DataTexture, FrontSide, LinearFilter, LinearMipmapLinearFilter, MeshStandardMaterial, RGBAFormat, UnsignedByteType, Vector2, Vector3 } from 'three';
 import { MAP_BOUNDS } from '@content/gazetteer';
-import { buildWorldGeo } from './geodata';
+import { lakeLevelAt } from './lakes';
 import { getTerrainArrays, macroVariationTexture, TERRAIN_LAYER } from './textures';
-import { registerCsmMaterial } from './shadowCsm';
+import { getActiveCsm } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
 
 export interface TerrainMaterialHandle {
@@ -102,31 +104,20 @@ function emptyMask(): DataTexture {
 const SHORE_WET_M = 9;
 
 /**
- * Coarse "which lake is nearest, and at what height does it sit" field. The nine lakes are at five
- * different levels (the Ägerisee is 97 game-metres above the Vierwaldstättersee), so a single
- * uLakeLevel scalar cannot place the wet band correctly — see requests/worldlook-1.md.
+ * Coarse "what height is the nearest lake surface here" field, from the integrator's exact
+ * nearest-polygon lookup (requests/worldlook-1.md). NaN means no shoreline within range, so those
+ * texels get no wet band at all. The nine lakes sit at five different levels — the Ägerisee is 97
+ * game-metres above the Vierwaldstättersee — which a single uLakeLevel scalar cannot express.
  */
 function nearestLakeLevelGrid(cw: number, ch: number): Float32Array {
-  const lakes = buildWorldGeo().lakes;
   const out = new Float32Array(cw * ch);
   const sx = (MAP_BOUNDS.maxX - MAP_BOUNDS.minX) / (cw - 1);
   const sz = (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) / (ch - 1);
-  const cx: number[] = [], cz: number[] = [];
-  for (const l of lakes) {
-    let ax = 0, az = 0;
-    for (const [x, z] of l.poly) { ax += x; az += z; }
-    cx.push(ax / l.poly.length); cz.push(az / l.poly.length);
-  }
   for (let gz = 0; gz < ch; gz++) {
     const wz = MAP_BOUNDS.minZ + gz * sz;
     for (let gx = 0; gx < cw; gx++) {
-      const wx = MAP_BOUNDS.minX + gx * sx;
-      let best = Infinity, lvl = 0;
-      for (let k = 0; k < lakes.length; k++) {
-        const d = (wx - cx[k]) * (wx - cx[k]) + (wz - cz[k]) * (wz - cz[k]);
-        if (d < best) { best = d; lvl = lakes[k].levelGameH; }
-      }
-      out[gz * cw + gx] = lvl;
+      const lvl = lakeLevelAt(MAP_BOUNDS.minX + gx * sx, wz, 260);
+      out[gz * cw + gx] = lvl === null ? NaN : lvl;
     }
   }
   return out;
@@ -159,9 +150,11 @@ export function buildSplatMask(
       if (lakeLvl && heightAt) {
         // B.a = 1 right at the water line of whichever lake is nearest, 0 SHORE_WET_M above it
         const lvl = lakeLvl[cz * CW + Math.min(CW - 1, Math.round((gx / (gridW - 1)) * (CW - 1)))];
-        const above = heightAt(wx, wz) - lvl;
-        const wet = above < -2 ? 1 : 1 - Math.min(1, Math.max(0, above / SHORE_WET_M));
-        b[i * 4 + 3] = Math.round(wet * 255);
+        if (lvl === lvl) {   // NaN = nothing to be wet next to
+          const above = heightAt(wx, wz) - lvl;
+          const wet = above < -2 ? 1 : 1 - Math.min(1, Math.max(0, above / SHORE_WET_M));
+          b[i * 4 + 3] = Math.round(wet * 255);
+        }
       }
     }
   }
@@ -185,6 +178,20 @@ export function buildSplatMask(
 }
 
 export function splatMaskReady(): boolean { return maskBuilt; }
+
+/**
+ * Force the terrain program to be rebuilt.
+ *
+ * The terrain material is created inside buildSky(), before the sky group (and therefore the
+ * hemisphere light) is in the scene and before the renderer has ever collected the CSM lights'
+ * shadow state. Its very first program is compiled against that half-built light state and comes
+ * out with no directional-light contribution at all — the landscape renders black while the trees,
+ * whose materials are created later, light correctly. Recompiling once the scene is actually
+ * running produces the correct program; sky.ts calls this on its first few frames.
+ */
+export function refreshTerrainMaterial(): void {
+  if (handle) handle.material.needsUpdate = true;
+}
 
 // ---------------------------------------------------------------------------------------------
 
@@ -213,7 +220,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
     uAltitudeTint: { value: new Color(0xc9c58a) }, // grass drifts to this above the villages
     uWetness: { value: 0 },        // rain darkens + glosses the ground
     uLakeLevel: { value: 0 },
-    uDebug: { value: 0 },   // TEMP diagnostic channel
+    uDirectScale: { value: 1 },   // see the CSM note on registerCsmMaterial below
     ...FOG_UNIFORMS,
   };
 
@@ -231,30 +238,15 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         uniform sampler2DArray tAlbedo, tNormal, tOrm;
         uniform sampler2D tMaskA, tMaskB, tMacro;
         uniform vec2 uMaskMin, uMaskSpan, uMaskTexel;
-        uniform float uSnowLine, uSnowDepth, uWetness, uLakeLevel, uDebug;
+        uniform float uSnowLine, uSnowDepth, uWetness, uLakeLevel, uDirectScale;
         uniform vec3 uSeasonTint, uAltitudeTint;
         varying vec3 vWorldPos;
         ${FOG_DECL}
-        // metres per texture repeat, per layer (grass meadow forest rock scree snow mud road)
-        const float TILE[8] = float[8](5.0, 6.0, 4.5, 7.0, 4.0, 8.0, 4.5, 4.0);
-        vec3 gMapN;
-        float gRough = 1.0;    // written in <map_fragment>, applied in <roughnessmap_fragment>
-        vec3 gDbgAlbedo; vec3 gDbgW;
-        float gSnow = 0.0;
 
-        // Biplanar: the horizontal projection plus whichever vertical plane faces the surface.
-        void planes(vec3 wp, vec3 n, float tile, out vec2 uvFlat, out vec2 uvSteep, out float steep) {
-          uvFlat = wp.xz / tile;
-          uvSteep = (abs(n.x) > abs(n.z)) ? vec2(wp.z, wp.y) / tile : vec2(wp.x, wp.y) / tile;
-          steep = smoothstep(0.86, 0.5, n.y); // ~30deg .. ~60deg
-        }
         /**
-         * Detail normal around the geometric normal, with an analytic tangent frame.
-         * A derivative-built frame (three's perturbNormalArb) is unusable here: the biplanar uv
-         * jumps between projections from pixel to pixel, so dFdx/dFdy of it are meaningless on
-         * every slope, the frame's scale explodes, and the resulting normal tips past the horizon,
-         * which is why the whole terrain went to ambient-only while the trees stayed lit.
-         * Perturbing around N by a bounded amount cannot flip the surface away from the sun.
+         * Detail normal around the geometric normal, with an analytic tangent frame. Perturbing
+         * around N by a bounded amount cannot tip the surface past the horizon the way a
+         * derivative-built frame does when the biplanar uv jumps between projections.
          */
         vec3 perturbNormalFromMap(vec3 surfNormal, vec3 mapN, float strength) {
           vec3 N = normalize(surfNormal);
@@ -263,6 +255,30 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           vec3 B = cross(N, T);
           return normalize(N + (T * mapN.x + B * mapN.y) * strength);
         }
+
+        // Splat accumulator. Deliberately a macro over named scalars rather than a float w[8] with
+        // a for loop and a TILE[i] lookup: dynamically indexed local/const arrays, in a shader that
+        // CSM has also filled with unrolled per-cascade light loops, miscompile on the software
+        // rasteriser the harness uses and the whole terrain comes back black.
+        float gRough = 1.0;    // written in <map_fragment>, applied in <roughnessmap_fragment>
+        vec3 gMapN = vec3(0.0, 0.0, 1.0);
+        vec3 gAlbAcc; vec3 gNrmAcc; vec3 gOrmAcc; float gWAcc;
+        #define SPLAT(IDX, TILE, WGT) \
+          if (WGT > 0.004) { \
+            float tl = (TILE) * detile; \
+            vec2 uvF = (detileRot * vWorldPos.xz) / tl; \
+            vec3 a = texture(tAlbedo, vec3(uvF, float(IDX))).rgb; \
+            vec3 nn = texture(tNormal, vec3(uvF, float(IDX))).rgb; \
+            vec3 oo = texture(tOrm, vec3(uvF, float(IDX))).rgb; \
+            if (steep > 0.02) { \
+              vec2 uvS = (abs(nrm.x) > abs(nrm.z)) ? vec2(vWorldPos.z, vWorldPos.y) / tl : vec2(vWorldPos.x, vWorldPos.y) / tl; \
+              a = mix(a, texture(tAlbedo, vec3(uvS, float(IDX))).rgb, steep); \
+              nn = mix(nn, texture(tNormal, vec3(uvS, float(IDX))).rgb, steep); \
+              oo = mix(oo, texture(tOrm, vec3(uvS, float(IDX))).rgb, steep); \
+            } \
+            gAlbAcc += a * (WGT); gNrmAcc += nn * (WGT); gOrmAcc += oo * (WGT); gWAcc += (WGT); \
+          }
+
         #include <common>
       `)
       .replace('#include <map_fragment>', /* glsl */ `
@@ -275,74 +291,64 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           vec4 mA = texture2D(tMaskA, muv);
           vec4 mB = texture2D(tMaskB, muv);
 
-          float w[8];
-          w[0] = mA.r; w[1] = mA.g; w[2] = mA.b; w[3] = mA.a;
-          w[4] = mB.r; w[6] = mB.g; w[7] = mB.b; w[5] = 0.0;
+          float w0 = mA.r, w1 = mA.g, w2 = mA.b, w3 = mA.a;
+          float w4 = mB.r, w6 = mB.g, w7 = mB.b;
 
           // altitude drift: pasture below the villages becomes alpine meadow above them
           float alp = smoothstep(90.0, 230.0, vWorldPos.y);
-          float toMeadow = w[0] * alp;
-          w[0] -= toMeadow; w[1] += toMeadow;
+          float toMeadow = w0 * alp;
+          w0 -= toMeadow; w1 += toMeadow;
 
-          // snow: by altitude, softened by slope (steep faces shed snow) and by the weather override
+          // snow: by altitude, softened by slope (steep faces shed it) and by the weather override
           float slopeShed = smoothstep(0.42, 0.82, nrm.y);
-          float snowAmt = clamp(smoothstep(uSnowLine - 70.0, uSnowLine + 45.0, vWorldPos.y) + uSnowDepth, 0.0, 1.0);
-          snowAmt *= slopeShed * (0.72 + 0.28 * macro.b);
-          float wsum = max(1e-4, w[0]+w[1]+w[2]+w[3]+w[4]+w[6]+w[7]);
-          for (int i = 0; i < 8; i++) w[i] /= wsum;
-          for (int i = 0; i < 8; i++) w[i] *= (1.0 - snowAmt);
-          w[5] = snowAmt;
+          float w5 = clamp(smoothstep(uSnowLine - 70.0, uSnowLine + 45.0, vWorldPos.y) + uSnowDepth, 0.0, 1.0);
+          w5 *= slopeShed * (0.72 + 0.28 * macro.b);
 
-          // dominant two layers -> two taps per map instead of eight
-          int i0 = 0; float w0 = -1.0;
-          for (int i = 0; i < 8; i++) if (w[i] > w0) { w0 = w[i]; i0 = i; }
-          int i1 = 0; float w1 = -1.0;
-          for (int i = 0; i < 8; i++) if (i != i0 && w[i] > w1) { w1 = w[i]; i1 = i; }
-          float blend = w1 / max(1e-4, w0 + w1);
+          float wsum = max(1e-4, w0 + w1 + w2 + w3 + w4 + w6 + w7);
+          float keep = (1.0 - w5) / wsum;
+          w0 *= keep; w1 *= keep; w2 *= keep; w3 *= keep; w4 *= keep; w6 *= keep; w7 *= keep;
 
-          float t0 = TILE[i0], t1 = TILE[i1];
-          vec2 f0, s0, f1, s1; float st0v, st1v;
-          planes(vWorldPos, nrm, t0, f0, s0, st0v);
-          planes(vWorldPos, nrm, t1, f1, s1, st1v);
+          // triplanar on anything past ~30 degrees, and a macro-driven tile scale so a 5 m repeat
+          // never reads as a grid at 500 m
+          float steep = smoothstep(0.86, 0.5, nrm.y);
+          float detile = 0.70 + 0.66 * macro.r;
+          // ...and a slowly drifting rotation of the horizontal projection, which is what actually
+          // kills the grid at 500 m: a pure scale change still repeats along the same axes.
+          float rot = (macro.g - 0.5) * 2.2;
+          mat2 detileRot = mat2(cos(rot), -sin(rot), sin(rot), cos(rot));
 
-          // de-tiling: the dominant layer is also sampled at 4.3x and mixed by the macro field
-          vec4 a0 = mix(texture(tAlbedo, vec3(f0, float(i0))), texture(tAlbedo, vec3(f0 * 0.233, float(i0))), 0.42 * macro.r + 0.12);
-          vec4 a1 = texture(tAlbedo, vec3(f1, float(i1)));
-          vec3 n0 = texture(tNormal, vec3(f0, float(i0))).xyz;
-          vec3 n1 = texture(tNormal, vec3(f1, float(i1))).xyz;
-          vec3 o0 = texture(tOrm, vec3(f0, float(i0))).xyz;
-          vec3 o1 = texture(tOrm, vec3(f1, float(i1))).xyz;
-          if (st0v > 0.02) {
-            a0 = mix(a0, texture(tAlbedo, vec3(s0, float(i0))), st0v);
-            n0 = mix(n0, texture(tNormal, vec3(s0, float(i0))).xyz, st0v);
-            o0 = mix(o0, texture(tOrm, vec3(s0, float(i0))).xyz, st0v);
-            a1 = mix(a1, texture(tAlbedo, vec3(s1, float(i1))), st1v);
-            n1 = mix(n1, texture(tNormal, vec3(s1, float(i1))).xyz, st1v);
-          }
-          vec3 albedo = mix(a0.rgb, a1.rgb, blend);
-          gMapN = normalize(mix(n0, n1, blend) * 2.0 - 1.0);
-          vec3 orm = mix(o0, o1, blend);
+          gAlbAcc = vec3(0.0); gNrmAcc = vec3(0.0); gOrmAcc = vec3(0.0); gWAcc = 0.0;
+          SPLAT(0, 5.0, w0)    // grass
+          SPLAT(1, 6.0, w1)    // alpine meadow
+          SPLAT(2, 4.5, w2)    // forest floor
+          SPLAT(3, 7.0, w3)    // rock
+          SPLAT(4, 4.0, w4)    // scree
+          SPLAT(5, 8.0, w5)    // snow
+          SPLAT(6, 4.5, w6)    // mud / shore
+          SPLAT(7, 4.0, w7)    // road
+          float inv = 1.0 / max(1e-4, gWAcc);
+          vec3 albedo = gAlbAcc * inv;
+          gMapN = normalize((gNrmAcc * inv) * 2.0 - 1.0);
+          vec3 orm = gOrmAcc * inv;
 
           // season / altitude tint on the two grass layers only
-          float greenW = w[0] + w[1];
+          float greenW = w0 + w1 + w2 * 0.45;
           vec3 tint = mix(uSeasonTint, uAltitudeTint, alp);
           albedo = mix(albedo, albedo * tint * 1.85, greenW * 0.88);
 
-          // macro variation: large-scale luminance + hue drift so 5 m tiles vanish at 500 m
-          albedo *= mix(vec3(0.78), vec3(1.22), macro.b);
+          // macro variation: large-scale luminance + hue drift
+          albedo *= mix(vec3(0.82), vec3(1.18), macro.b);
           albedo = mix(albedo, albedo * vec3(1.06, 1.0, 0.9), (macro.g - 0.5) * 0.5 + 0.25);
 
           // shore + rain wetting: darker, smoother, slightly bluer.
           // mB.a is baked "height above the nearest lake surface" (see buildSplatMask), so this is
           // correct for the Aegerisee at +97 as well as for the Vierwaldstaettersee at 0.
-          float shore = smoothstep(0.12, 0.92, mB.a);
-          float wet = clamp(max(shore, uWetness) * (1.0 - snowAmt), 0.0, 1.0);
-          albedo *= mix(1.0, 0.52, wet);
+          float shore = smoothstep(0.35, 0.95, mB.a);
+          float wet = clamp(max(shore, uWetness) * (1.0 - w5), 0.0, 1.0);
+          albedo *= mix(1.0, 0.68, wet);
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
-          gDbgAlbedo = clamp(albedo, 0.0, 1.0); gDbgW = vec3(w[0], w[2], w[3]);
           gRough = clamp(mix(orm.y, 0.22, wet), 0.05, 1.0);
-          gSnow = snowAmt;
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
       `)
@@ -350,24 +356,37 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         #include <roughnessmap_fragment>
         roughnessFactor *= gRough;
       `)
+      .replace('#include <lights_fragment_end>', `
+        #include <lights_fragment_end>
+        reflectedLight.directDiffuse *= uDirectScale;
+        reflectedLight.directSpecular *= uDirectScale;
+      `)
       .replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>
         normal = perturbNormalFromMap(normal, gMapN, 0.55);
       `)
       .replace('#include <dithering_fragment>', `
         gl_FragColor.rgb = aerialPerspective(gl_FragColor.rgb, vWorldPos, vWorldPos - cameraPosition);
-        if (uDebug > 0.5) {
-          if (uDebug < 1.5) gl_FragColor.rgb = gDbgAlbedo;
-          else if (uDebug < 2.5) gl_FragColor.rgb = normalize(vNormal) * 0.5 + 0.5;
-          else if (uDebug < 3.5) gl_FragColor.rgb = normalize(normal) * 0.5 + 0.5;
-          else if (uDebug < 4.5) gl_FragColor.rgb = gDbgW;
-          else gl_FragColor.rgb = vec3(diffuseColor.rgb);
-        }
         #include <dithering_fragment>
       `);
   };
 
-  registerCsmMaterial(material);
+  // NOT registered with CSM, deliberately.
+  //
+  // csm.setupMaterial() defines USE_CSM on the material and swaps in CSMShader's
+  // lights_fragment_begin, which applies each cascade's DirectionalLight only to the depth slice
+  // that cascade owns. On this material that binding comes out dead on the program three compiles
+  // first: the terrain renders with zero direct light (a black landscape under a lit sky, with
+  // correctly lit trees standing on it), while every other material in the scene is fine. Forcing
+  // needsUpdate later does not rebuild it into a working state.
+  //
+  // Left un-registered, the terrain takes three's stock directional path, so ALL `cascades` lights
+  // light it (and it still receives their shadow maps — a fragment outside a cascade's map reads as
+  // lit, so the three maps union correctly). That over-lights the direct term by exactly the cascade
+  // count, which uDirectScale takes back out in <lights_fragment_end>; the ambient term is untouched
+  // and therefore still correct. See the note in the final report.
+  const csm = getActiveCsm() as { cascades?: number } | null;
+  uniforms.uDirectScale.value = 1 / Math.max(1, csm?.cascades ?? 1);
   handle = { material, uniforms };
   return handle;
 }

@@ -16,8 +16,8 @@ import { boulderGeometry, rockMaterial } from './propGeometry';
 
 type Tier = 'full' | 'mid' | 'impostor';
 
-const SPACING: Record<Tier, number> = { full: 10, mid: 13, impostor: 22 };
-const IMPOSTOR_SPACING_FAR = 42;
+const SPACING: Record<Tier, number> = { full: 8.5, mid: 11, impostor: 15 };
+const IMPOSTOR_SPACING_FAR = 24;
 /** Tier by distance from the camera to the nearest point of the chunk, not by terrain chunk LOD:
  *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m. */
 const TIER_DIST = { full: 95, mid: 250 };
@@ -80,7 +80,7 @@ export class VegetationManager {
   }
 
   private treePool(kind: TreeKind, tier: Tier): Pool {
-    if (tier === 'impostor') return this.poolFor(`tree.${kind}.impostor`, 9000, () => treeImpostor(kind), false);
+    if (tier === 'impostor') return this.poolFor(`tree.${kind}.impostor`, 26000, () => treeImpostor(kind), false);
     const lod: 0 | 1 = tier === 'full' ? 0 : 1;
     // Only the near tier casts: CSM re-draws every caster once per cascade, so shadows from trees
     // past ~100 m cost three extra passes for something a pixel wide.
@@ -199,7 +199,7 @@ export class VegetationManager {
         if (y > TREELINE) continue; // LORE §3: nothing grows above game h 355
 
         let treeChance = 0, rockChance = 0;
-        if (surface === 'forest') { treeChance = tier === 'impostor' ? 0.5 : 0.66; rockChance = 0.012; }
+        if (surface === 'forest') { treeChance = tier === 'impostor' ? 0.8 : 0.78; rockChance = 0.010; }
         else if (surface === 'grass' || surface === 'meadow') { treeChance = tier === 'impostor' ? 0.025 : 0.05; rockChance = 0.008; }
         else if (surface === 'scree' || surface === 'rock') { treeChance = y < TREELINE * 0.8 ? 0.03 : 0; rockChance = 0.06; }
         else if (surface === 'mud') { treeChance = 0.03; }
