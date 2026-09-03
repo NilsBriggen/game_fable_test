@@ -24,6 +24,7 @@ const BUILDINGS = [
   'castle.keep', 'castle.wall', 'castle.tower', 'letzi.wall', 'palisade',
   'bridge.wood', 'bridge.stone', 'mill', 'boat',
 ];
+const WEAPONS = ['weapon.spiess', 'weapon.halberd', 'weapon.crossbow', 'weapon.sword', 'weapon.dagger', 'weapon.staff', 'shield.heater', 'shield.buckler'];
 const PROPS = ['cross', 'hayrack', 'fence', 'well', 'gallows.pole', 'campfire', 'tent', 'cart', 'signpost', 'rock.large', 'rock.small', 'stump'];
 
 function stats(obj: Object3D): { meshes: number; tris: number; mats: Set<Material> } {
@@ -44,9 +45,11 @@ describe('model library budgets', () => {
   const lib = new ModelLibrary(1234);
 
   it('every building and prop stays within 6 draw calls and 8k triangles', () => {
-    for (const id of [...BUILDINGS, ...PROPS]) {
-      const s = stats(lib.spawn(id));
-      expect(s.meshes, `${id}: ${s.meshes} meshes`).toBeLessThanOrEqual(6);
+    const variants: [string, string | undefined][] = [...[...BUILDINGS, ...PROPS, ...WEAPONS].map((i) => [i, undefined] as [string, undefined]),
+      ['house.blockbau', 'inn'], ['house.blockbau', 'large'], ['house.blockbau', 'small'], ['house.stone', 'large']];
+    for (const [id, variant] of variants) {
+      const s = stats(lib.spawn(id, { variant }));
+      expect(s.meshes, `${id}/${variant ?? '-'}: ${s.meshes} meshes`).toBeLessThanOrEqual(6);
       expect(s.tris, `${id}: ${Math.round(s.tris)} tris`).toBeLessThanOrEqual(8000);
       expect(s.meshes, `${id} produced no geometry`).toBeGreaterThan(0);
     }
@@ -59,7 +62,7 @@ describe('model library budgets', () => {
   });
 
   it('every mesh carries position/normal/uv/colour, so per-material merging stays uniform', () => {
-    for (const id of [...BUILDINGS, ...PROPS]) {
+    for (const id of [...BUILDINGS, ...PROPS, ...WEAPONS]) {
       lib.spawn(id).traverse((c) => {
         const m = c as Mesh;
         if (!m.isMesh) return;
@@ -77,10 +80,12 @@ describe('model library budgets', () => {
       'castle.keep': [15, 15], 'castle.tower': [8, 8], chapel: [7, 9],
     };
     for (const [id, [w, d]] of Object.entries(expected)) {
-      const box = new Box3().setFromObject(lib.spawn(id));
-      const size = box.getSize(new Box3().min.clone());
-      expect(size.x, `${id} width ${size.x.toFixed(1)}`).toBeLessThanOrEqual(w);
-      expect(size.z, `${id} depth ${size.z.toFixed(1)}`).toBeLessThanOrEqual(d);
+      for (let i = 0; i < 8; i++) {          // houses jitter per spawn: every draw must still fit
+        const box = new Box3().setFromObject(lib.spawn(id));
+        const size = box.getSize(new Box3().min.clone());
+        expect(size.x, `${id} width ${size.x.toFixed(1)}`).toBeLessThanOrEqual(w);
+        expect(size.z, `${id} depth ${size.z.toFixed(1)}`).toBeLessThanOrEqual(d);
+      }
     }
   });
 
@@ -111,11 +116,46 @@ describe('characters', () => {
     const header = JSON.parse(buf.toString('utf8', 8, 8 + buf.readUInt32LE(4))) as { clips: { name: string }[] };
     const have = new Set(header.clips.map((c) => c.name));
     const anims: CharacterAnim[] = ['idle', 'walk', 'run', 'attack', 'hit', 'down', 'dead', 'brace', 'shoot', 'reload', 'talk', 'cheer', 'flee'];
-    const weapons: WeaponKind[] = ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff', 'axe', 'none'];
-    for (const a of anims) for (const w of weapons) for (const seed of [0, 1, 2]) {
-      const pick = clipFor(a, w, seed);
+    const weapons: WeaponKind[] = ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff', 'axe', 'lance', 'none'];
+    for (const a of anims) for (const w of weapons) for (const shield of [false, true]) for (const seed of [0, 1, 2, 3, 4]) {
+      const pick = clipFor(a, w, seed, shield);
       expect(have.has(pick.name), `${a}/${w}: no clip "${pick.name}"`).toBe(true);
     }
+  });
+
+  it('registers a model id for every archetype it dresses', () => {
+    const lib = new ModelLibrary(3);
+    for (const id of CHARACTER_ARCHETYPES) expect(lib.has(`char.${id}`), `char.${id} not registered`).toBe(true);
+    expect(lib.has('char.player')).toBe(true);
+  });
+
+  it('gives a mounted archetype a horse without a fifth draw call', async () => {
+    const h = spawnCharacter('habsburg-knight', { variant: 'mounted' });
+    await new Promise((r) => setTimeout(r, 20));
+    const s = stats(h.object);
+    expect(s.meshes, `${s.meshes} meshes`).toBeLessThanOrEqual(4);
+    const box = new Box3().setFromObject(h.object);
+    expect(box.max.y, 'rider sits above the saddle').toBeGreaterThan(1.9);
+    expect(box.max.z - box.min.z, 'horse is about 2.4 m long').toBeGreaterThan(1.8);
+    h.dispose();
+  });
+
+  it('dresses civilians in four variants and soldiers in one', async () => {
+    const clothOf = async (a: string, seed: number): Promise<string> => {
+      const h = spawnCharacter(a, { seed });
+      await new Promise((r) => setTimeout(r, 20));
+      const m = h.object.children[0]?.children.find((c) => (c as Mesh).isMesh) as Mesh | undefined;
+      const col = m?.geometry.getAttribute('color');
+      const out = col ? `${col.getX(0).toFixed(3)},${col.getY(0).toFixed(3)},${col.getZ(0).toFixed(3)}` : 'none';
+      h.dispose();
+      return out;
+    };
+    const civilian = new Set<string>();
+    for (const seed of [0, 1, 2, 3]) civilian.add(await clothOf('peasant', seed));
+    expect(civilian.size, 'peasants should not all be identical').toBeGreaterThan(1);
+    const soldier = new Set<string>();
+    for (const seed of [0, 1, 2, 3]) soldier.add(await clothOf('habsburg-footman', seed));
+    expect(soldier.size, 'a livery is a livery').toBe(1);
   });
 
   it('falls back to a procedural skeleton when the clip pack cannot be fetched', async () => {

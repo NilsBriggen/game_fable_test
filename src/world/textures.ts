@@ -41,13 +41,21 @@ export interface TerrainArrays {
 
 let terrainArrays: TerrainArrays | null = null;
 
-/** A 1×1×8 grey/flat placeholder so the material can compile before the JPEGs arrive. */
+/**
+ * Full-size flat placeholder so the material can shade before the JPEGs arrive.
+ *
+ * It must be allocated at the FINAL 512x512x8 size: three uploads array textures into immutable
+ * storage, so a 1x1x8 placeholder can never be resized to the real data later — the upload is
+ * rejected and every terrain sample reads back black, which is exactly how the whole landscape
+ * ended up unlit while the (non-array) trees and water shaded correctly.
+ */
 function placeholderArray(r: number, g: number, b: number): DataArrayTexture {
-  const data = new Uint8Array(new ArrayBuffer(TERRAIN_LAYER_COUNT * 4));
-  for (let i = 0; i < TERRAIN_LAYER_COUNT; i++) {
+  const px = LAYER_PX * LAYER_PX * TERRAIN_LAYER_COUNT;
+  const data = new Uint8Array(new ArrayBuffer(px * 4));
+  for (let i = 0; i < px; i++) {
     data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = 255;
   }
-  const t = new DataArrayTexture(data, 1, 1, TERRAIN_LAYER_COUNT);
+  const t = new DataArrayTexture(data, LAYER_PX, LAYER_PX, TERRAIN_LAYER_COUNT);
   t.format = RGBAFormat; t.type = UnsignedByteType;
   t.colorSpace = NoColorSpace;
   t.needsUpdate = true;
@@ -67,8 +75,9 @@ async function decodeLayerStack(url: string): Promise<Uint8Array> {
   return new Uint8Array(img.data.buffer.slice(0) as ArrayBuffer);
 }
 
+/** Overwrite the placeholder's pixels in place — same dimensions, so the upload is a plain respecify. */
 function fillArray(tex: DataArrayTexture, data: Uint8Array): void {
-  tex.image = { data, width: LAYER_PX, height: LAYER_PX, depth: TERRAIN_LAYER_COUNT } as any;
+  (tex.image.data as Uint8Array).set(data);
   tex.needsUpdate = true;
 }
 
@@ -83,23 +92,28 @@ export function getTerrainArrays(): TerrainArrays {
     t.anisotropy = 4;
     return t;
   };
-  const albedo = mk(120, 130, 96);
+  const albedo = mk(126, 134, 104);
   const normal = mk(128, 128, 255);
-  const orm = mk(255, 200, 128);
+  const orm = mk(255, 210, 0);   // AO=1, roughness=0.82, metalness=0
   const arrays: TerrainArrays = {
     albedo, normal, orm, loaded: false,
     ready: Promise.resolve(),
   };
   arrays.ready = (async () => {
-    const [a, n, o] = await Promise.all([
-      decodeLayerStack(`${ASSET_BASE}/terrain/albedo-array.jpg`),
-      decodeLayerStack(`${ASSET_BASE}/terrain/normal-array.jpg`),
-      decodeLayerStack(`${ASSET_BASE}/terrain/orm-array.jpg`),
-    ]);
-    fillArray(albedo, a);
-    fillArray(normal, n);
-    fillArray(orm, o);
-    arrays.loaded = true;
+    try {
+      const [a, n, o] = await Promise.all([
+        decodeLayerStack(`${ASSET_BASE}/terrain/albedo-array.jpg`),
+        decodeLayerStack(`${ASSET_BASE}/terrain/normal-array.jpg`),
+        decodeLayerStack(`${ASSET_BASE}/terrain/orm-array.jpg`),
+      ]);
+      fillArray(albedo, a);
+      fillArray(normal, n);
+      fillArray(orm, o);
+      arrays.loaded = true;
+    } catch (err) {
+      // keep the flat placeholders; the terrain stays lit, just untextured
+      console.warn('[world] terrain texture arrays unavailable, using flat placeholders:', err);
+    }
   })();
   terrainArrays = arrays;
   return arrays;

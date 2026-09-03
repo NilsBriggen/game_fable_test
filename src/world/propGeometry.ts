@@ -1,6 +1,10 @@
-/** Shared boulder geometry + material for the vegetation InstancedMesh rock pools. */
-import { Float32BufferAttribute, MeshStandardMaterial, SphereGeometry } from 'three';
-import { registerCsmMaterial } from './shadowCsm';
+/**
+ * Shared boulder geometry + material for the vegetation InstancedMesh rock pools.
+ * Uses the same CC0 PBR rock material as the `rock.*` models (assets.ts / models.ts), so scattered
+ * boulders and placed rocks read as the same stone and share one material instance.
+ */
+import { Float32BufferAttribute, SphereGeometry, type MeshStandardMaterial } from 'three';
+import { propMat } from './models';
 
 const cache = new Map<string, SphereGeometry>();
 export function boulderGeometry(baseRadius: number): SphereGeometry {
@@ -16,21 +20,21 @@ export function boulderGeometry(baseRadius: number): SphereGeometry {
   }
   geo.computeVertexNormals();
   geo.translate(0, baseRadius * 0.55, 0);
+  // The shared prop material is vertex-coloured (models.ts tints every building this way). Rock035's
+  // albedo is near-black in linear light (0.005/0.009/0.012), so the grey stone tint carries the same
+  // per-channel gain models.ts uses — see TINT_GAIN there and tools/assets/albedo.mjs.
+  const c = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) { c[i * 3] = 12.2; c[i * 3 + 1] = 8.2; c[i * 3 + 2] = 5.7; }
+  geo.setAttribute('color', new Float32BufferAttribute(c, 3));
   cache.set(key, geo);
   return geo;
 }
 
-let mat: MeshStandardMaterial | null = null;
 export function rockMaterial(): MeshStandardMaterial {
-  if (mat) return mat;
-  mat = new MeshStandardMaterial({ color: 0x7a746a, roughness: 0.95 });
-  registerCsmMaterial(mat);
-  return mat;
+  return propMat('rock');
 }
 
 export function disposePropGeometry(): void {
   for (const g of cache.values()) g.dispose();
   cache.clear();
-  mat?.dispose();
-  mat = null;
 }

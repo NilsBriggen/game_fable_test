@@ -20,7 +20,7 @@ import { fbm2D } from './noise';
 const LAT_DEG = 47;
 const DOME_R = 8600; // inside the 12 000 m camera far plane, further than anything the player reaches
 
-function dayOfYearFromCalendar(month: number, day: number): number {
+export function dayOfYearFromCalendar(month: number, day: number): number {
   const days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   let doy = day;
   for (let m = 0; m < month - 1; m++) doy += days[m];
@@ -28,7 +28,7 @@ function dayOfYearFromCalendar(month: number, day: number): number {
 }
 
 /** Standard solar-position approximation; `hour` is local apparent time. */
-function solarPosition(dayOfYear: number, hour: number, decDegOverride?: number): { elevation: number; azimuth: number } {
+export function solarPosition(dayOfYear: number, hour: number, decDegOverride?: number): { elevation: number; azimuth: number } {
   const lat = (LAT_DEG * Math.PI) / 180;
   const decDeg = decDegOverride ?? 23.44 * Math.sin(((2 * Math.PI) / 365) * (dayOfYear - 81));
   const dec = (decDeg * Math.PI) / 180;
@@ -43,7 +43,7 @@ function solarPosition(dayOfYear: number, hour: number, decDegOverride?: number)
 }
 
 /** The moon runs ~50 min later each day and swings +/-23 deg in declination over the month. */
-function lunarPosition(dayOfYear: number, hour: number): { elevation: number; azimuth: number; phase: number } {
+export function lunarPosition(dayOfYear: number, hour: number): { elevation: number; azimuth: number; phase: number } {
   const synodic = ((dayOfYear % 29.53) + 29.53) % 29.53;
   const lagHours = 12 - (synodic / 29.53) * 24;   // full moon (synodic 0) rises as the sun sets
   const dec = 23.44 * Math.sin((synodic / 27.32) * Math.PI * 2);
@@ -275,8 +275,8 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
   const moonTex = moonTexture();
   const moonMat = new PointsMaterial({
-    map: moonTex, size: 420, sizeAttenuation: true, transparent: true, opacity: 0,
-    depthWrite: false, depthTest: false, blending: AdditiveBlending, fog: false,
+    map: moonTex, size: 380, sizeAttenuation: true, transparent: true, opacity: 0,
+    depthWrite: false, depthTest: true, blending: AdditiveBlending, fog: false,
   });
   const moonGeo = new BufferGeometry();
   moonGeo.setAttribute('position', new BufferAttribute(new Float32Array(3), 3));
@@ -402,16 +402,18 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     // CSM reads `lightIntensity` only in its constructor, so per-frame brightness has to be pushed
     // onto the DirectionalLights themselves.
     const dayI = Math.max(0, Math.sin(Math.max(0, sun.elevation)));
+    // three r155+ lighting is physical: a 0.1-linear-albedo meadow needs irradiance around 6 to
+    // land in the middle of the ACES curve at exposure ~0.9. 1.8 (the pre-r155 habit) renders night.
     const intensity = night
-      ? (moonUp ? 0.10 + moonP.phase * 0.22 : 0.05) * w.sunMul
-      : (0.25 + dayI * 3.0) * w.sunMul;
+      ? (moonUp ? 0.28 + moonP.phase * 0.55 : 0.14) * w.sunMul
+      : (0.55 + dayI * 6.4) * w.sunMul;
     csm.lightIntensity = intensity;
     for (const l of csm.lights) { l.color.copy(night ? nightLight : look.light); l.intensity = intensity; }
     csm.updateFrustums();
 
     hemi.color.copy(look.ambient);
     hemi.groundColor.setHex(night ? 0x141821 : 0x40382a).lerp(look.ambient, 0.25);
-    hemi.intensity = (night ? 0.20 + (moonUp ? moonP.phase * 0.12 : 0) : 0.42 + dayI * 0.42) * w.ambientMul;
+    hemi.intensity = (night ? 0.42 + (moonUp ? moonP.phase * 0.30 : 0) : 0.95 + dayI * 1.55) * w.ambientMul;
 
     // --- clouds ----------------------------------------------------------------------------------
     // Cloud bodies take the colour of whatever is lighting them: white at noon, orange at dusk, blue at night.
@@ -555,7 +557,7 @@ function makeStars(tex: CanvasTexture, count = 1500): Points {
   geo.setAttribute('position', new BufferAttribute(positions, 3));
   const mat = new PointsMaterial({
     map: tex, color: 0xffffff, size: 90, sizeAttenuation: true, transparent: true, opacity: 0,
-    blending: AdditiveBlending, depthWrite: false, depthTest: false, fog: false,
+    blending: AdditiveBlending, depthWrite: false, depthTest: true, fog: false,
   });
   const pts = new Points(geo, mat);
   pts.name = 'stars';

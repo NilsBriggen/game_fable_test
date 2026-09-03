@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Every entry produces committed files under public/assets/**. Re-run `node tools/assets/fetch.mjs` to reproduce.",
+  "note": "Every entry produces committed files under public/assets/**. Re-run `node tools/assets/fetch.mjs` to reproduce. `node tools/assets/albedo.mjs` prints each committed diffuse map's mean linear albedo; those numbers are the per-channel tint gains in src/world/models.ts (TINT_GAIN) and src/world/characters.ts (SkinBuilder.gain) \u2014 re-measure whenever a texture here is swapped.",
   "sources": {
     "ambientcg": {
       "name": "ambientCG",
@@ -221,7 +221,7 @@
       },
       "target": "public/assets/characters/rig-medium.anims.bin",
       "postprocess": "rig-anims",
-      "note": "Rig_Medium clip library. Post-processing keeps only the clips listed below, drops constant position/scale tracks (kept for root+hips) and stores rotations as float32 — the game rebuilds its own period-proportioned skeleton and retargets these rotations onto it (src/world/characters.ts).",
+      "note": "Rig_Medium clip library. Post-processing keeps only the clips listed below, drops constant position/scale tracks (kept for root+hips) and stores rotations as float32 \u2014 the game rebuilds its own period-proportioned skeleton and retargets these rotations onto it (src/world/characters.ts).",
       "clipFiles": [
         {
           "file": "Animations/gltf/Rig_Medium/Rig_Medium_General.glb",

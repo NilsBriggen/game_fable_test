@@ -24,7 +24,7 @@ const SHORE_RANGE = 130; // metres of shore distance mapped into 0..1
 // Triangulation
 // ---------------------------------------------------------------------------------------------
 
-function signedArea(poly: [number, number][]): number {
+export function signedArea(poly: [number, number][]): number {  // exported for water.test.ts
   let a = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
   return a / 2;
@@ -40,7 +40,7 @@ function pointInTri(p: [number, number], a: [number, number], b: [number, number
 }
 
 /** Ear clipping for a simple (possibly strongly concave) polygon. Returns index triples. */
-function earClip(poly: [number, number][]): number[] {
+export function earClip(poly: [number, number][]): number[] {
   const idx = poly.map((_, i) => i);
   if (signedArea(poly) < 0) idx.reverse(); // work on a CCW ring
   const tris: number[] = [];
@@ -140,8 +140,8 @@ export function buildWater(): WaterHandle {
     tRipple1: { value: ripple1 },
     uTime: { value: 0 },
     // Vierwaldstättersee/Urnersee: glacial-flour turquoise in the shallows, near-black blue-green deep
-    uShallowColor: { value: new Color(0x2f7f88) },
-    uDeepColor: { value: new Color(0x0b2a37) },
+    uShallowColor: { value: new Color(0x3a97a0) },
+    uDeepColor: { value: new Color(0x0d3547) },
     uFoamColor: { value: new Color(0xdfeaee) },
     uWind: { value: new Vector2(0.62, 0.78) },
     ...ATMOSPHERE,
@@ -187,7 +187,7 @@ export function buildWater(): WaterHandle {
           gShore = texture2D(tShore, vShoreUv);
           float depth = gShore.r;
           // colour ramp: turquoise shelf -> deep blue-green body
-          vec3 col = mix(uShallowColor, uDeepColor, smoothstep(0.02, 0.42, depth));
+          vec3 col = mix(uShallowColor, uDeepColor, smoothstep(0.015, 0.30, depth));
           // foam: a broken band hugging the shore, animated by the ripple field
           float band = 1.0 - smoothstep(0.0, 0.052, depth);
           float wob = gShore.g + 0.35 * sin(uTime * 0.9 + vWWorld.x * 0.09 + vWWorld.z * 0.06);
@@ -217,12 +217,16 @@ export function buildWater(): WaterHandle {
           // analytic sky: horizon band -> zenith, plus the sun's own warm lobe
           float up = clamp(R.y, 0.0, 1.0);
           vec3 skyCol = mix(uSkyHorizon, uSkyZenith, pow(up, 0.55));
+          // a near-horizontal reflection ray crosses 1-3 km of Urnersee and hits the far wall of the
+          // valley long before it reaches the sky: reflect the mountains, not the bright horizon
+          vec3 shoreRefl = mix(uDeepColor * 1.5, uSkyHorizon, 0.22);
+          skyCol = mix(shoreRefl, skyCol, smoothstep(0.015, 0.20, up));
           float sunLobe = pow(max(dot(R, normalize(uSunDir)), 0.0), 26.0);
           skyCol += uSunTint * sunLobe * 0.55 * uGlitter;
           // Fresnel: nearly mirror at grazing angles, mostly body colour looking straight down
           float f = 0.02 + 0.98 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
           f *= 1.0 - clamp(gShore.r < 0.02 ? 0.6 : 0.0, 0.0, 1.0); // foam is not a mirror
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, pow(skyCol, vec3(2.2)), clamp(f, 0.0, 0.86));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, pow(skyCol, vec3(2.2)), clamp(f, 0.0, 0.58));
           // sun glitter: a tight highlight the ripple normals shatter into moving sparks
           float spec = pow(max(dot(R, normalize(uSunDir)), 0.0), 900.0);
           gl_FragColor.rgb += pow(uSunTint, vec3(2.2)) * spec * 5.0 * uGlitter;

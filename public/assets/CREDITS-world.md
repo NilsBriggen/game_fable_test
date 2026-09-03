@@ -37,6 +37,8 @@ The three terrain files are 512×4096 JPEGs holding eight 512² layers each, upl
 
 | Asset | Where | Why not downloaded |
 |---|---|---|
-| Sky + environment map | `src/world/sky.ts` (Preetham `three/addons/objects/Sky.js` + PMREM) | a baked HDRI cannot follow the 06:00/12:00/19:00/23:00 game clock at 47° N; the IBL and the water reflection are rendered from the live sky instead |
+| Sky, clouds, stars, moon | `src/world/sky.ts` (Preetham `three/addons/objects/Sky.js` + canvas cloud/star/moon sprites) | a baked HDRI cannot follow the 06:00/12:00/19:00/23:00 game clock at 47° N; the sun/moon path, haze colour, exposure and the water reflection are all evaluated from the live solar elevation instead |
 | Tree meshes + needle/leaf/grass cut-outs | `src/world/treeGeometry.ts`, `src/world/textures.ts` | a downloaded GLB is one mesh at one LOD; the generator gives per-species silhouettes, 3 LODs + impostor, and season-tinted foliage from one shared material |
 | Terrain splat mask, macro-variation noise, water ripple normals | `src/world/textures.ts`, `src/world/terrainMaterial.ts` | derived from the height model / procedural; nothing to download |
+| Lake shore-distance atlas, foam mask | `src/world/water.ts` | baked from the gazetteer lake polygons at load; a downloadable texture could not know where the shore is |
+| Parchment map sheet (paper, hillshade, ink work, hachures) | `src/world/map.ts` | drawn to a canvas from the live height model so the chart always matches the terrain the seed produced |

@@ -10,9 +10,12 @@
  * (src/exploration/settlements.ts), so all built settlements together cost one draw call per material.
  *
  * Eight shared materials cover every building: logs, planks, shingle, ashlar, drystone, plaster, iron,
- * thatch (+ rock/wool/fire for natural props, tents and campfires).
+ * thatch (+ rock/wool/fire for natural props, tents and campfires). Painted tints are multiplied by each
+ * map's own albedo, which for these CC0 sets is both dark and hue-shifted, so every tint carries the
+ * per-channel gain in `TINT_GAIN` — measured with `node tools/assets/albedo.mjs`.
  * Real-metre scale (ARCHITECTURE.md §1) and the footprints src/exploration/layout.ts assumes:
- * blockbau 8×6, stone house 9×7, church nave 9×16, castle wall segment 8 m, letzi 8 m, bridge 14 m.
+ * blockbau 8×6 (±8 % per spawn), stone house 9×7, church nave 9×13 + tower/apse, castle wall segment 8 m,
+ * letzi 8 m, bridge 14 m.
  */
 import {
   BufferGeometry, Euler, Float32BufferAttribute, Group, Matrix4, Mesh, MeshStandardMaterial, Object3D,
@@ -65,13 +68,24 @@ const UV_METRES: Record<MatId, number> = {
 
 // ---------------- geometry assembly ----------------
 
-function setColor(geo: BufferGeometry, hex: number): void {
+/** Per-material gain on the vertex tint. `map * vColor` is unclamped and the ambientCG albedos are far
+ *  darker than they look in sRGB (wood-plank averages 0.046 in *linear* light, rock 0.009), so a painted
+ *  tone only lands where it was authored if it is multiplied by ≈ 0.8 / meanLinearAlbedo. Measure with
+ *  `node tools/assets/albedo.mjs`; rock is capped rather than the 92× its near-black map would ask for. */
+const TINT_GAIN: Record<MatId, [number, number, number]> = {
+  logs: [7.1, 12.3, 19.5], planks: [10.7, 22.9, 27.6], shingle: [6.2, 8.4, 14.0],
+  ashlar: [3.1, 4.0, 9.9], drystone: [4.2, 5.4, 8.3], plaster: [1.20, 1.24, 1.28],
+  iron: [2.54, 3.16, 3.65], thatch: [5.3, 6.8, 9.4], rock: [25, 18, 15], cloth: [0.93, 0.93, 0.93],
+  fire: [1, 1, 1],
+};
+
+function setColor(geo: BufferGeometry, hex: number, gain: [number, number, number] = [1, 1, 1]): void {
   const n = geo.attributes.position.count;
   const c = new Float32Array(n * 3);
   const r = ((hex >> 16) & 255) / 255, g = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
   // sRGB → linear, to match the renderer's colour space (materials sample sRGB maps)
   const lin = (v: number) => (v < 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
-  const lr = lin(r), lg = lin(g), lb = lin(b);
+  const lr = lin(r) * gain[0], lg = lin(g) * gain[1], lb = lin(b) * gain[2];
   for (let i = 0; i < n; i++) { c[i * 3] = lr; c[i * 3 + 1] = lg; c[i * 3 + 2] = lb; }
   geo.setAttribute('color', new Float32BufferAttribute(c, 3));
 }
@@ -153,7 +167,7 @@ function wedgeGeo(w: number, h: number, d: number): BufferGeometry {
 
 /** Deformed icosphere-ish boulder (seeded), used for rocks, roof weights and rubble. */
 function blobGeo(r: number, seed: number, squash = 0.8, seg = 8): BufferGeometry {
-  const rings = 5;
+  const rings = Math.max(3, Math.round(seg * 0.55));
   const rnd = (i: number) => {
     const s = Math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
     return s - Math.floor(s);
@@ -181,12 +195,12 @@ const _e = new Euler();
 class Build {
   private parts = new Map<MatId, BufferGeometry[]>();
 
-  add(mat: MatId, geo: BufferGeometry, color: number, at: XYZ = [0, 0, 0], rot?: XYZ, scale?: XYZ): this {
-    _e.set(rot?.[0] ?? 0, rot?.[1] ?? 0, rot?.[2] ?? 0);
+  add(mat: MatId, geo: BufferGeometry, color: number, at: XYZ = [0, 0, 0], rot?: XYZ, scale?: XYZ, order: 'XYZ' | 'YXZ' = 'XYZ'): this {
+    _e.set(rot?.[0] ?? 0, rot?.[1] ?? 0, rot?.[2] ?? 0, order);
     _q.setFromEuler(_e);
     _m.compose(new Vector3(at[0], at[1], at[2]), _q, new Vector3(scale?.[0] ?? 1, scale?.[1] ?? 1, scale?.[2] ?? 1));
     geo.applyMatrix4(_m);
-    setColor(geo, color);
+    setColor(geo, color, TINT_GAIN[mat]);
     boxUv(geo, UV_METRES[mat]);
     let list = this.parts.get(mat);
     if (!list) { list = []; this.parts.set(mat, list); }
@@ -232,7 +246,7 @@ class Build {
 
 // ---------------- shared sub-assemblies ----------------
 
-const SHINGLE_TONE = 0x6b5a44;
+const SHINGLE_TONE = 0x7b6a52;
 const LOG_TONE = 0x9c8156;
 const PLANK_TONE = 0x8d7247;
 const PLANK_DARK = 0x5d4a2e;
@@ -261,12 +275,12 @@ function gableRoof(b: Build, w: number, d: number, rise: number, y: number, opts
   b.wedge('planks', PLANK_TONE, [w, rise, 0.12], [ox, y, oz + dz / 2 - 0.06]);      // gable ends
   b.wedge('planks', PLANK_TONE, [w, rise, 0.12], [ox, y, oz - dz / 2 + 0.06]);
   if (opts.weights !== false && mat === 'shingle') {
-    for (let i = 0; i < 6; i++) {
-      const t = (i + 0.5) / 6;
+    for (let i = 0; i < 4; i++) {
+      const t = (i + 0.5) / 4;
       const zz = -dz / 2 + t * dz;
       for (const s of [-1, 1]) {
         const u = 0.45 + ((i * 7) % 3) * 0.12;
-        b.blob('rock', 0x8d8880, 0.18, [ox + s * halfW * u, y + rise * (1 - u) + 0.16, oz + zz], i * 3 + s, 0.6, 6);
+        b.blob('rock', 0xb9b3a6, 0.18, [ox + s * halfW * u, y + rise * (1 - u) + 0.16, oz + zz], i * 3 + s, 0.6, 5);
       }
     }
   }
@@ -293,13 +307,13 @@ function doorway(b: Build, x: number, y: number, z: number, w = 1.05, h = 2.0, f
 }
 
 /** Horizontal log courses on all four walls + protruding cross-jointed corner ends (Blockbau). */
-function logWalls(b: Build, w: number, d: number, h: number, y0: number, courseH = 0.34): void {
+function logWalls(b: Build, w: number, d: number, h: number, y0: number, courseH = 0.34, tone0 = LOG_TONE): void {
   const courses = Math.max(4, Math.round(h / courseH));
   const ch = h / courses;
   const r = ch * 0.52;
   for (let i = 0; i < courses; i++) {
     const y = y0 + ch * (i + 0.5);
-    const tone = i % 2 === 0 ? LOG_TONE : 0x8f764e;
+    const tone = i % 2 === 0 ? tone0 : 0x8f764e;
     const longWay = i % 2 === 0;
     if (longWay) {
       for (const s of [-1, 1]) b.cyl('logs', tone, r, r, w + 0.5, [0, y, s * d / 2], [0, 0, Math.PI / 2], 7);
@@ -319,15 +333,23 @@ function blockbauInto(b: Build, rng: Rng, variant?: string): Object3D[] {
     : variant === 'inn' ? { w: 11.5, d: 8, wallH: 4.4, ridge: 3.4 }
       : variant === 'small' ? { w: 6.5, d: 5.2, wallH: 2.6, ridge: 2.3 }
         : { w: 8, d: 6, wallH: 3.1, ridge: 2.8 };
-  const { w, d, wallH, ridge } = size;
+  // per-spawn variation: no draw-call cost (exploration merges by material anyway) and a village of
+  // identical houses reads as a tile set rather than a place
+  const jitter = (v: number, k: number) => v * (1 + (rng.next() - 0.5) * k);
+  const w = jitter(size.w, 0.16), d = jitter(size.d, 0.12), wallH = jitter(size.wallH, 0.12);
+  const ridge = jitter(size.ridge, 0.14);
+  const roofTone = [0x6b5a44, 0x7b6849, 0x5d5140][Math.floor(rng.next() * 3)];
+  const logTone = [LOG_TONE, 0x8c7350, 0xa88c5f][Math.floor(rng.next() * 3)];
+  const hasGallery = variant !== 'small' && rng.next() < 0.7;
   const plinth = 0.55;
-  // drystone plinth on sloping ground
+  // drystone plinth, with a buried footing so a downhill side never shows daylight under the sill
   b.box('drystone', DRY_TONE, [w + 0.5, plinth, d + 0.5], [0, plinth / 2 - 0.15, 0]);
-  for (let i = 0; i < 10; i++) {
-    const t = i / 10;
-    b.blob('drystone', DRY_TONE, 0.3, [-w / 2 - 0.2 + t * (w + 0.4), plinth * 0.55, d / 2 + 0.22], i, 0.7, 6);
+  b.box('drystone', 0x7c776e, [w + 0.2, 1.8, d + 0.2], [0, -0.9, 0]);
+  for (let i = 0; i < 4; i++) {
+    const t = (i + 0.5) / 4;
+    b.blob('drystone', DRY_TONE, 0.32, [-w / 2 - 0.2 + t * (w + 0.4), plinth * 0.55, d / 2 + 0.22], i, 0.7, 5);
   }
-  logWalls(b, w, d, wallH, plinth);
+  logWalls(b, w, d, wallH, plinth, 0.34, logTone);
   // upper gable storey in vertical boards
   b.wedge('planks', PLANK_TONE, [w, ridge * 0.92, d * 0.9], [0, plinth + wallH, 0]);
   doorway(b, 0, plinth, d / 2 + 0.06, 1.05, 2.0);
@@ -336,21 +358,19 @@ function blockbauInto(b: Build, rng: Rng, variant?: string): Object3D[] {
   window(b, -w / 2 - 0.08, plinth + wallH * 0.62, 0, 0.5, 0.6, 'x');
   // gallery (Laube) under the eaves on the long side
   const galY = plinth + wallH * 0.72;
-  b.box('planks', PLANK_TONE, [w + 0.5, 0.1, 1.0], [0, galY, d / 2 + 0.55]);
-  b.box('planks', PLANK_DARK, [w + 0.5, 0.09, 0.09], [0, galY + 0.85, d / 2 + 1.02]);
-  for (let i = 0; i <= 6; i++) b.box('planks', PLANK_DARK, [0.07, 0.85, 0.07], [-w / 2 - 0.2 + (i / 6) * (w + 0.4), galY + 0.43, d / 2 + 1.02]);
-  for (const s of [-1, 1]) b.cyl('logs', LOG_TONE, 0.08, 0.09, galY, [s * (w / 2 + 0.1), galY / 2, d / 2 + 1.0], undefined, 6);
-  gableRoof(b, w, d, ridge, plinth + wallH);
-  const extra: Object3D[] = [];
-  if (variant === 'inn') {
-    const s = new Build();
-    s.cyl('iron', IRON_TONE, 0.035, 0.035, 1.1, [w / 2 + 0.5, plinth + wallH * 0.9, d / 2 - 0.6], [0, 0, Math.PI / 2], 6);
-    s.box('planks', 0x4e3a22, [0.9, 0.7, 0.06], [w / 2 + 1.0, plinth + wallH * 0.55, d / 2 - 0.6]);
-    s.cyl('iron', IRON_TONE, 0.02, 0.02, 0.4, [w / 2 + 1.0, plinth + wallH * 0.75, d / 2 - 0.6], undefined, 5);
-    for (const m of s.meshes()) extra.push(m);
+  if (hasGallery) {
+    b.box('planks', PLANK_TONE, [w + 0.5, 0.1, 1.0], [0, galY, d / 2 + 0.55]);
+    b.box('planks', PLANK_DARK, [w + 0.5, 0.09, 0.09], [0, galY + 0.85, d / 2 + 1.02]);
+    for (let i = 0; i <= 6; i++) b.box('planks', PLANK_DARK, [0.07, 0.85, 0.07], [-w / 2 - 0.2 + (i / 6) * (w + 0.4), galY + 0.43, d / 2 + 1.02]);
+    for (const s of [-1, 1]) b.cyl('logs', logTone, 0.08, 0.09, galY, [s * (w / 2 + 0.1), galY / 2, d / 2 + 1.0], undefined, 6);
   }
-  void rng;
-  return extra;
+  gableRoof(b, w, d, ridge, plinth + wallH, { tone: roofTone });
+  if (variant === 'inn') {   // wrought-iron bracket + painted board (drawn into the same batches)
+    b.cyl('iron', IRON_TONE, 0.035, 0.035, 1.1, [w / 2 + 0.5, plinth + wallH * 0.9, d / 2 - 0.6], [0, 0, Math.PI / 2], 6);
+    b.box('planks', 0x4e3a22, [0.9, 0.7, 0.06], [w / 2 + 1.0, plinth + wallH * 0.55, d / 2 - 0.6]);
+    b.cyl('iron', IRON_TONE, 0.02, 0.02, 0.4, [w / 2 + 1.0, plinth + wallH * 0.75, d / 2 - 0.6], undefined, 5);
+  }
+  return [];
 }
 
 function houseBlockbau(rng: Rng, variant?: string): Object3D {
@@ -360,11 +380,14 @@ function houseBlockbau(rng: Rng, variant?: string): Object3D {
 }
 
 function houseStone(rng: Rng, variant?: string): Object3D {
-  const w = variant === 'large' ? 11 : 9, d = 7, wallH = 6.4, ridge = 2.8;
+  const w = variant === 'large' ? 11 : 9, d = 7, ridge = 2.8;
+  const wallH = 6.4 * (1 + (rng.next() - 0.5) * 0.14);
+  const wash = [PLASTER_TONE, 0xd6c49a, 0xc9c6bb][Math.floor(rng.next() * 3)];
   const b = new Build();
-  b.box('plaster', PLASTER_TONE, [w, wallH, d], [0, wallH / 2, 0]);
-  // ashlar quoins and plinth
+  b.box('plaster', wash, [w, wallH, d], [0, wallH / 2, 0]);
+  // ashlar quoins and plinth (+ buried footing for sloping ground)
   b.box('ashlar', STONE_TONE, [w + 0.3, 0.7, d + 0.3], [0, 0.35, 0]);
+  b.box('ashlar', 0x8a857c, [w, 1.8, d], [0, -0.9, 0]);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     for (let i = 0; i < 7; i++) {
       const hh = 0.8;
@@ -379,7 +402,6 @@ function houseStone(rng: Rng, variant?: string): Object3D {
   }
   doorway(b, 0, 0, d / 2 + 0.06, 1.2, 2.3);
   gableRoof(b, w, d, ridge, wallH, { overhang: 0.5 });
-  void rng;
   return b.emit('house.stone');
 }
 
@@ -387,6 +409,7 @@ function barn(rng: Rng): Object3D {
   const w = 11, d = 7, wallH = 4.4, ridge = 3.4;
   const b = new Build();
   b.box('drystone', DRY_TONE, [w + 0.4, 0.5, d + 0.4], [0, 0.2, 0]);
+  b.box('drystone', 0x7c776e, [w, 1.8, d], [0, -0.9, 0]);
   b.box('planks', 0x6f5a3a, [w, wallH, d], [0, 0.45 + wallH / 2, 0]);
   // vertical boarding + corner posts
   for (let i = 0; i <= 12; i++) {
@@ -407,6 +430,7 @@ function barn(rng: Rng): Object3D {
 function churchInto(b: Build, ox = 0, oz = 0): void {
   const naveW = 9, naveD = 13, wallH = 7.4, ridge = 3.6;
   b.box('ashlar', STONE_TONE, [naveW + 0.5, 0.8, naveD + 0.5], [ox, 0.4, oz]);
+  b.box('ashlar', 0x8a857c, [naveW, 2.0, naveD], [ox, -1.0, oz]);
   b.box('plaster', 0xdcd5c2, [naveW, wallH, naveD], [ox, wallH / 2, oz]);
   for (let i = -1; i <= 1; i++) for (const sx of [-1, 1]) {
     b.box('ashlar', STONE_TONE, [0.55, wallH * 0.8, 0.9], [ox + sx * (naveW / 2 + 0.2), wallH * 0.4, oz + i * 3.6]);
@@ -417,6 +441,10 @@ function churchInto(b: Build, ox = 0, oz = 0): void {
     b.box('planks', 0x1a1610, [0.12, 1.9, 0.62], [ox + sx * (naveW / 2 + 0.02), wallH * 0.55, z]);
     b.cyl('ashlar', STONE_TONE, 0.36, 0.36, 0.2, [ox + sx * (naveW / 2 + 0.04), wallH * 0.55 + 0.95, z], [0, 0, Math.PI / 2], 8);
   }
+  b.box('ashlar', STONE_TONE, [naveW + 0.24, 0.22, naveD + 0.24], [ox, wallH * 0.52, oz]);   // stringcourse
+  // south door with a stone surround
+  b.box('ashlar', STONE_TONE, [0.3, 3.0, 1.9], [ox + naveW / 2 + 0.04, 1.5, oz - 1.0]);
+  doorway(b, ox + naveW / 2 + 0.14, 0, oz - 1.0, 1.3, 2.4, 'x');
   gableRoof(b, naveW, naveD, ridge, wallH, { overhang: 0.5, weights: false, at: [ox, oz] });
   // apse (east end)
   b.cyl('plaster', 0xdcd5c2, 2.6, 2.7, 5.6, [ox, 2.8, oz + naveD / 2 + 1.1], undefined, 10);
@@ -448,6 +476,7 @@ function chapel(rng: Rng): Object3D {
   const w = 5, d = 7, wallH = 3.8, ridge = 2.2;
   const b = new Build();
   b.box('drystone', DRY_TONE, [w + 0.4, 0.5, d + 0.4], [0, 0.25, 0]);
+  b.box('drystone', 0x7c776e, [w, 1.8, d], [0, -0.9, 0]);
   b.box('plaster', 0xe0d9c6, [w, wallH, d], [0, 0.5 + wallH / 2, 0]);
   for (const sx of [-1, 1]) {
     b.box('planks', 0x1a1610, [0.1, 1.2, 0.45], [sx * (w / 2 + 0.02), 0.5 + wallH * 0.6, 1.2]);
@@ -494,7 +523,8 @@ function gableRoofRotated(b: Build, w: number, d: number, rise: number, y: numbe
   const ang = Math.atan2(rise, halfW);
   for (const s of [-1, 1]) {
     const ox = x + Math.sin(yaw + Math.PI / 2) * s * halfW / 2, oz = z + Math.cos(yaw + Math.PI / 2) * s * halfW / 2;
-    b.add('shingle', boxGeo(w, 0.12, slope), SHINGLE_TONE, [ox, y + rise / 2, oz], [s * ang, yaw, 0]);
+    // YXZ: yaw the range first, then tilt the slab in its own frame
+    b.add('shingle', boxGeo(w, 0.12, slope), SHINGLE_TONE, [ox, y + rise / 2, oz], [s * ang, yaw, 0], undefined, 'YXZ');
   }
 }
 
@@ -571,16 +601,15 @@ function letziWall(rng: Rng): Object3D {
   const b = new Build();
   b.box('drystone', DRY_TONE, [w, h * 0.9, th * 0.8], [0, h * 0.45, 0]);
   let seed = 1;
-  for (let course = 0; course < 5; course++) {
-    const y = 0.25 + course * 0.5;
-    const inset = course * 0.09;
-    const n = 9 - course;
+  for (let course = 0; course < 4; course++) {
+    const y = 0.32 + course * 0.6;
+    const inset = course * 0.11;
+    const n = 7 - course;
     for (let i = 0; i < n; i++) {
       const x = -w / 2 + ((i + 0.5) / n) * w;
-      const rr = 0.34 + ((seed * 7) % 5) * 0.03;
-      b.blob('drystone', course % 2 ? 0x928c81 : DRY_TONE, rr, [x, y, (((seed * 13) % 7) / 7 - 0.5) * 0.3], seed++, 0.62, 6);
-      b.blob('drystone', 0x8a857b, rr * 0.9, [x, y, th / 2 - inset - 0.15], seed++, 0.62, 6);
-      b.blob('drystone', 0x8a857b, rr * 0.9, [x, y, -th / 2 + inset + 0.15], seed++, 0.62, 6);
+      const rr = 0.38 + ((seed * 7) % 5) * 0.03;
+      b.blob('drystone', course % 2 ? 0x928c81 : DRY_TONE, rr, [x, y, th / 2 - inset - 0.2], seed++, 0.6, 5);
+      b.blob('drystone', 0x8a857b, rr * 0.95, [x, y, -th / 2 + inset + 0.2], seed++, 0.6, 5);
     }
   }
   void rng;
@@ -651,15 +680,15 @@ function mill(rng: Rng): Object3D {
   const cx = 4.3, cy = 2.0;
   b.cyl('logs', 0x6f5a3a, 0.16, 0.16, 1.4, [cx, cy, 0], [0, 0, Math.PI / 2], 8);       // axle
   for (const s of [-1, 1]) {
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2;
-      b.box('planks', PLANK_TONE, [0.12, 1.85, 0.12], [cx + s * 0.55, cy + Math.sin(a) * 0.93, Math.cos(a) * 0.93], [s * 0, 0, -a]);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      b.box('planks', PLANK_TONE, [0.12, 1.85, 0.12], [cx + s * 0.55, cy + Math.sin(a) * 0.93, Math.cos(a) * 0.93], [a, 0, 0]);
     }
-    b.cyl('planks', PLANK_DARK, 1.9, 1.9, 0.1, [cx + s * 0.55, cy, 0], [0, 0, Math.PI / 2], 14);
+    b.cyl('planks', PLANK_DARK, 1.9, 1.9, 0.1, [cx + s * 0.55, cy, 0], [0, 0, Math.PI / 2], 10);
   }
-  for (let i = 0; i < 10; i++) {                                                        // paddles
-    const a = (i / 10) * Math.PI * 2;
-    b.box('planks', 0x6a5535, [1.2, 0.42, 0.1], [cx, cy + Math.sin(a) * 1.75, Math.cos(a) * 1.75], [-a, Math.PI / 2, 0]);
+  for (let i = 0; i < 8; i++) {                                                         // paddles
+    const a = (i / 8) * Math.PI * 2;
+    b.box('planks', 0x6a5535, [1.2, 0.42, 0.1], [cx, cy + Math.sin(a) * 1.75, Math.cos(a) * 1.75], [a, 0, 0]);
   }
   b.box('planks', PLANK_DARK, [3.2, 0.2, 0.9], [cx + 1.4, cy + 2.1, 0]);                // sluice
   return b.emit('mill', extra);
@@ -680,12 +709,16 @@ function boat(rng: Rng): Object3D {
         const taper = 1 - Math.pow(Math.abs(u - 0.5) * 2, 2.2) * 0.88;
         const z = side * (w / 2) * taper * (0.72 + t * 0.3);
         const nz = side * (w / 2) * (1 - Math.pow(Math.abs((i + 1.5) / 7 - 0.5) * 2, 2.2) * 0.88) * (0.72 + t * 0.3);
-        b.box('planks', s % 2 ? 0x7a6440 : PLANK_TONE, [len / 7 + 0.06, 0.22, 0.1], [x, y, (z + nz) / 2], [0, Math.atan2(nz - z, len / 7), 0]);
+        const sheer = Math.pow(Math.abs(u - 0.5) * 2, 2.4) * 0.42;   // upswept bow and stern
+        b.box('planks', s % 2 ? 0x7a6440 : PLANK_TONE, [len / 7 + 0.06, 0.22, 0.1], [x, y + sheer, (z + nz) / 2],
+          [0, Math.atan2(nz - z, len / 7), 0]);
       }
     }
   }
   b.box('planks', 0x6a5535, [len * 0.9, 0.1, w * 0.62], [0, 0.12, 0]);                 // bottom
   for (let i = 0; i < 3; i++) b.box('planks', PLANK_DARK, [0.5, 0.09, w * 0.8], [(i - 1) * 2.0, 0.72, 0]);  // thwarts
+  b.box('planks', PLANK_DARK, [0.5, 0.5, 0.14], [-len / 2 + 0.2, 0.55, 0]);              // stem post
+  b.box('planks', PLANK_DARK, [0.5, 0.5, 0.14], [len / 2 - 0.2, 0.55, 0]);
   b.cyl('logs', 0x7d6540, 0.05, 0.05, 3.4, [1.4, 0.95, 0.5], [0.2, 0.3, 1.45], 6);      // punt pole
   void rng;
   return b.emit('boat');
@@ -713,9 +746,9 @@ function hayrack(rng: Rng): Object3D {
   }
   for (let j = 0; j < 4; j++) b.box('logs', 0x6f5636, [2.6, 0.07, 0.07], [0, 0.6 + j * 0.6, 0]);
   for (let j = 0; j < 3; j++) {
-    for (let i = 0; i < 6; i++) {
-      const x = -1.1 + (i / 5) * 2.2;
-      b.blob('thatch', THATCH_TONE, 0.3, [x, 0.75 + j * 0.6, (rng.next() - 0.5) * 0.2], i + j * 6, 0.7, 6);
+    for (let i = 0; i < 3; i++) {
+      const x = -0.9 + i * 0.9;
+      b.blob('thatch', THATCH_TONE, 0.45, [x, 0.75 + j * 0.6, (rng.next() - 0.5) * 0.2], i + j * 3, 0.6, 6);
     }
   }
   return b.emit('hayrack');
@@ -734,11 +767,11 @@ function fenceModel(rng: Rng): Object3D {
 
 function well(rng: Rng): Object3D {
   const b = new Build();
-  for (let course = 0; course < 3; course++) {
-    const n = 10;
+  for (let course = 0; course < 2; course++) {
+    const n = 7;
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + course * 0.3;
-      b.blob('drystone', course % 2 ? DRY_TONE : 0x928c81, 0.3, [Math.cos(a) * 0.95, 0.18 + course * 0.32, Math.sin(a) * 0.95], i + course * n, 0.6, 6);
+      const a = (i / n) * Math.PI * 2 + course * 0.4;
+      b.blob('drystone', course % 2 ? DRY_TONE : 0x928c81, 0.34, [Math.cos(a) * 0.95, 0.2 + course * 0.45, Math.sin(a) * 0.95], i + course * n, 0.6, 5);
     }
   }
   b.cyl('drystone', DRY_TONE, 0.98, 1.0, 0.9, [0, 0.45, 0], undefined, 12);
@@ -774,13 +807,13 @@ function campfire(rng: Rng): Object3D {
   const b = new Build();
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    b.blob('rock', 0x8a8378, 0.22, [Math.cos(a) * 0.58, 0.1, Math.sin(a) * 0.58], i, 0.6, 6);
+    b.blob('rock', 0xb2ada1, 0.22, [Math.cos(a) * 0.58, 0.1, Math.sin(a) * 0.58], i, 0.6, 6);
   }
   for (let i = 0; i < 4; i++) {
     const a = (Math.PI / 4) * i;
     b.cyl('logs', 0x54432a, 0.06, 0.08, 0.95, [0, 0.14, 0], [0, a, Math.PI / 2 - 0.15], 6);
   }
-  b.blob('rock', 0x241d16, 0.28, [0, 0.06, 0], 9, 0.35, 7);                             // ash bed
+  b.blob('rock', 0x50463a, 0.28, [0, 0.06, 0], 9, 0.35, 7);                             // ash bed
   b.cyl('fire', 0xffa040, 0.02, 0.22, 0.6, [0, 0.42, 0], undefined, 6);
   b.cyl('fire', 0xffd070, 0.02, 0.13, 0.34, [0, 0.3, 0.06], undefined, 6);
   void rng;
@@ -842,10 +875,10 @@ function rockModel(rng: Rng, big: boolean): Object3D {
   const b = new Build();
   const r = big ? 1.7 + rng.next() * 0.7 : 0.5 + rng.next() * 0.3;
   const seed = Math.floor(rng.next() * 1000);
-  b.blob('rock', 0x8b857a, r, [0, r * 0.55, 0], seed, 0.78, big ? 10 : 7);
+  b.blob('rock', 0xb9b3a6, r, [0, r * 0.55, 0], seed, 0.78, big ? 10 : 7);
   if (big) {
-    b.blob('rock', 0x817b70, r * 0.5, [r * 0.7, r * 0.35, r * 0.3], seed + 1, 0.7, 7);
-    b.blob('rock', 0x8f8a7f, r * 0.35, [-r * 0.8, r * 0.25, -r * 0.2], seed + 2, 0.7, 6);
+    b.blob('rock', 0xaea89b, r * 0.5, [r * 0.7, r * 0.35, r * 0.3], seed + 1, 0.7, 7);
+    b.blob('rock', 0xc2bcae, r * 0.35, [-r * 0.8, r * 0.25, -r * 0.2], seed + 2, 0.7, 6);
   }
   return b.emit(big ? 'rock.large' : 'rock.small');
 }
@@ -860,6 +893,60 @@ function stump(rng: Rng): Object3D {
     b.cyl('logs', 0x5d4a2e, 0.07, 0.13, 0.5, [Math.cos(a) * r * 0.9, 0.1, Math.sin(a) * r * 0.9], [Math.sin(a) * 1.2, 0, -Math.cos(a) * 1.2], 5);
   }
   return b.emit('stump');
+}
+
+// ---------------- weapons & shields (standalone; the in-hand copies live in characters.ts) ----------------
+
+/** Grip at the origin, blade up +Y — the same convention the hand-slot geometry uses. */
+function weaponModel(kind: string): Object3D {
+  const b = new Build();
+  const HAFT = 0x8f7a5c, STEEL = 0xa9b0b8;
+  switch (kind) {
+    case 'spiess':
+      b.cyl('logs', HAFT, 0.021, 0.023, 2.05, [0, 0.60, 0], undefined, 7);
+      b.cyl('iron', STEEL, 0.004, 0.036, 0.33, [0, 1.79, 0], undefined, 6);
+      break;
+    case 'halberd':
+      b.cyl('logs', HAFT, 0.023, 0.026, 1.78, [0, 0.42, 0], undefined, 7);
+      b.cyl('iron', STEEL, 0.005, 0.032, 0.30, [0, 1.45, 0], undefined, 6);
+      b.box('iron', STEEL, [0.24, 0.30, 0.012], [0.135, 1.14, 0]);
+      b.box('iron', STEEL, [0.13, 0.07, 0.011], [-0.075, 1.20, 0]);
+      break;
+    case 'crossbow':
+      b.box('logs', HAFT, [0.055, 0.60, 0.05], [0, 0.16, 0]);
+      b.box('iron', STEEL, [0.66, 0.028, 0.022], [0, 0.40, 0]);
+      b.box('iron', STEEL, [0.03, 0.02, 0.10], [0, 0.45, 0]);
+      break;
+    case 'sword':
+      b.cyl('logs', 0x503a26, 0.019, 0.019, 0.18, [0, -0.03, 0], undefined, 6);
+      b.box('iron', STEEL, [0.21, 0.024, 0.028], [0, 0.09, 0]);
+      b.box('iron', STEEL, [0.052, 0.78, 0.013], [0, 0.50, 0]);
+      b.blob('iron', STEEL, 0.032, [0, -0.15, 0], 3, 0.9, 6);
+      break;
+    case 'dagger':
+      b.cyl('logs', 0x503a26, 0.016, 0.016, 0.12, [0, -0.04, 0], undefined, 6);
+      b.box('iron', STEEL, [0.10, 0.018, 0.02], [0, 0.05, 0]);
+      b.box('iron', STEEL, [0.032, 0.30, 0.009], [0, 0.20, 0]);
+      break;
+    default: // staff
+      b.cyl('logs', HAFT, 0.021, 0.024, 1.70, [0, 0.20, 0], undefined, 7);
+      break;
+  }
+  return b.emit(`weapon.${kind}`);
+}
+
+function shieldModel(kind: string): Object3D {
+  const b = new Build();
+  if (kind === 'buckler') {
+    b.cyl('planks', 0x7a6240, 0.15, 0.15, 0.03, [0, 0, 0], [Math.PI / 2, 0, 0], 12);
+    b.blob('iron', 0xa9b0b8, 0.06, [0, 0, 0.04], 2, 0.7, 8);
+    return b.emit('shield.buckler');
+  }
+  for (const [dy, w, h] of [[0.26, 0.52, 0.18], [0.08, 0.52, 0.18], [-0.10, 0.48, 0.18], [-0.26, 0.34, 0.16]] as [number, number, number][]) {
+    b.box('planks', 0x7a6240, [w, h, 0.024], [0, dy, 0]);
+  }
+  b.blob('iron', 0xa9b0b8, 0.055, [0, 0.08, 0.03], 5, 0.6, 8);
+  return b.emit('shield.heater');
 }
 
 function placeholder(): Object3D {
@@ -923,6 +1010,8 @@ export class ModelLibrary {
     for (const id of CHARACTER_MODEL_IDS) {
       this.register(id, (o) => characterModel(id, { variant: o.variant, seed: (o.rng.next() * 0xffffffff) >>> 0 }));
     }
+    for (const k of ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff']) this.register(`weapon.${k}`, () => weaponModel(k));
+    for (const k of ['heater', 'buckler']) this.register(`shield.${k}`, () => shieldModel(k));
     this.register('placeholder', () => placeholder());
   }
 

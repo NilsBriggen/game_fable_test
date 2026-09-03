@@ -82,7 +82,10 @@ export class VegetationManager {
   private treePool(kind: TreeKind, tier: Tier): Pool {
     if (tier === 'impostor') return this.poolFor(`tree.${kind}.impostor`, 9000, () => treeImpostor(kind), false);
     const lod: 0 | 1 = tier === 'full' ? 0 : 1;
-    return this.poolFor(`tree.${kind}.${tier}`, tier === 'full' ? 2600 : 3600, () => ({ geometry: buildTreeGeometry(kind, new Rng(7 + lod), lod), material: treeMaterial() }));
+    // Only the near tier casts: CSM re-draws every caster once per cascade, so shadows from trees
+    // past ~100 m cost three extra passes for something a pixel wide.
+    return this.poolFor(`tree.${kind}.${tier}`, tier === 'full' ? 2600 : 3600,
+      () => ({ geometry: buildTreeGeometry(kind, new Rng(7 + lod), lod), material: treeMaterial() }), tier === 'full');
   }
   private rockPool(size: 'large' | 'small'): Pool {
     return this.poolFor(`rock.${size}`, 1200, () => ({ geometry: boulderGeometry(size === 'large' ? 1.7 : 0.55), material: rockMaterial() }));
@@ -122,7 +125,7 @@ export class VegetationManager {
     // the world module that is guaranteed to run after `await terrain.ready`.
     if (!this.maskKicked && !splatMaskReady()) {
       this.maskKicked = true;
-      buildSplatMask((x, z) => this.terrain.surfaceIdAt(x, z), this.terrain.cpuWidth, this.terrain.cpuHeight);
+      buildSplatMask((x, z) => this.terrain.surfaceIdAt(x, z), this.terrain.cpuWidth, this.terrain.cpuHeight, (x, z) => this.terrain.heightAt(x, z));
     }
     const active = this.terrain.listActiveChunks();
     const activeKeys = new Set(active.map((c) => c.key));

@@ -6,6 +6,7 @@
  */
 import { Color, DataTexture, FrontSide, LinearFilter, LinearMipmapLinearFilter, MeshStandardMaterial, RGBAFormat, UnsignedByteType, Vector2, Vector3 } from 'three';
 import { MAP_BOUNDS } from '@content/gazetteer';
+import { buildWorldGeo } from './geodata';
 import { getTerrainArrays, macroVariationTexture, TERRAIN_LAYER } from './textures';
 import { registerCsmMaterial } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
@@ -97,8 +98,47 @@ function emptyMask(): DataTexture {
   return t;
 }
 
+/** Metres of height above the lake surface over which the shore stays visibly wet. */
+const SHORE_WET_M = 9;
+
+/**
+ * Coarse "which lake is nearest, and at what height does it sit" field. The nine lakes are at five
+ * different levels (the Ägerisee is 97 game-metres above the Vierwaldstättersee), so a single
+ * uLakeLevel scalar cannot place the wet band correctly — see requests/worldlook-1.md.
+ */
+function nearestLakeLevelGrid(cw: number, ch: number): Float32Array {
+  const lakes = buildWorldGeo().lakes;
+  const out = new Float32Array(cw * ch);
+  const sx = (MAP_BOUNDS.maxX - MAP_BOUNDS.minX) / (cw - 1);
+  const sz = (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) / (ch - 1);
+  const cx: number[] = [], cz: number[] = [];
+  for (const l of lakes) {
+    let ax = 0, az = 0;
+    for (const [x, z] of l.poly) { ax += x; az += z; }
+    cx.push(ax / l.poly.length); cz.push(az / l.poly.length);
+  }
+  for (let gz = 0; gz < ch; gz++) {
+    const wz = MAP_BOUNDS.minZ + gz * sz;
+    for (let gx = 0; gx < cw; gx++) {
+      const wx = MAP_BOUNDS.minX + gx * sx;
+      let best = Infinity, lvl = 0;
+      for (let k = 0; k < lakes.length; k++) {
+        const d = (wx - cx[k]) * (wx - cx[k]) + (wz - cz[k]) * (wz - cz[k]);
+        if (d < best) { best = d; lvl = lakes[k].levelGameH; }
+      }
+      out[gz * cw + gx] = lvl;
+    }
+  }
+  return out;
+}
+
 /** Bake the mask from a surface-id sampler (vegetation.ts calls this once the CPU grid exists). */
-export function buildSplatMask(surfaceIdAt: (x: number, z: number) => number, gridW: number, gridH: number): void {
+export function buildSplatMask(
+  surfaceIdAt: (x: number, z: number) => number,
+  gridW: number,
+  gridH: number,
+  heightAt?: (x: number, z: number) => number,
+): void {
   if (maskBuilt) return;
   maskBuilt = true;
   const n = gridW * gridH;
@@ -106,12 +146,23 @@ export function buildSplatMask(surfaceIdAt: (x: number, z: number) => number, gr
   const b = new Uint8Array(new ArrayBuffer(n * 4));
   const sx = (MAP_BOUNDS.maxX - MAP_BOUNDS.minX) / (gridW - 1);
   const sz = (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ) / (gridH - 1);
+  const CW = 128, CH = 136;
+  const lakeLvl = heightAt ? nearestLakeLevelGrid(CW, CH) : null;
   for (let gz = 0; gz < gridH; gz++) {
     const wz = MAP_BOUNDS.minZ + gz * sz;
+    const cz = Math.min(CH - 1, Math.round((gz / (gridH - 1)) * (CH - 1)));
     for (let gx = 0; gx < gridW; gx++) {
       const i = gz * gridW + gx;
-      const slot = SURFACE_TO_MASK[surfaceIdAt(MAP_BOUNDS.minX + gx * sx, wz)] ?? SURFACE_TO_MASK[0];
+      const wx = MAP_BOUNDS.minX + gx * sx;
+      const slot = SURFACE_TO_MASK[surfaceIdAt(wx, wz)] ?? SURFACE_TO_MASK[0];
       (slot[0] === 0 ? a : b)[i * 4 + slot[1]] = 255;
+      if (lakeLvl && heightAt) {
+        // B.a = 1 right at the water line of whichever lake is nearest, 0 SHORE_WET_M above it
+        const lvl = lakeLvl[cz * CW + Math.min(CW - 1, Math.round((gx / (gridW - 1)) * (CW - 1)))];
+        const above = heightAt(wx, wz) - lvl;
+        const wet = above < -2 ? 1 : 1 - Math.min(1, Math.max(0, above / SHORE_WET_M));
+        b[i * 4 + 3] = Math.round(wet * 255);
+      }
     }
   }
   const mk = (data: Uint8Array<ArrayBuffer>): DataTexture => {
@@ -162,6 +213,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
     uAltitudeTint: { value: new Color(0xc9c58a) }, // grass drifts to this above the villages
     uWetness: { value: 0 },        // rain darkens + glosses the ground
     uLakeLevel: { value: 0 },
+    uDebug: { value: 0 },   // TEMP diagnostic channel
     ...FOG_UNIFORMS,
   };
 
@@ -179,15 +231,15 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         uniform sampler2DArray tAlbedo, tNormal, tOrm;
         uniform sampler2D tMaskA, tMaskB, tMacro;
         uniform vec2 uMaskMin, uMaskSpan, uMaskTexel;
-        uniform float uSnowLine, uSnowDepth, uWetness, uLakeLevel;
+        uniform float uSnowLine, uSnowDepth, uWetness, uLakeLevel, uDebug;
         uniform vec3 uSeasonTint, uAltitudeTint;
         varying vec3 vWorldPos;
         ${FOG_DECL}
         // metres per texture repeat, per layer (grass meadow forest rock scree snow mud road)
         const float TILE[8] = float[8](5.0, 6.0, 4.5, 7.0, 4.0, 8.0, 4.5, 4.0);
-        vec2 gUv;              // uv of the projection actually used (for the derivative normal frame)
         vec3 gMapN;
         float gRough = 1.0;    // written in <map_fragment>, applied in <roughnessmap_fragment>
+        vec3 gDbgAlbedo; vec3 gDbgW;
         float gSnow = 0.0;
 
         // Biplanar: the horizontal projection plus whichever vertical plane faces the surface.
@@ -196,16 +248,20 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           uvSteep = (abs(n.x) > abs(n.z)) ? vec2(wp.z, wp.y) / tile : vec2(wp.x, wp.y) / tile;
           steep = smoothstep(0.86, 0.5, n.y); // ~30deg .. ~60deg
         }
-        vec3 perturbNormalFromMap(vec3 eyePos, vec3 surfNormal, vec2 uv, vec3 mapN) {
-          vec3 q0 = dFdx(eyePos), q1 = dFdy(eyePos);
-          vec2 st0 = dFdx(uv), st1 = dFdy(uv);
-          vec3 N = surfNormal;
-          vec3 q1perp = cross(q1, N), q0perp = cross(N, q0);
-          vec3 T = q1perp * st0.x + q0perp * st1.x;
-          vec3 B = q1perp * st0.y + q0perp * st1.y;
-          float det = max(dot(T, T), dot(B, B));
-          float sc = det == 0.0 ? 0.0 : inversesqrt(det);
-          return normalize(T * (mapN.x * sc) + B * (mapN.y * sc) + N * mapN.z);
+        /**
+         * Detail normal around the geometric normal, with an analytic tangent frame.
+         * A derivative-built frame (three's perturbNormalArb) is unusable here: the biplanar uv
+         * jumps between projections from pixel to pixel, so dFdx/dFdy of it are meaningless on
+         * every slope, the frame's scale explodes, and the resulting normal tips past the horizon,
+         * which is why the whole terrain went to ambient-only while the trees stayed lit.
+         * Perturbing around N by a bounded amount cannot flip the surface away from the sun.
+         */
+        vec3 perturbNormalFromMap(vec3 surfNormal, vec3 mapN, float strength) {
+          vec3 N = normalize(surfNormal);
+          vec3 up = abs(N.y) < 0.985 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+          vec3 T = normalize(cross(up, N));
+          vec3 B = cross(N, T);
+          return normalize(N + (T * mapN.x + B * mapN.y) * strength);
         }
         #include <common>
       `)
@@ -256,14 +312,12 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           vec3 n1 = texture(tNormal, vec3(f1, float(i1))).xyz;
           vec3 o0 = texture(tOrm, vec3(f0, float(i0))).xyz;
           vec3 o1 = texture(tOrm, vec3(f1, float(i1))).xyz;
-          gUv = f0;
           if (st0v > 0.02) {
             a0 = mix(a0, texture(tAlbedo, vec3(s0, float(i0))), st0v);
             n0 = mix(n0, texture(tNormal, vec3(s0, float(i0))).xyz, st0v);
             o0 = mix(o0, texture(tOrm, vec3(s0, float(i0))).xyz, st0v);
             a1 = mix(a1, texture(tAlbedo, vec3(s1, float(i1))), st1v);
             n1 = mix(n1, texture(tNormal, vec3(s1, float(i1))).xyz, st1v);
-            if (st0v > 0.5) gUv = s0;
           }
           vec3 albedo = mix(a0.rgb, a1.rgb, blend);
           gMapN = normalize(mix(n0, n1, blend) * 2.0 - 1.0);
@@ -272,18 +326,21 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // season / altitude tint on the two grass layers only
           float greenW = w[0] + w[1];
           vec3 tint = mix(uSeasonTint, uAltitudeTint, alp);
-          albedo = mix(albedo, albedo * tint * 1.55, greenW * 0.85);
+          albedo = mix(albedo, albedo * tint * 1.85, greenW * 0.88);
 
           // macro variation: large-scale luminance + hue drift so 5 m tiles vanish at 500 m
           albedo *= mix(vec3(0.78), vec3(1.22), macro.b);
           albedo = mix(albedo, albedo * vec3(1.06, 1.0, 0.9), (macro.g - 0.5) * 0.5 + 0.25);
 
-          // shore + rain wetting: darker, smoother, slightly bluer
-          float shore = (1.0 - smoothstep(0.0, 6.5, vWorldPos.y - uLakeLevel)) * step(uLakeLevel - 3.0, vWorldPos.y);
+          // shore + rain wetting: darker, smoother, slightly bluer.
+          // mB.a is baked "height above the nearest lake surface" (see buildSplatMask), so this is
+          // correct for the Aegerisee at +97 as well as for the Vierwaldstaettersee at 0.
+          float shore = smoothstep(0.12, 0.92, mB.a);
           float wet = clamp(max(shore, uWetness) * (1.0 - snowAmt), 0.0, 1.0);
           albedo *= mix(1.0, 0.52, wet);
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
+          gDbgAlbedo = clamp(albedo, 0.0, 1.0); gDbgW = vec3(w[0], w[2], w[3]);
           gRough = clamp(mix(orm.y, 0.22, wet), 0.05, 1.0);
           gSnow = snowAmt;
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
@@ -295,10 +352,17 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       `)
       .replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>
-        normal = perturbNormalFromMap(-vViewPosition, normal, gUv, gMapN);
+        normal = perturbNormalFromMap(normal, gMapN, 0.55);
       `)
       .replace('#include <dithering_fragment>', `
         gl_FragColor.rgb = aerialPerspective(gl_FragColor.rgb, vWorldPos, vWorldPos - cameraPosition);
+        if (uDebug > 0.5) {
+          if (uDebug < 1.5) gl_FragColor.rgb = gDbgAlbedo;
+          else if (uDebug < 2.5) gl_FragColor.rgb = normalize(vNormal) * 0.5 + 0.5;
+          else if (uDebug < 3.5) gl_FragColor.rgb = normalize(normal) * 0.5 + 0.5;
+          else if (uDebug < 4.5) gl_FragColor.rgb = gDbgW;
+          else gl_FragColor.rgb = vec3(diffuseColor.rgb);
+        }
         #include <dithering_fragment>
       `);
   };

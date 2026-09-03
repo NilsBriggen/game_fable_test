@@ -11,7 +11,7 @@ import type { TerrainManager } from './terrain';
 import { buildWorldGeo } from './geodata';
 
 const SIZE = 1400;
-const SNOW_H = 620;   // game height where the chart starts leaving the paper bare (perpetual snow)
+const SNOW_H = 900;   // game height where the chart starts leaving the paper bare (perpetual snow)
 
 const INK = '#43301c';
 const INK_SOFT = 'rgba(67,48,28,0.55)';
@@ -24,6 +24,28 @@ export function worldToMapUv(x: number, z: number): [number, number] {
   const v = (z - MAP_BOUNDS.minZ) / (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ);
   return [u, v];
 }
+/**
+ * Trace a lake outline as a smooth closed curve instead of the gazetteer's 5–12 straight edges:
+ * quadratics through the edge midpoints, with the polygon corners as control points, which is what
+ * makes the shoreline read as drawn rather than as a polygon.
+ */
+function smoothPath(ctx: CanvasRenderingContext2D, poly: [number, number][], shrink = 0): void {
+  const n = poly.length;
+  let cx = 0, cz = 0;
+  for (const [x, z] of poly) { cx += x; cz += z; }
+  cx /= n; cz /= n;
+  const pts = poly.map(([x, z]) => toPx(cx + (x - cx) * (1 - shrink), cz + (z - cz) * (1 - shrink)));
+  const mid = (a: [number, number], b: [number, number]): [number, number] => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  ctx.beginPath();
+  let m = mid(pts[n - 1], pts[0]);
+  ctx.moveTo(m[0], m[1]);
+  for (let i = 0; i < n; i++) {
+    const next = mid(pts[i], pts[(i + 1) % n]);
+    ctx.quadraticCurveTo(pts[i][0], pts[i][1], next[0], next[1]);
+  }
+  ctx.closePath();
+}
+
 function toPx(x: number, z: number): [number, number] {
   const [u, v] = worldToMapUv(x, z);
   return [u * SIZE, v * SIZE];
@@ -34,12 +56,13 @@ function landTint(h: number, surface: string): [number, number, number] {
   if (surface === 'settlement' || surface === 'road') return [206, 180, 138];
   const t = Math.max(0, Math.min(1, h / SNOW_H));
   const keys: [number, [number, number, number]][] = [
-    [0.00, [190, 190, 138]],
-    [0.16, [176, 178, 124]],
-    [0.38, [196, 174, 122]],
-    [0.62, [198, 166, 120]],
-    [0.82, [214, 196, 168]],
-    [1.00, [238, 232, 220]],
+    [0.00, [158, 176, 116]],   // valley pasture
+    [0.14, [172, 180, 118]],
+    [0.34, [196, 180, 122]],   // upper alp
+    [0.56, [184, 164, 130]],   // rock and scree
+    [0.76, [190, 180, 168]],
+    [0.90, [208, 206, 202]],   // the paper starts showing through
+    [1.00, [224, 223, 220]],
   ];
   let i = 0;
   while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
@@ -57,28 +80,31 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
   const geo = buildWorldGeo();
 
   // ---- 1. relief + hypsometric wash on paper -------------------------------------------------
-  const img = ctx.createImageData(SIZE, SIZE);
+  // The relief is drawn at half scale and stretched back up. That is 4x cheaper, and the smooth
+  // upscale is also what turns the surface grid's 100 m classification blocks into a wash.
+  const R = SIZE >> 1;
+  const img = ctx.createImageData(R, R);
   const L = normalize3(-0.55, 0.72, -0.42); // light from the north-west, the cartographic convention
   const spanX = MAP_BOUNDS.maxX - MAP_BOUNDS.minX, spanZ = MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ;
-  const forestMask = new Uint8Array(SIZE * SIZE);
-  for (let py = 0; py < SIZE; py++) {
-    const z = MAP_BOUNDS.minZ + (py / (SIZE - 1)) * spanZ;
-    for (let px = 0; px < SIZE; px++) {
-      const x = MAP_BOUNDS.minX + (px / (SIZE - 1)) * spanX;
+  const forestMask = new Uint8Array(R * R);
+  for (let py = 0; py < R; py++) {
+    const z = MAP_BOUNDS.minZ + (py / (R - 1)) * spanZ;
+    for (let px = 0; px < R; px++) {
+      const x = MAP_BOUNDS.minX + (px / (R - 1)) * spanX;
       const surf = terrain.surfaceAt(x, z);
-      const i = (py * SIZE + px) * 4;
-      if (surf === 'forest') forestMask[py * SIZE + px] = 1;
-      if (surf === 'water') { img.data[i] = 0; img.data[i + 3] = 0; continue; } // lakes are painted as polygons below
+      const i = (py * R + px) * 4;
+      if (surf === 'forest') forestMask[py * R + px] = 1;
+      if (surf === 'water') { img.data[i + 3] = 0; continue; } // lakes are painted as polygons below
       const h = terrain.heightAt(x, z);
       const [r, g, b] = landTint(h, surf);
       const n = terrain.normalAt(x, z);
       const dot = n.x * L[0] + n.y * L[1] + n.z * L[2];
-      // slope shading: a soft sepia wash, deliberately gentler than a satellite hillshade
-      let shade = 0.66 + Math.max(0, dot) * 0.52;
       const slope = Math.hypot(n.x, n.z);
-      shade -= slope * 0.22;                                   // steep ground reads darker
-      const grain = fbm2D(px * 1.4, py * 1.4, { octaves: 3, frequency: 0.06, seed: 17 }) * 0.06;
-      shade = Math.max(0.32, Math.min(1.25, shade + grain));
+      // hillshade with a slight S-curve, so ridges and their shadowed flanks actually read
+      let shade = 0.46 + Math.pow(Math.max(0, dot), 0.8) * 0.86 - slope * 0.10;
+      shade += (shade - 0.95) * 0.35;
+      const grain = (valueNoise2D(px * 0.17, py * 0.17, 17) - 0.5) * 0.08;
+      shade = Math.max(0.30, Math.min(1.30, shade + grain));
       img.data[i] = clamp255(r * shade);
       img.data[i + 1] = clamp255(g * shade * 0.985);
       img.data[i + 2] = clamp255(b * shade * 0.93);            // pull everything a touch toward sepia
@@ -88,42 +114,29 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
   // paper first, then the relief over it (lake pixels are transparent and stay paper)
   paintParchment(ctx);
   const relief = document.createElement('canvas');
-  relief.width = SIZE; relief.height = SIZE;
+  relief.width = R; relief.height = R;
   relief.getContext('2d')!.putImageData(img, 0, 0);
-  ctx.globalAlpha = 0.88;
-  ctx.drawImage(relief, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.globalAlpha = 0.9;
+  ctx.drawImage(relief, 0, 0, SIZE, SIZE);
   ctx.globalAlpha = 1;
 
   // ---- 2. lakes ------------------------------------------------------------------------------
   for (const lake of geo.lakes) {
-    ctx.beginPath();
-    lake.poly.forEach(([x, z], i) => { const [a, b] = toPx(x, z); i === 0 ? ctx.moveTo(a, b) : ctx.lineTo(a, b); });
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(148,176,188,0.78)';
+    smoothPath(ctx, lake.poly);
+    ctx.fillStyle = 'rgba(132,168,184,0.80)';
     ctx.fill();
-    // shore hatching: three shrinking outlines, as engraved charts drew still water
+    // shore hatching: shrinking outlines inside the shore, as engraved charts drew still water
     ctx.save();
+    smoothPath(ctx, lake.poly);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(63,92,105,0.5)';
-    for (let k = 1; k <= 3; k++) {
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      lake.poly.forEach(([x, z], i) => {
-        const [a, b] = toPx(x, z);
-        const [cx, cy] = lakeCentroidPx(lake.poly);
-        const s = 1 - k * 0.022;
-        const ax = cx + (a - cx) * s, ay = cy + (b - cy) * s;
-        i === 0 ? ctx.moveTo(ax, ay) : ctx.lineTo(ax, ay);
-      });
-      ctx.closePath();
-      ctx.stroke();
-    }
+    ctx.strokeStyle = 'rgba(63,92,105,0.32)';
+    ctx.lineWidth = 1.0;
+    for (let k = 1; k <= 3; k++) { smoothPath(ctx, lake.poly, k * 0.028); ctx.stroke(); }
     ctx.restore();
+    smoothPath(ctx, lake.poly);
     ctx.strokeStyle = WATER_INK;
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    lake.poly.forEach(([x, z], i) => { const [a, b] = toPx(x, z); i === 0 ? ctx.moveTo(a, b) : ctx.lineTo(a, b); });
-    ctx.closePath();
+    ctx.lineWidth = 1.7;
     ctx.stroke();
   }
 
@@ -131,14 +144,21 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
   ctx.fillStyle = 'rgba(58,74,44,0.85)';
   ctx.strokeStyle = 'rgba(48,62,36,0.9)';
   ctx.lineWidth = 0.9;
-  const STEP = 9;
-  for (let py = 4; py < SIZE; py += STEP) {
-    for (let px = 4; px < SIZE; px += STEP) {
-      const jx = Math.round(px + (valueNoise2D(px * 0.7, py * 0.7, 5) * 2 - 1) * STEP * 0.45);
-      const jy = Math.round(py + (valueNoise2D(px * 0.7, py * 0.7, 91) * 2 - 1) * STEP * 0.45);
-      if (jx < 0 || jy < 0 || jx >= SIZE || jy >= SIZE) continue;
-      if (!forestMask[jy * SIZE + jx]) continue;
-      if (valueNoise2D(jx * 0.31, jy * 0.31, 44) < 0.30) continue; // thin the stand out
+  const STEP = 15;
+  for (let py = 6; py < SIZE; py += STEP) {
+    for (let px = 6; px < SIZE; px += STEP) {
+      const jx = Math.round(px + (valueNoise2D(px * 0.7, py * 0.7, 5) * 2 - 1) * STEP * 0.4);
+      const jy = Math.round(py + (valueNoise2D(px * 0.7, py * 0.7, 91) * 2 - 1) * STEP * 0.4);
+      if (jx < 2 || jy < 2 || jx >= SIZE - 2 || jy >= SIZE - 2) continue;
+      // require a solid stand, not one stray forest texel, then thin it further
+      const hx = jx >> 1, hy = jy >> 1;
+      let dense = 0;
+      for (const [ox, oy] of [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2]]) {
+        const qx = hx + ox, qy = hy + oy;
+        if (qx >= 0 && qy >= 0 && qx < (SIZE >> 1) && qy < (SIZE >> 1) && forestMask[qy * (SIZE >> 1) + qx]) dense++;
+      }
+      if (dense < 4) continue;
+      if (valueNoise2D(jx * 0.31, jy * 0.31, 44) < 0.42) continue;
       // a 4 px conifer: stem plus a filled triangle
       ctx.beginPath(); ctx.moveTo(jx, jy + 1); ctx.lineTo(jx, jy + 3.6); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(jx, jy - 4); ctx.lineTo(jx + 2.1, jy + 1.2); ctx.lineTo(jx - 2.1, jy + 1.2); ctx.closePath(); ctx.fill();
@@ -220,10 +240,10 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
     if (cx < 40 || cy < 40 || cx > SIZE - 40 || cy > SIZE - 40) continue;
     const label = spaced(r.name.toUpperCase());
     ctx.font = 'italic 600 21px Georgia, "Times New Roman", serif';
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = 'rgba(238,228,203,0.85)';   // paper halo so the name reads over the hachures
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(228,214,182,0.7)';    // faint paper halo so the name reads over the hachures
     ctx.strokeText(label, cx, cy);
-    ctx.fillStyle = 'rgba(74,52,30,0.92)';
+    ctx.fillStyle = 'rgba(62,42,22,0.95)';
     ctx.fillText(label, cx, cy);
   }
 
@@ -237,14 +257,21 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
   return cachedUrl;
 }
 
-/** Warm laid paper: fibre noise, a faint wove grid and a couple of old damp stains. */
+/**
+ * Warm laid paper. Painted at 1/4 scale and stretched: the mottling is all low-frequency, and a
+ * full-resolution fbm here costs several seconds of the map's one-off generation budget.
+ */
 function paintParchment(ctx: CanvasRenderingContext2D): void {
-  const img = ctx.createImageData(SIZE, SIZE);
-  for (let y = 0; y < SIZE; y++) {
-    for (let x = 0; x < SIZE; x++) {
-      const i = (y * SIZE + x) * 4;
-      const f = fbm2D(x, y, { octaves: 5, frequency: 0.004, seed: 907 }) * 0.5 + 0.5;
-      const fibre = Math.sin(y * 0.9 + fbm2D(x, y, { octaves: 2, frequency: 0.02, seed: 51 }) * 6) * 0.012;
+  const P = SIZE >> 2;
+  const small = document.createElement('canvas');
+  small.width = P; small.height = P;
+  const sctx = small.getContext('2d')!;
+  const img = sctx.createImageData(P, P);
+  for (let y = 0; y < P; y++) {
+    for (let x = 0; x < P; x++) {
+      const i = (y * P + x) * 4;
+      const f = fbm2D(x, y, { octaves: 4, frequency: 0.016, seed: 907 }) * 0.5 + 0.5;
+      const fibre = Math.sin(y * 3.6 + fbm2D(x, y, { octaves: 2, frequency: 0.08, seed: 51 }) * 6) * 0.014;
       const k = 0.88 + f * 0.22 + fibre;
       img.data[i] = clamp255(232 * k);
       img.data[i + 1] = clamp255(216 * k);
@@ -252,7 +279,9 @@ function paintParchment(ctx: CanvasRenderingContext2D): void {
       img.data[i + 3] = 255;
     }
   }
-  ctx.putImageData(img, 0, 0);
+  sctx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(small, 0, 0, SIZE, SIZE);
 }
 
 /** Edge burn, foxing and a vignette, painted over the finished chart. */
@@ -349,10 +378,6 @@ function centroidPx(poly: [number, number][]): [number, number] {
   for (const [x, z] of poly) { sx += x; sz += z; }
   return toPx(sx / poly.length, sz / poly.length);
 }
-function lakeCentroidPx(poly: [number, number][]): [number, number] {
-  return centroidPx(poly);
-}
-
 function normalize3(x: number, y: number, z: number): [number, number, number] {
   const l = Math.hypot(x, y, z) || 1;
   return [x / l, y / l, z / l];
