@@ -43,17 +43,20 @@ export async function register(ctx: GameContext): Promise<void> {
     try {
       const cx = view.grid.origin.x;
       const cz = view.grid.origin.z;
+      // orbit the field's own height: authored reliefs now sit on the real ground, so a y=0 focus at
+      // Morgarten (300 m up) pointed the camera at the sky with the grid in a corner
+      const cy = view.cells.length ? view.cells.reduce((a, c) => a + c.height, 0) / view.cells.length : 0;
       const span = Math.max(view.grid.cols, view.grid.rows) * view.grid.cellM;
       const exploration = ctx.services.tryGet('exploration');
       if (exploration) {
         const rig = exploration.getCameraRig();
         rig.setMode('combat');
-        rig.focus(cx, 0, cz, { distance: Math.max(24, span * 0.75), pitch: -0.72, yaw: view.grid.origin.yaw + 0.6, instant: true });
+        rig.focus(cx, cy, cz, { distance: Math.max(24, span * 0.75), pitch: -0.72, yaw: view.grid.origin.yaw + 0.6, instant: true });
       } else {
         const camera = ctx.gfx.camera;
         const dist = Math.max(24, span * 0.75);
-        camera.position.set(cx + dist * 0.6, dist * 0.75, cz + dist * 0.6);
-        camera.lookAt(cx, 0, cz);
+        camera.position.set(cx + dist * 0.6, cy + dist * 0.75, cz + dist * 0.6);
+        camera.lookAt(cx, cy, cz);
       }
     } finally {
       framing = false;
