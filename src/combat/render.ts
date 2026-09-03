@@ -396,6 +396,18 @@ export class CombatRenderer {
     this.updateDebugOverlay(view);
   }
 
+  /** Fight over: drop every transient (units, highlights, damage numbers) and hide the grid. */
+  clearAfterEnd(): void {
+    for (const [id, mesh] of [...this.unitMeshes]) this.removeUnit(id, mesh);
+    for (const p of this.damagePops) this.root.remove(p.sprite);
+    this.damagePops = [];
+    while (this.highlightGroup.children.length) {
+      const c = this.highlightGroup.children.pop()!;
+      if (c instanceof Mesh) { c.geometry.dispose(); (c.material as MeshStandardMaterial).dispose(); }
+    }
+    this.hide();
+  }
+
   private removeUnit(id: number, mesh: Object3D): void {
     this.unitGroup.remove(mesh);
     this.unitMeshes.delete(id);

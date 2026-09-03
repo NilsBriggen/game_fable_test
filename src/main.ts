@@ -2,6 +2,7 @@
  * Bootstrap. Owns the game-state machine transitions, the frame loop and the harness API.
  * ARCHITECTURE.md §6–7. Integrator-owned.
  */
+import { Frustum, Matrix4, Mesh, Object3D } from 'three';
 import { GameContext } from '@core/context';
 import type { GameState } from '@core/state';
 import { Name, Transform } from '@core/components';
@@ -421,7 +422,37 @@ function stats() {
     systems: ctx.scheduler.list(),
     content: ctx.content.counts(),
     viewport: [window.innerWidth, window.innerHeight],
+    split: sceneSplit(),
   };
+}
+
+/** Triangles per top-level scene group, frustum-culled like the renderer (a budget overrun's first question). */
+function sceneSplit(): Record<string, number> {
+  const out: Record<string, number> = {};
+  const cam = ctx.gfx.camera;
+  cam.updateMatrixWorld();
+  const frustum = new Frustum().setFromProjectionMatrix(new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+  const count = (o: Object3D): number => {
+    if (!o.visible) return 0;
+    let n = 0;
+    const m = o as Mesh & { isMesh?: boolean; isInstancedMesh?: boolean; count?: number };
+    if (m.isMesh && m.geometry) {
+      const inView = !m.frustumCulled || frustum.intersectsObject(m);
+      if (inView) {
+        const g = m.geometry;
+        const tris = g.index ? g.index.count / 3 : (g.attributes.position?.count ?? 0) / 3;
+        n += m.isInstancedMesh ? tris * (m.count ?? 1) : tris;
+      }
+    }
+    for (const c of o.children) n += count(c);
+    return Math.round(n);
+  };
+  for (const child of ctx.gfx.scene.children) {
+    const name = child.name || child.type;
+    out[name] = (out[name] ?? 0) + count(child);
+    for (const g of child.children) if (g.children.length > 50 || g.name) { const k = `${name}/${g.name || g.type}`; out[k] = (out[k] ?? 0) + count(g); }
+  }
+  return out;
 }
 
 const api = {

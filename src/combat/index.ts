@@ -91,5 +91,8 @@ export async function register(ctx: GameContext): Promise<void> {
   const service = Object.assign(serviceBase, { resume: () => engine.resume() });
 
   engine.on('state', () => frameCamera());
+  // the engine keeps its last state after 'end' (the UI's result card reads it); the 3D grid, unit
+  // figures and floating numbers must not linger into exploration
+  engine.on('end', () => renderer.clearAfterEnd());
   ctx.services.register('combat', service);
 }

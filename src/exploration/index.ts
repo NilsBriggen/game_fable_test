@@ -66,7 +66,8 @@ class ExplorationServiceImpl implements ExplorationService {
 
     ctx.events.on('state-changed', (from, to) => {
       if (to === 'loading') this.teardownTransientMeshes();
-      if (to === 'explore' && from === 'combat') this.cameraRig.setMode('follow');
+      // leaving combat by any door (explore, or an aftermath dialogue/cutscene first) hands the camera back
+      if (from === 'combat' && to !== 'combat' && to !== 'paused') this.cameraRig.setMode('follow');
     });
     ctx.events.on('loaded', () => this.rebuildTransientMeshes());
     ctx.events.on('chapter-changed', (chapter) => this.populate(chapter));
