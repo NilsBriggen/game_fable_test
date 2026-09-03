@@ -25,16 +25,20 @@ const PORT = Number(opt('--port', 0)) || await freePort();
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 await mkdir(OUT, { recursive: true });
 
-// same lock as run.mjs
-const LOCK = path.join(root, 'tools/harness/.lock');
+// same two run slots as run.mjs
+const SLOTS = ['tools/harness/.lock', 'tools/harness/.lock2'].map((p) => path.join(root, p));
+let LOCK = null;
 const t0 = Date.now();
-while (true) {
-  try { fs.mkdirSync(LOCK); fs.writeFileSync(path.join(LOCK, 'pid'), String(process.pid)); break; } catch {}
-  try { if (Date.now() - fs.statSync(LOCK).mtimeMs > 45 * 60 * 1000) { fs.rmSync(LOCK, { recursive: true, force: true }); continue; } } catch { continue; }
+while (!LOCK) {
+  for (const slot of SLOTS) {
+    try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; break; } catch {}
+    try { if (Date.now() - fs.statSync(slot).mtimeMs > 45 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); } catch {}
+  }
+  if (LOCK) break;
   if (Date.now() - t0 > 240 * 60 * 1000) { console.error("playthrough: lock timeout"); process.exit(3); }
   await new Promise((r) => setTimeout(r, 2000));
 }
-const release = () => { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} };
+const release = () => { if (LOCK) { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} } };
 for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { release(); if (sig !== 'exit') process.exit(130); });
 
 async function waitHttp(url, ms) { const s = Date.now(); while (Date.now() - s < ms) { try { if ((await fetch(url)).ok) return true; } catch {} await new Promise((r) => setTimeout(r, 300)); } return false; }
@@ -44,7 +48,7 @@ if (!(await waitHttp(URL_BASE, 60000))) { console.error('dev server did not star
 
 const executablePath = process.env.HARNESS_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--enable-webgl'], ...(executablePath ? { executablePath } : {}) });
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 }); // 720p: ~2.2x faster frames under SwiftShader, HUD still legible
 page.setDefaultTimeout(180000);
 const pageErrors = []; page.on('pageerror', (e) => pageErrors.push(String(e.message || e)));
 const consoleErrors = []; page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
@@ -64,7 +68,8 @@ const started = Date.now();
 const result = await page.evaluate(async (pick) => {
   const h = window.__harness;
   const before = { e: h.console.errors.length, w: h.console.warnings.length };
-  const r = await h.runAct1Playthrough({ pick, screenshot: (name) => window.__shot(name), maxSecondsPerBeat: 150 });
+  const DLG_SHOTS = args.includes('--dialogue-shots'); // per-node shots cost up to 25 s each under load; beats are always captured
+  const r = await h.runAct1Playthrough({ pick, screenshot: (name) => (DLG_SHOTS || !name.startsWith('dlg-')) ? window.__shot(name) : Promise.resolve(), maxSecondsPerBeat: 150 });
   const st = h.stats();
   return { ...r, errors: h.console.errors.slice(before.e), warnings: h.console.warnings.slice(before.w), drawCalls: st.drawCalls, heapMB: st.heapMB, state: st.state };
 }, PICK);

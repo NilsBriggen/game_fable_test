@@ -31,19 +31,24 @@ await mkdir(OUT, { recursive: true });
 
 // Serialise harness runs across concurrent builders: one run at a time (CPU is shared, SwiftShader is slow,
 // and the out dir must not be clobbered). Lock = atomic mkdir; stale locks (> 45 min) are broken.
-const LOCK = path.join(root, 'tools/harness/.lock');
+// Two run slots (a playthrough alongside a capture batch): SwiftShader frame times are not scored, and
+// each run has its own server, port and --out, so the only shared resource is CPU.
+const SLOTS = ['tools/harness/.lock', 'tools/harness/.lock2'].map((p) => path.join(root, p));
+let LOCK = null;
 const fs = await import('node:fs');
 async function acquireLock() {
   const t0 = Date.now();
   while (true) {
-    try { fs.mkdirSync(LOCK); fs.writeFileSync(path.join(LOCK, 'pid'), String(process.pid)); return; } catch {}
-    try { const age = Date.now() - fs.statSync(LOCK).mtimeMs; if (age > 45 * 60 * 1000) { fs.rmSync(LOCK, { recursive: true, force: true }); continue; } } catch { continue; }
+    for (const slot of SLOTS) {
+      try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; return; } catch {}
+      try { const age = Date.now() - fs.statSync(slot).mtimeMs; if (age > 45 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); } catch {}
+    }
     if (Date.now() - t0 > 60 * 60 * 1000) { console.error('harness: could not acquire lock after 60 min'); process.exit(3); }
     if ((Date.now() - t0) % 60000 < 2500) console.log('harness: waiting for another run to finish…');
     await new Promise((r) => setTimeout(r, 2000));
   }
 }
-function releaseLock() { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} }
+function releaseLock() { if (LOCK) { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} } }
 await acquireLock();
 for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { releaseLock(); if (sig !== 'exit') process.exit(130); });
 
