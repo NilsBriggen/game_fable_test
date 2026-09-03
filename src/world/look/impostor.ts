@@ -37,9 +37,9 @@ interface Profile {
 }
 
 const PROFILE: Record<ImpostorCell, Profile> = {
-  spruce: { foliage: 'spruce', crownStart: 0.13, crown: 0.20, whorls: 11, cards: 7, droop: 0.42, taper: 1.35, dome: false, trunk: '#3b2c1e' },
-  fir: { foliage: 'fir', crownStart: 0.19, crown: 0.23, whorls: 10, cards: 7, droop: 0.16, taper: 1.05, dome: false, trunk: '#42311f' },
-  larch: { foliage: 'larch', crownStart: 0.23, crown: 0.17, whorls: 10, cards: 6, droop: 0.30, taper: 1.2, dome: false, trunk: '#4a3826' },
+  spruce: { foliage: 'spruce', crownStart: 0.13, crown: 0.24, whorls: 11, cards: 7, droop: 0.42, taper: 1.35, dome: false, trunk: '#3b2c1e' },
+  fir: { foliage: 'fir', crownStart: 0.19, crown: 0.26, whorls: 10, cards: 7, droop: 0.16, taper: 1.05, dome: false, trunk: '#42311f' },
+  larch: { foliage: 'larch', crownStart: 0.23, crown: 0.20, whorls: 10, cards: 6, droop: 0.30, taper: 1.2, dome: false, trunk: '#4a3826' },
   beech: { foliage: 'beech', crownStart: 0.42, crown: 0.35, whorls: 6, cards: 9, droop: 0.0, taper: 0.6, dome: true, trunk: '#5b5044' },
   pine: { foliage: 'pine', crownStart: 0.30, crown: 0.42, whorls: 5, cards: 6, droop: 0.5, taper: 0.9, dome: false, trunk: '#43301d' },
 };

@@ -4,12 +4,22 @@ All third-party assets below are CC0 1.0 (public domain dedication) — no attri
 it is given anyway. Regenerate this file and every asset with `node tools/assets/fetch.mjs`
 (manifest: `tools/assets/manifest.json`).
 
-Total committed asset bytes: **4.87 MB** in 41 files.
+Total committed asset bytes: **9.66 MB** in 84 files.
 
 | File | Content | Source | Author | Licence | Size |
 |---|---|---|---|---|---|
 | `assets/characters/KayKit-License.txt` | upstream licence text | [kaylousberg.itch.io](https://kaylousberg.itch.io/kaykit-character-animations) | Kay Lousberg (www.kaylousberg.com) | CC0-1.0 | 2 KB |
 | `assets/characters/rig-medium.anims.bin` | Rig_Medium animation clips, re-packed | [kaylousberg.itch.io](https://kaylousberg.itch.io/kaykit-character-animations) | Kay Lousberg (www.kaylousberg.com) | CC0-1.0 | 509 KB |
+| `assets/models/buildings/megakit.bin` | 48 MegaKit pieces, re-packed (EKIT) | [opengameart.org](https://opengameart.org/content/medieval-village-megakit) | Quaternius (quaternius.com) | CC0-1.0 | 1.19 MB |
+| `assets/models/props/stone_fire_pit.bin` | stone_fire_pit (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/stone_fire_pit) | Sebastian Platen | CC0-1.0 | 117 KB |
+| `assets/models/props/wine_barrel_01.bin` | wine_barrel_01 (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wine_barrel_01) | James Ray Cock | CC0-1.0 | 441 KB |
+| `assets/models/props/wooden_axe.bin` | wooden_axe (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_axe) | Ulan Cabanilla | CC0-1.0 | 109 KB |
+| `assets/models/props/wooden_bucket_01.bin` | wooden_bucket_01 (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_bucket_01) | James Ray Cock | CC0-1.0 | 185 KB |
+| `assets/models/props/wooden_crate_01.bin` | wooden_crate_01 (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_crate_01) | James Ray Cock | CC0-1.0 | 224 KB |
+| `assets/models/props/wooden_ladder.bin` | wooden_ladder (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_ladder) | Miroslav Turura | CC0-1.0 | 326 KB |
+| `assets/models/props/wooden_lantern_01.bin` | wooden_lantern_01 (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 311 KB |
+| `assets/models/props/wooden_stool_01.bin` | wooden_stool_01 (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_stool_01) | Kuutti Siitonen | CC0-1.0 | 349 KB |
+| `assets/models/props/wooden_table_02.bin` | wooden_table_02 (1k glTF), re-packed (EKIT) | [polyhaven.com](https://polyhaven.com/a/wooden_table_02) | Serhii Khromov | CC0-1.0 | 9 KB |
 | `assets/textures/props/chainmail/diff.jpg` | Chainmail004 diff | [ambientcg.com](https://ambientcg.com/get?file=Chainmail004_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 230 KB |
 | `assets/textures/props/chainmail/nor.jpg` | Chainmail004 nor | [ambientcg.com](https://ambientcg.com/get?file=Chainmail004_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 68 KB |
 | `assets/textures/props/chainmail/rough.jpg` | Chainmail004 rough | [ambientcg.com](https://ambientcg.com/get?file=Chainmail004_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 38 KB |
@@ -25,6 +35,39 @@ Total committed asset bytes: **4.87 MB** in 41 files.
 | `assets/textures/props/masonry/diff.jpg` | old_stone_wall diff | [polyhaven.com](https://polyhaven.com/a/old_stone_wall) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 277 KB |
 | `assets/textures/props/masonry/nor.jpg` | old_stone_wall nor | [polyhaven.com](https://polyhaven.com/a/old_stone_wall) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 100 KB |
 | `assets/textures/props/masonry/rough.jpg` | old_stone_wall rough | [polyhaven.com](https://polyhaven.com/a/old_stone_wall) | Poly Haven (Rob Tuytel, Rico Cilliers et al.) | CC0-1.0 | 6 KB |
+| `assets/textures/props/megakit/mk-tiles/diff.jpg` | megakit T_RoundTiles_BaseColor.png → diff | [opengameart.org](https://opengameart.org/content/medieval-village-megakit) | Quaternius (quaternius.com) | CC0-1.0 | 73 KB |
+| `assets/textures/props/megakit/mk-tiles/nor.jpg` | megakit T_RoundTiles_Normal.png → nor | [opengameart.org](https://opengameart.org/content/medieval-village-megakit) | Quaternius (quaternius.com) | CC0-1.0 | 86 KB |
+| `assets/textures/props/megakit/mk-tiles/rough.jpg` | megakit T_RoundTiles_Roughness.png → rough | [opengameart.org](https://opengameart.org/content/medieval-village-megakit) | Quaternius (quaternius.com) | CC0-1.0 | 47 KB |
+| `assets/textures/props/ph/ph-stone_fire_pit/diff.jpg` | stone_fire_pit stone_fire_pit_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/stone_fire_pit) | Sebastian Platen | CC0-1.0 | 59 KB |
+| `assets/textures/props/ph/ph-stone_fire_pit/nor.jpg` | stone_fire_pit stone_fire_pit_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/stone_fire_pit) | Sebastian Platen | CC0-1.0 | 75 KB |
+| `assets/textures/props/ph/ph-stone_fire_pit/rough.jpg` | stone_fire_pit stone_fire_pit_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/stone_fire_pit) | Sebastian Platen | CC0-1.0 | 47 KB |
+| `assets/textures/props/ph/ph-wine_barrel_01/diff.jpg` | wine_barrel_01 wine_barrel_01_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wine_barrel_01) | James Ray Cock | CC0-1.0 | 55 KB |
+| `assets/textures/props/ph/ph-wine_barrel_01/nor.jpg` | wine_barrel_01 wine_barrel_01_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wine_barrel_01) | James Ray Cock | CC0-1.0 | 47 KB |
+| `assets/textures/props/ph/ph-wine_barrel_01/rough.jpg` | wine_barrel_01 wine_barrel_01_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wine_barrel_01) | James Ray Cock | CC0-1.0 | 43 KB |
+| `assets/textures/props/ph/ph-wooden_axe/diff.jpg` | wooden_axe wooden_axe_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_axe) | Ulan Cabanilla | CC0-1.0 | 58 KB |
+| `assets/textures/props/ph/ph-wooden_axe/nor.jpg` | wooden_axe wooden_axe_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_axe) | Ulan Cabanilla | CC0-1.0 | 26 KB |
+| `assets/textures/props/ph/ph-wooden_axe/rough.jpg` | wooden_axe wooden_axe_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_axe) | Ulan Cabanilla | CC0-1.0 | 53 KB |
+| `assets/textures/props/ph/ph-wooden_bucket_01/diff.jpg` | wooden_bucket_01 wooden_bucket_01_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_bucket_01) | James Ray Cock | CC0-1.0 | 50 KB |
+| `assets/textures/props/ph/ph-wooden_bucket_01/nor.jpg` | wooden_bucket_01 wooden_bucket_01_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_bucket_01) | James Ray Cock | CC0-1.0 | 40 KB |
+| `assets/textures/props/ph/ph-wooden_bucket_01/rough.jpg` | wooden_bucket_01 wooden_bucket_01_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_bucket_01) | James Ray Cock | CC0-1.0 | 58 KB |
+| `assets/textures/props/ph/ph-wooden_crate_01/diff.jpg` | wooden_crate_01 wooden_crate_01_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_crate_01) | James Ray Cock | CC0-1.0 | 50 KB |
+| `assets/textures/props/ph/ph-wooden_crate_01/nor.jpg` | wooden_crate_01 wooden_crate_01_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_crate_01) | James Ray Cock | CC0-1.0 | 34 KB |
+| `assets/textures/props/ph/ph-wooden_crate_01/rough.jpg` | wooden_crate_01 wooden_crate_01_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_crate_01) | James Ray Cock | CC0-1.0 | 60 KB |
+| `assets/textures/props/ph/ph-wooden_ladder/diff.jpg` | wooden_ladder wooden_ladder_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_ladder) | Miroslav Turura | CC0-1.0 | 59 KB |
+| `assets/textures/props/ph/ph-wooden_ladder/nor.jpg` | wooden_ladder wooden_ladder_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_ladder) | Miroslav Turura | CC0-1.0 | 43 KB |
+| `assets/textures/props/ph/ph-wooden_ladder/rough.jpg` | wooden_ladder wooden_ladder_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_ladder) | Miroslav Turura | CC0-1.0 | 58 KB |
+| `assets/textures/props/ph/ph-wooden_lantern_01-1/diff.jpg` | wooden_lantern_01 wooden_lantern_01_glass_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 22 KB |
+| `assets/textures/props/ph/ph-wooden_lantern_01-1/nor.jpg` | wooden_lantern_01 wooden_lantern_01_glass_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 6 KB |
+| `assets/textures/props/ph/ph-wooden_lantern_01-1/rough.jpg` | wooden_lantern_01 wooden_lantern_01_glass_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 33 KB |
+| `assets/textures/props/ph/ph-wooden_lantern_01/diff.jpg` | wooden_lantern_01 wooden_lantern_01_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 51 KB |
+| `assets/textures/props/ph/ph-wooden_lantern_01/nor.jpg` | wooden_lantern_01 wooden_lantern_01_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 47 KB |
+| `assets/textures/props/ph/ph-wooden_lantern_01/rough.jpg` | wooden_lantern_01 wooden_lantern_01_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_lantern_01) | James Ray Cock | CC0-1.0 | 60 KB |
+| `assets/textures/props/ph/ph-wooden_stool_01/diff.jpg` | wooden_stool_01 wooden_stool_01_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_stool_01) | Kuutti Siitonen | CC0-1.0 | 59 KB |
+| `assets/textures/props/ph/ph-wooden_stool_01/nor.jpg` | wooden_stool_01 wooden_stool_01_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_stool_01) | Kuutti Siitonen | CC0-1.0 | 48 KB |
+| `assets/textures/props/ph/ph-wooden_stool_01/rough.jpg` | wooden_stool_01 wooden_stool_01_rough_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_stool_01) | Kuutti Siitonen | CC0-1.0 | 52 KB |
+| `assets/textures/props/ph/ph-wooden_table_02/diff.jpg` | wooden_table_02 wooden_table_02_diff_1k.jpg → diff | [polyhaven.com](https://polyhaven.com/a/wooden_table_02) | Serhii Khromov | CC0-1.0 | 46 KB |
+| `assets/textures/props/ph/ph-wooden_table_02/nor.jpg` | wooden_table_02 wooden_table_02_nor_gl_1k.jpg → nor | [polyhaven.com](https://polyhaven.com/a/wooden_table_02) | Serhii Khromov | CC0-1.0 | 30 KB |
+| `assets/textures/props/ph/ph-wooden_table_02/rough.jpg` | wooden_table_02 wooden_table_02_arm_1k.jpg → rough | [polyhaven.com](https://polyhaven.com/a/wooden_table_02) | Serhii Khromov | CC0-1.0 | 39 KB |
 | `assets/textures/props/plaster/diff.jpg` | Plaster003 diff | [ambientcg.com](https://ambientcg.com/get?file=Plaster003_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 372 KB |
 | `assets/textures/props/plaster/nor.jpg` | Plaster003 nor | [ambientcg.com](https://ambientcg.com/get?file=Plaster003_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 60 KB |
 | `assets/textures/props/plaster/rough.jpg` | Plaster003 rough | [ambientcg.com](https://ambientcg.com/get?file=Plaster003_1K-JPG.zip) | Lennart Demes (ambientCG) | CC0-1.0 | 11 KB |
@@ -52,12 +95,16 @@ Total committed asset bytes: **4.87 MB** in 41 files.
 
 ## Not downloaded, and why
 
-* **Buildings and props are procedural geometry** (`src/world/models.ts`) textured with the CC0 PBR
-  materials above. Exploration merges every settlement mesh by *material instance*
-  (`src/exploration/settlements.ts`), and `WorldService.spawnModel` is synchronous, so a streamed GLB
-  cannot be part of that bake; procedural geometry also keeps the metre footprints `src/exploration/layout.ts`
-  assumes. KayKit's Medieval Builder Pack (CC0, downloaded and inspected) is hex-tile stylised and does not
-  match the PBR/painterly target.
+* **Alpine buildings are procedural geometry** (`src/world/models/*`) textured with the CC0 PBR
+  materials above: the Blockbau log house, Stadel, Spycher, Romanesque church, castle and letzi have no
+  CC0 counterpart. The **town house, the village tavern, the wagon and the crates are composed from the
+  Quaternius Medieval Village MegaKit** (`assets/models/buildings/megakit.bin`, 48 of its 176 glTF pieces
+  re-packed) and **small props are Poly Haven scans** (`assets/models/props/*.bin`). Both are loaded once at
+  boot and composed *synchronously* into the same per-material batches as the procedural geometry, so
+  exploration's per-POI merge (`src/exploration/settlements.ts`) still sees one mesh per material.
+  Not used: the kit's high-poly stone corners/door frames (2–3k tris each), Poly Haven's barrels set, basket,
+  stump and spinning wheel (0.6–1.4 MB of geometry each — too heavy for dressing), and KayKit's Medieval
+  Builder Pack (hex-tile stylised).
 * **Character meshes are procedural too** (`src/world/characters.ts`), skinned to a skeleton retargeted to
   adult human proportions; only the *animation* is third-party (KayKit Rig_Medium, CC0), re-packed to the
   31 clips the game maps onto `CharacterAnim`. Rigged CC0 humans that exist (KayKit Adventurers,

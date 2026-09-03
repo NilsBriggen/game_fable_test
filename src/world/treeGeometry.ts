@@ -39,9 +39,9 @@ const SPECIES: Record<TreeKind, Species> = {
   // A Swiss valley spruce is tall, narrow and starts its crown low; the fir is blunter and denser;
   // the larch is the airy one; the beech is the only broad crown below the tree line; the mountain
   // pine (Bergföhre) in the last belt under it is barely more than a shrub.
-  spruce: { height: [13, 19], crown: 0.19, whorls: 8, cardsPerWhorl: 5, droop: 0.46, foliage: 'spruce', bark: 'bark', crownStart: 0.13, taper: 1.4, trunkR: 0.017 },
-  fir: { height: [12, 17], crown: 0.22, whorls: 7, cardsPerWhorl: 5, droop: 0.16, foliage: 'fir', bark: 'bark', crownStart: 0.20, taper: 1.05, trunkR: 0.019 },
-  larch: { height: [11, 15], crown: 0.16, whorls: 7, cardsPerWhorl: 4, droop: 0.30, foliage: 'larch', bark: 'barkPale', crownStart: 0.26, taper: 1.2, trunkR: 0.015 },
+  spruce: { height: [13, 19], crown: 0.23, whorls: 8, cardsPerWhorl: 5, droop: 0.46, foliage: 'spruce', bark: 'bark', crownStart: 0.13, taper: 1.4, trunkR: 0.017 },
+  fir: { height: [12, 17], crown: 0.25, whorls: 7, cardsPerWhorl: 5, droop: 0.16, foliage: 'fir', bark: 'bark', crownStart: 0.20, taper: 1.05, trunkR: 0.019 },
+  larch: { height: [11, 15], crown: 0.19, whorls: 7, cardsPerWhorl: 4, droop: 0.30, foliage: 'larch', bark: 'barkPale', crownStart: 0.26, taper: 1.2, trunkR: 0.015 },
   beech: { height: [11, 17], crown: 0.36, whorls: 4, cardsPerWhorl: 7, droop: 0.05, foliage: 'beech', bark: 'barkPale', crownStart: 0.44, taper: 0.6, trunkR: 0.024 },
   pine: { height: [3, 5.5], crown: 0.55, whorls: 4, cardsPerWhorl: 5, droop: 0.55, foliage: 'pine', bark: 'bark', crownStart: 0.12, taper: 0.9, trunkR: 0.03 },
 };
@@ -173,7 +173,7 @@ function buildTree(kind: TreeKind, rng: Rng, lod: 0 | 1): BufferGeometry {
         right.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(len * 0.52);
         nrm.set(Math.cos(a) * 0.45, 0.9, Math.sin(a) * 0.45).normalize();
         mb.quad(centre, right, up, nrm, folUv, depthShade * 0.72, Math.min(1, depthShade * 1.12));
-        if (lod === 0 && rng.next() < 0.34) {
+        if (lod === 0 && rng.next() < 0.5) {
           // second card rolled about the branch axis so the whorl has volume, not a flat disc
           centre.set(dx * 0.46, y + dy * 0.46 + len * 0.14, dz * 0.46);
           right.set(-Math.sin(a), 0.85, Math.cos(a)).normalize().multiplyScalar(len * 0.44);

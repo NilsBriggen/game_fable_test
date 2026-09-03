@@ -16,6 +16,7 @@ import {
   gableRoofRotated, logWalls, mixTone, pyramidRoof, quoins, stonePlinth, windowOpening,
 } from './kit';
 import { woodpileInto, marketStallInto, barrelInto, ladderInto } from './props';
+import { tavernInto, townHouseInto } from './townhouse';
 
 // ---------------- Blockbau farmhouse ----------------
 
@@ -34,6 +35,8 @@ const HOUSE_SIZES: Record<string, HouseSize> = {
  * village square. Returns extra loose children (none today; the signature is kept for the mill).
  */
 export function blockbauInto(b: Build, rng: Rng, variant?: string): Object3D[] {
+  // the village tavern is the MegaKit-composed Sust when the kit is loaded (townhouse.ts)
+  if (variant === 'inn' && tavernInto(b, rng)) return [];
   const size = HOUSE_SIZES[variant ?? 'default'] ?? HOUSE_SIZES.default;
   // per-spawn variation: no draw-call cost (exploration merges by material anyway) and a village of
   // identical houses reads as a tile set rather than a place
@@ -106,10 +109,11 @@ export function houseBlockbau(rng: Rng, variant?: string): Object3D {
 // ---------------- stone town house ----------------
 
 export function houseStone(rng: Rng, variant?: string): Object3D {
+  const b = new Build();
+  if (townHouseInto(b, rng, variant)) return b.emit('house.stone');   // MegaKit-composed (townhouse.ts)
   const w = variant === 'large' ? 10.4 : 8.6, d = 7, ridge = 2.5;
   const wallH = 6.4 * (1 + (rng.next() - 0.5) * 0.12);
   const wash = [PLASTER_TONE, 0xd6c49a, 0xc9c6bb][Math.floor(rng.next() * 3)];
-  const b = new Build();
   // rubble ground storey, limewashed upper storeys, ashlar quoins tying the corners
   b.box('masonry', MASONRY_TONE, [w, 2.6, d], [0, 1.3, 0]);
   b.box('plaster', wash, [w - 0.06, wallH - 2.5, d - 0.06], [0, 2.5 + (wallH - 2.5) / 2, 0]);
@@ -173,7 +177,8 @@ export function granary(rng: Rng): Object3D {
   logWalls(b, w, d, wallH, floor + 0.16, 0.25, mixTone(LOG_TONE, PLANK_DARK, 0.2));
   for (const sz of [-1, 1]) boardGable(b, w, ridge * 0.9, floor + 0.16 + wallH, sz * (d / 2 - 0.04));
   doorway(b, 0, floor + 0.16, d / 2 + 0.1, 0.75, 1.5, 'z');
-  ladderInto(b, 0, 0, d / 2 + 0.62, floor + 0.4, 0.5);
+  // the Poly Haven ladder scan leaning on the sill; the procedural ladder stands in without the asset
+  if (!b.prop('wooden_ladder', [0.55, 0, d / 2 + 0.75], [-0.42, 0, 0], 1.15)) ladderInto(b, 0, 0, d / 2 + 0.62, floor + 0.4, 0.5);
   gableRoof(b, w, d, ridge, floor + 0.16 + wallH, { overhang: 0.55, tone: 0x8b8478 });
   void rng;
   return b.emit('granary');

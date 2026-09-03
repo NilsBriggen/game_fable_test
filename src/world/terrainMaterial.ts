@@ -300,10 +300,12 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           float alp = smoothstep(160.0, 330.0, vWorldPos.y);
 
           // ---- slope wins over classification ------------------------------------------------
-          // A 40-60 degree face is bare limestone whatever the height model called it; below that a
-          // band of loose scree collects. Without this every cliff wore stretched pasture.
-          float rockify = smoothstep(0.78, 0.52, nrm.y);
-          float screeify = smoothstep(0.90, 0.74, nrm.y) * (1.0 - rockify) * 0.75;
+          // A 50-65 degree face is bare limestone whatever the height model called it; from ~37
+          // degrees a band of loose scree collects below it. Without this every cliff wore stretched
+          // pasture; with the band starting at 39 degrees (0.78) every rolling hillside above the
+          // Urnersee broke out in pale blotches that read as snow from the Seelisberg viewpoint.
+          float rockify = smoothstep(0.68, 0.46, nrm.y);
+          float screeify = smoothstep(0.82, 0.64, nrm.y) * (1.0 - rockify) * 0.6;
           float soften = 1.0 - max(rockify, screeify);
           w1 *= soften; w2 *= soften; w6 *= soften; w7 *= soften; w8 *= soften;
           w3 = max(w3 * soften, rockify);
@@ -369,7 +371,10 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // wood turns with the season too
           float greenW = w0 + w1 + w2 * 0.8;
           vec3 tint = mix(uSeasonTint, uAltitudeTint, alp);
-          albedo = mix(albedo, albedo * tint * 1.85, greenW * 0.88);
+          // x1.5 puts the tint's luminance at ~1.0 (hue shift, not a brightening): at x1.85 the
+          // alpine meadow layer went past white in the green channel and the whole middle distance
+          // hazed to chalk
+          albedo = mix(albedo, albedo * tint * 1.5, greenW * 0.88);
 
           // A spruce stand seen from across the Urnersee has to read as forest between the trunks,
           // not as the bare litter texture. Desaturate the litter first and only then tint it toward
@@ -380,7 +385,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
 
           // limestone is grey-white, not the green-grey the season tint would drag it toward, and a
           // cliff face is brighter on its bedding ledges than in the joints
-          albedo = mix(albedo, albedo * vec3(1.06, 1.05, 1.02) * (0.86 + 0.30 * grainC), w3 * 0.7);
+          albedo = mix(albedo, albedo * vec3(0.98, 0.98, 0.96) * (0.80 + 0.28 * grainC), w3 * 0.7);
 
           // The yard set (Ground081) is a pale grey-beige path gravel out of the box; a village
           // trodden by cattle and emptied of chamber pots is browner and duller than that.
@@ -393,7 +398,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo = mix(albedo, albedo * vec3(0.90, 0.94, 1.03) * (0.86 + 0.20 * macro.b), w5 * 0.9);
 
           // macro variation: large-scale luminance + hue drift
-          albedo *= mix(vec3(0.82), vec3(1.18), macro.b);
+          albedo *= mix(vec3(0.86), vec3(1.12), macro.b);
           albedo = mix(albedo, albedo * vec3(1.06, 1.0, 0.9), (macro.g - 0.5) * 0.5 + 0.25);
 
           // near-field grain: without it every ground layer is a smooth wash within a few metres of

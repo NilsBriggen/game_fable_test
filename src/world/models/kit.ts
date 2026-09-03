@@ -19,14 +19,21 @@ import {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { registerCsmMaterial } from '../shadowCsm';
 import { propMaterial, type PropTexId } from '../assets';
+import { kitPiece } from './megakit';
 
 // ---------------- materials ----------------
 
-export type MatId = 'logs' | 'planks' | 'shingle' | 'ashlar' | 'masonry' | 'drystone' | 'plaster'
-  | 'iron' | 'thatch' | 'rock' | 'cloth' | 'fire';
+export type ProcMatId = 'logs' | 'planks' | 'shingle' | 'ashlar' | 'masonry' | 'drystone' | 'plaster'
+  | 'iron' | 'thatch' | 'rock' | 'cloth' | 'fire'
+  /** MegaKit round clay tiles (kit UVs + the kit's painted map) */
+  | 'tiles'
+  /** dark window glass: no map, one shared material */
+  | 'glass';
+/** `ph-<asset>[-n]`: a Poly Haven scan's own material (megakit.ts). */
+export type MatId = ProcMatId | `ph-${string}`;
 
 /** id → (texture set, fixed PBR opts). Fixed so every caller lands on the same cached instance. */
-const MAT_SPEC: Record<Exclude<MatId, 'fire'>, [PropTexId, { roughness?: number; metalness?: number; normalScale?: number }]> = {
+const MAT_SPEC: Record<Exclude<ProcMatId, 'fire' | 'glass'>, [PropTexId, { roughness?: number; metalness?: number; normalScale?: number; glNormal?: boolean }]> = {
   logs: ['wood-log', { roughness: 0.92, normalScale: 1.1 }],
   planks: ['wood-plank', { roughness: 0.9 }],
   shingle: ['shingle', { roughness: 0.88, normalScale: 1.35 }],
@@ -38,9 +45,11 @@ const MAT_SPEC: Record<Exclude<MatId, 'fire'>, [PropTexId, { roughness?: number;
   thatch: ['thatch', { roughness: 1, normalScale: 1.2 }],
   rock: ['rock', { roughness: 0.95, normalScale: 1.2 }],
   cloth: ['wool', { roughness: 0.95 }],
+  tiles: ['tiles', { roughness: 0.9, normalScale: 0.9, glNormal: true }],
 };
 
 let fireMaterial: MeshStandardMaterial | null = null;
+let glassMaterial: MeshStandardMaterial | null = null;
 export function propMat(id: MatId): MeshStandardMaterial {
   if (id === 'fire') {
     if (!fireMaterial) {
@@ -49,34 +58,48 @@ export function propMat(id: MatId): MeshStandardMaterial {
     }
     return fireMaterial;
   }
-  const [tex, opts] = MAT_SPEC[id];
+  if (id === 'glass') {
+    if (!glassMaterial) {
+      glassMaterial = new MeshStandardMaterial({ color: 0x1a2028, roughness: 0.25, metalness: 0.4, vertexColors: true });
+      registerCsmMaterial(glassMaterial);
+    }
+    return glassMaterial;
+  }
+  if (id.startsWith('ph-')) return propMaterial(id as PropTexId, { roughness: 1, glNormal: true });
+  const [tex, opts] = MAT_SPEC[id as Exclude<ProcMatId, 'fire' | 'glass'>];
   return propMaterial(tex, opts);
 }
 
 export function disposeKitCaches(): void {
   fireMaterial?.dispose();
   fireMaterial = null;
+  glassMaterial?.dispose();
+  glassMaterial = null;
 }
 
 /** Texture repeat length in metres per material (bigger = coarser grain). Chosen so a course of the
  *  mapped stone/shingle reads at its real size: masonry ~0.25 m stones, ashlar ~0.35 m blocks,
  *  shingle ~0.12 m slates. */
-const UV_METRES: Record<MatId, number> = {
+const UV_METRES: Record<ProcMatId, number> = {
   logs: 1.6, planks: 1.2, shingle: 1.5, ashlar: 1.7, masonry: 2.6, drystone: 1.8, plaster: 2.4,
-  iron: 0.6, thatch: 1.4, rock: 1.6, cloth: 0.8, fire: 1,
+  iron: 0.6, thatch: 1.4, rock: 1.6, cloth: 0.8, fire: 1, tiles: 1, glass: 1,
 };
 
 /** Per-material gain on the vertex tint. `map * vColor` is unclamped and the CC0 albedos are far darker
  *  than they look in sRGB, so a painted tone only lands where it was authored if it is multiplied by
  *  ≈ 0.8 / meanLinearAlbedo. Measure with `node tools/assets/albedo.mjs`; rock is capped rather than the
- *  80× its near-black map would ask for. */
-const TINT_GAIN: Record<MatId, [number, number, number]> = {
+ *  80× its near-black map would ask for. The kit's painted tiles and the Poly Haven scans are authored
+ *  at their final brightness: gain 1 (`GAIN_ONE`). */
+const TINT_GAIN: Record<ProcMatId, [number, number, number]> = {
   logs: [7.1, 12.3, 19.5], planks: [10.7, 22.9, 27.6], shingle: [2.93, 3.45, 4.59],
   ashlar: [3.46, 3.47, 3.51], masonry: [3.40, 4.49, 6.61],
   drystone: [4.2, 5.4, 8.3], plaster: [1.20, 1.24, 1.28],
   iron: [2.54, 3.16, 3.65], thatch: [5.3, 6.8, 9.4], rock: [25, 18, 15], cloth: [0.93, 0.93, 0.93],
-  fire: [1, 1, 1],
+  fire: [1, 1, 1], tiles: [1, 1, 1], glass: [1, 1, 1],
 };
+const GAIN_ONE: [number, number, number] = [1, 1, 1];
+const gainOf = (m: MatId): [number, number, number] => (m.startsWith('ph-') ? GAIN_ONE : TINT_GAIN[m as ProcMatId]);
+const uvMetresOf = (m: MatId): number => (m.startsWith('ph-') ? 1 : UV_METRES[m as ProcMatId]);
 
 function setColor(geo: BufferGeometry, hex: number, gain: [number, number, number] = [1, 1, 1]): void {
   const n = geo.attributes.position.count;
@@ -211,17 +234,52 @@ export class Build {
 
   /** `swapUv` exchanges u and v: a roof slab's dominant normal is +y, so its default projection lays
    *  the shingle courses down the slope instead of along the ridge. */
-  add(mat: MatId, geo: BufferGeometry, color: number, at: XYZ = [0, 0, 0], rot?: XYZ, scale?: XYZ, order: 'XYZ' | 'YXZ' = 'XYZ', swapUv = false): this {
+  add(mat: MatId, geo: BufferGeometry, color: number, at: XYZ = [0, 0, 0], rot?: XYZ, scale?: XYZ, order: 'XYZ' | 'YXZ' = 'XYZ', swapUv = false, keepUv = false): this {
     _e.set(rot?.[0] ?? 0, rot?.[1] ?? 0, rot?.[2] ?? 0, order);
     _q.setFromEuler(_e);
     _m.compose(new Vector3(at[0], at[1], at[2]), _q, new Vector3(scale?.[0] ?? 1, scale?.[1] ?? 1, scale?.[2] ?? 1));
     geo.applyMatrix4(_m);
-    setColor(geo, color, TINT_GAIN[mat]);
-    boxUv(geo, UV_METRES[mat], swapUv);
+    setColor(geo, color, gainOf(mat));
+    if (!keepUv) boxUv(geo, uvMetresOf(mat), swapUv);
     let list = this.parts.get(mat);
     if (!list) { list = []; this.parts.set(mat, list); }
     list.push(geo);
     return this;
+  }
+
+  /**
+   * A MegaKit piece (megakit.ts) at `at`, yawed/rotated/scaled like any primitive. `tones` maps the
+   * piece's material ids (plaster, planks, masonry, ashlar, tiles, glass) to a tint; a material not in
+   * `tones` gets the shared default tone for it. Parts are re-projected with the world-scale box UVs of
+   * our own PBR set (so a kit wall and a procedural wall share one texture and one draw call); the tile
+   * roof keeps the kit's UVs. Returns false (and draws nothing) when the kit is not loaded.
+   */
+  piece(name: string, tones: Partial<Record<string, number>>, at: XYZ = [0, 0, 0], rot?: XYZ, scale?: XYZ, order: 'XYZ' | 'YXZ' = 'XYZ'): boolean {
+    const p = kitPiece(name);
+    if (!p) return false;
+    for (const part of p.parts) {
+      const mat = part.mat as MatId;
+      if (mat === 'glass' && tones.glass === undefined) continue;   // window glass off unless asked for
+      const tone = tones[mat] ?? KIT_DEFAULT_TONE[mat] ?? 0xffffff;
+      this.add(mat, part.geo.clone(), tone, at, rot, scale, order, false, mat === 'tiles');
+    }
+    return true;
+  }
+
+  /**
+   * A Poly Haven prop scan (megakit.ts PROP_IDS) standing on `at` (its lowest point is put on y = 0
+   * before the transform, so `at[1]` is the ground/floor it rests on). Own maps, own UVs, tint 1.
+   * Returns false when that prop is not loaded, so the caller can draw its procedural stand-in.
+   */
+  prop(id: string, at: XYZ = [0, 0, 0], rot?: XYZ, scale = 1, order: 'XYZ' | 'YXZ' = 'XYZ'): boolean {
+    const p = kitPiece(id);
+    if (!p) return false;
+    for (const part of p.parts) {
+      const g = part.geo.clone();
+      g.translate(0, -p.min[1], 0);
+      this.add(part.mat as MatId, g, 0xffffff, at, rot, [scale, scale, scale], order, false, true);
+    }
+    return true;
   }
 
   box(mat: MatId, color: number, size: XYZ, at: XYZ, rot?: XYZ): this {
@@ -279,6 +337,13 @@ export const PLASTER_TONE = 0xd8d0bc;
 export const IRON_TONE = 0x8e9298;
 export const THATCH_TONE = 0xc4a463;
 export const WEIGHT_TONE = 0x8f8b82;
+/** Kit tile roofs are tinted down from the painted orange toward weathered terracotta. */
+export const TILE_TONE = 0x9a7a66;
+
+/** Default tint per kit material id when `Build.piece` is not told otherwise. */
+const KIT_DEFAULT_TONE: Partial<Record<string, number>> = {
+  plaster: PLASTER_TONE, planks: PLANK_DARK, masonry: MASONRY_TONE, ashlar: STONE_TONE, tiles: TILE_TONE, glass: 0xffffff,
+};
 
 // ---------------- roofs ----------------
 

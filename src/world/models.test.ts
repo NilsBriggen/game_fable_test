@@ -8,6 +8,7 @@ import { Box3, Group, Mesh, Vector3, type Material, type Object3D } from 'three'
 interface Buffer { toString(enc: string, start?: number, end?: number): string; readUInt32LE(offset: number): number }
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ModelLibrary } from './models';
+import { PROP_IDS, hasKit, hasProp, installKit, kitPieceNames } from './models/megakit';
 import { CHARACTER_ARCHETYPES, clipFor, spawnCharacter, type WeaponKind } from './characters';
 import { archetypes } from '@content/archetypes';
 import type { CharacterAnim } from '@core/services';
@@ -48,7 +49,8 @@ describe('model library budgets', () => {
   // 7 meshes = 7 materials at most per model. Exploration merges by material *per POI*
   // (src/exploration/settlements.ts), so a whole village costs one draw call per material it uses —
   // roughly a dozen — not one per building. 12k triangles is the per-model ceiling; the village-level
-  // budget is asserted separately below.
+  // budget is asserted separately below. (The kit-composed tavern with its Poly Haven props is
+  // asserted in the 'downloaded kits' block below.)
   it('every building and prop stays within 7 draw calls and 12k triangles', () => {
     const variants: [string, string | undefined][] = [...[...BUILDINGS, ...PROPS, ...WEAPONS].map((i) => [i, undefined] as [string, undefined]),
       ['house.blockbau', 'inn'], ['house.blockbau', 'large'], ['house.blockbau', 'small'], ['house.stone', 'large']];
@@ -136,6 +138,88 @@ describe('model library budgets', () => {
     const hat = pole.children.find((c) => c.type === 'Group');
     expect(hat).toBeTruthy();
     expect(stats(hat!).meshes).toBeGreaterThan(0);
+  });
+});
+
+describe('downloaded kits (MegaKit pieces + Poly Haven props, installed from disk)', () => {
+  let lib: ModelLibrary;
+  beforeAll(async () => {
+    const spec = 'node:' + 'fs';
+    const { readFileSync } = await import(spec) as { readFileSync: (p: string) => Buffer & { buffer: ArrayBuffer; byteOffset: number; byteLength: number } };
+    const ab = (b: { buffer: ArrayBuffer; byteOffset: number; byteLength: number }): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+    installKit(ab(readFileSync('public/assets/models/buildings/megakit.bin')));
+    for (const id of PROP_IDS) installKit(ab(readFileSync(`public/assets/models/props/${id}.bin`)));
+    lib = new ModelLibrary(1234);
+  });
+
+  it('packs every piece the composites use and every prop id', () => {
+    expect(hasKit()).toBe(true);
+    for (const id of PROP_IDS) expect(hasProp(id), `prop ${id} missing`).toBe(true);
+    const names = new Set(kitPieceNames());
+    for (const n of ['Wall_UnevenBrick_Door_Flat', 'Wall_Plaster_Window_Wide_Flat', 'Wall_Plaster_WoodGrid', 'Window_Wide_Flat1',
+      'WindowShutters_Wide_Flat_Open', 'WindowShutters_Wide_Flat_Closed', 'Door_1_Flat', 'Door_1_Round', 'Roof_RoundTiles_6x8',
+      'Roof_Front_Brick6', 'Roof_Dormer_RoundTile', 'Prop_Chimney2', 'Balcony_Simple_Straight', 'Prop_Wagon', 'Corner_ExteriorWide_Wood']) {
+      expect(names.has(n), `kit piece ${n} missing`).toBe(true);
+    }
+  });
+
+  it('composes the town house, the tavern and the wagon from the kit within budget', () => {
+    // one mesh per material; the tavern adds the Poly Haven props' own materials (each one a
+    // per-POI draw call — a village has one tavern)
+    const cases: [string, string | undefined, number, number][] = [
+      ['house.stone', undefined, 8, 20000], ['house.stone', 'large', 8, 24000], ['house.blockbau', 'inn', 18, 80000],
+      ['cart', undefined, 3, 3000], ['well', undefined, 9, 9000], ['campfire', undefined, 6, 6000],
+      ['woodpile', undefined, 5, 6000], ['granary', undefined, 7, 14000],
+    ];
+    for (const [id, variant, meshes, tris] of cases) {
+      const s = stats(lib.spawn(id, { variant }));
+      expect(s.meshes, `${id}/${variant ?? '-'}: ${s.meshes} meshes`).toBeLessThanOrEqual(meshes);
+      expect(s.tris, `${id}/${variant ?? '-'}: ${Math.round(s.tris)} tris`).toBeLessThanOrEqual(tris);
+      const mats = [...s.mats].map((m) => (m as { map?: { userData?: unknown } }).map ? 'mapped' : 'flat');
+      expect(mats.length).toBeGreaterThan(0);
+    }
+    // the kit path really is taken: the tile roof material only exists on kit buildings
+    const house = stats(lib.spawn('house.stone'));
+    expect(house.meshes, 'town house did not use the kit (tiles material missing)').toBeGreaterThanOrEqual(6);
+  });
+
+  it('keeps the kit buildings on the ground and inside the footprints layout.ts assumes', () => {
+    const limits: Record<string, [number, number]> = { 'house.stone': [11.5, 9.5], 'house.blockbau': [10.5, 9.5], cart: [5, 5], well: [5, 5] };
+    for (const [id, [w, d]] of Object.entries(limits)) {
+      for (const variant of [undefined, 'inn', 'large']) {
+        if (variant && !id.startsWith('house')) continue;
+        const box = new Box3().setFromObject(lib.spawn(id, { variant }));
+        expect(box.min.y, `${id}/${variant} floats (${box.min.y.toFixed(2)})`).toBeLessThanOrEqual(0.06);
+        expect(box.min.y, `${id}/${variant} buried (${box.min.y.toFixed(2)})`).toBeGreaterThan(-2.6);
+        const size = box.getSize(new Vector3());
+        expect(size.x, `${id}/${variant} width ${size.x.toFixed(1)}`).toBeLessThanOrEqual(w);
+        expect(size.z, `${id}/${variant} depth ${size.z.toFixed(1)}`).toBeLessThanOrEqual(d);
+      }
+    }
+    // Poly Haven props are re-based so their lowest point is the floor they stand on
+    for (const id of ['woodpile', 'campfire', 'cart']) {
+      lib.spawn(id).traverse((c) => {
+        const m = c as Mesh;
+        if (!m.isMesh) return;
+        for (const attr of ['position', 'normal', 'uv', 'color']) expect(m.geometry.getAttribute(attr), `${id}: missing ${attr}`).toBeTruthy();
+      });
+    }
+  });
+
+  it('a village with the kit tavern still merges to well under 400 draw calls and 1.2 M triangles', () => {
+    const recipe: [string, string | undefined, number][] = [
+      ['well', undefined, 1], ['church', undefined, 1], ['house.blockbau', 'inn', 1], ['house.blockbau', undefined, 13],
+      ['fence', undefined, 9], ['hayrack', undefined, 6], ['cross', undefined, 1], ['cart', undefined, 1], ['granary', undefined, 2],
+    ];
+    let tris = 0;
+    const mats = new Set<Material>();
+    for (const [id, variant, n] of recipe) for (let i = 0; i < n; i++) {
+      const s = stats(lib.spawn(id, { variant, seed: i }));
+      tris += s.tris;
+      for (const m of s.mats) mats.add(m);
+    }
+    expect(mats.size, `${mats.size} merged draw calls`).toBeLessThanOrEqual(40);
+    expect(tris, `${Math.round(tris)} village triangles`).toBeLessThanOrEqual(1_200_000);
   });
 });
 

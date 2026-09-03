@@ -33,6 +33,10 @@ export function woodpileInto(b: Build, x: number, y: number, z: number, yaw = 0,
   }
   b.box('planks', PLANK_DARK, [len + 0.2, 0.06, 0.8 * scale], at(0, rows * r * 2.05 + 0.06, 0), [0, yaw, 0]);
   b.blob('drystone', WEIGHT_TONE, 0.17, at(len * 0.25, rows * r * 2.05 + 0.16, 0), 3, 0.4, 5);
+  // chopping block in front of the stack, the Poly Haven hand axe left stuck in it
+  const blk = at(len * 0.1, 0, 0.62 * scale);
+  b.cyl('logs', 0x6b5637, 0.2 * scale, 0.22 * scale, 0.5 * scale, [blk[0], blk[1] + 0.25 * scale, blk[2]], undefined, 8);
+  b.prop('wooden_axe', [blk[0] + 0.04, blk[1] + 0.36 * scale, blk[2]], [0.25, yaw + 0.6, 0.15], 0.95);
 }
 
 /** A stave barrel with iron hoops. */
@@ -169,9 +173,14 @@ export function well(rng: Rng): Object3D {
   b.cyl('logs', PLANK_TONE, 0.17, 0.17, 0.6, [0, 2.5, 0], [0, 0, Math.PI / 2], 9);                             // drum
   b.cyl('iron', IRON_TONE, 0.02, 0.02, 0.3, [r + 0.05, 2.5, 0], [0, 0, Math.PI / 2], 5);
   b.cyl('iron', IRON_TONE, 0.02, 0.02, 0.28, [r + 0.2, 2.36, 0], undefined, 5);
-  b.cyl('iron', mixTone(IRON_TONE, 0x6b5638, 0.6), 0.012, 0.012, 1.1, [0, 1.95, 0], undefined, 5);             // rope
-  b.cyl('planks', 0x6a5535, 0.18, 0.15, 0.28, [0, 1.32, 0], undefined, 9);
-  b.cyl('iron', IRON_TONE, 0.185, 0.185, 0.03, [0, 1.42, 0], undefined, 9, false);
+  // rope down to the Poly Haven bucket standing on the coping (procedural bucket without the asset)
+  if (b.prop('wooden_bucket_01', [r * 0.55, 0.84, 0.25], [0, 0.6, 0])) {
+    b.cyl('iron', mixTone(IRON_TONE, 0x6b5638, 0.6), 0.012, 0.012, 1.1, [r * 0.55, 1.95, 0.25], [0, 0, 0.05], 5);
+  } else {
+    b.cyl('iron', mixTone(IRON_TONE, 0x6b5638, 0.6), 0.012, 0.012, 1.1, [0, 1.95, 0], undefined, 5);           // rope
+    b.cyl('planks', 0x6a5535, 0.18, 0.15, 0.28, [0, 1.32, 0], undefined, 9);
+    b.cyl('iron', IRON_TONE, 0.185, 0.185, 0.03, [0, 1.42, 0], undefined, 9, false);
+  }
   gableRoof(b, 2.05, 1.9, 0.55, 2.72, { overhang: 0.3, weights: false, purlins: false, tone: SHINGLE_TONE, course: 0.28 });
   troughInto(b, 0, 0, r + 1.05, 0, 1.9);
   // a cobbled apron so the well is not standing in bare grass
@@ -222,9 +231,12 @@ export function gallowsPole(rng: Rng): Object3D {
 
 export function campfire(rng: Rng): Object3D {
   const b = new Build();
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    b.blob('rock', 0xb2ada1, 0.22, [Math.cos(a) * 0.58, 0.1, Math.sin(a) * 0.58], i, 0.6, 6);
+  // the Poly Haven stone ring (a 1.45 m scan) when loaded, else a ring of procedural boulders
+  if (!b.prop('stone_fire_pit', [0, 0, 0], [0, 0.4, 0], 0.9)) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      b.blob('rock', 0xb2ada1, 0.22, [Math.cos(a) * 0.58, 0.1, Math.sin(a) * 0.58], i, 0.6, 6);
+    }
   }
   for (let i = 0; i < 4; i++) {
     const a = (Math.PI / 4) * i;
@@ -261,6 +273,11 @@ export function tent(rng: Rng): Object3D {
 
 export function cart(rng: Rng): Object3D {
   const b = new Build();
+  // the MegaKit farm wagon when the kit is loaded (4 m along -z: centre it on the origin like the cart)
+  if (b.piece('Prop_Wagon', { planks: 0x7a6440 }, [0, 0, 1.1])) {
+    void rng;
+    return b.emit('cart');
+  }
   const wheelR = 0.56;
   b.box('planks', PLANK_TONE, [2.5, 0.16, 1.4], [0, 0.92, 0]);
   for (let i = 0; i < 6; i++) b.box('planks', i % 2 ? PLANK_TONE : 0x7a6440, [2.5, 0.35, 0.1], [0, 1.14, -0.7 + (i / 5) * 1.4]);

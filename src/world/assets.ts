@@ -9,7 +9,8 @@
  * geometry helpers in models.ts/characters.ts always write a `color` attribute.
  */
 import {
-  MeshStandardMaterial, RepeatWrapping, SRGBColorSpace, Texture, TextureLoader, Vector2,
+  BufferGeometry, Float32BufferAttribute, MeshStandardMaterial, RepeatWrapping, SRGBColorSpace, Texture,
+  TextureLoader, Vector2,
 } from 'three';
 import { registerCsmMaterial } from './shadowCsm';
 
@@ -17,7 +18,18 @@ const BASE = 'assets/textures/props';
 
 export type PropTexId =
   | 'wood-log' | 'wood-plank' | 'shingle' | 'stone-block' | 'masonry' | 'drystone' | 'plaster'
-  | 'iron' | 'thatch' | 'rock' | 'wool' | 'leather' | 'chainmail';
+  | 'iron' | 'thatch' | 'rock' | 'wool' | 'leather' | 'chainmail'
+  /** the MegaKit's round clay tiles (keeps the kit's own UVs) */
+  | 'tiles'
+  /** a Poly Haven model's own scan maps: `ph-<asset id>[-n]` */
+  | `ph-${string}`;
+
+/** Texture sets that do not live directly under BASE/<id>/ . */
+function texDir(id: PropTexId): string {
+  if (id === 'tiles') return 'megakit/mk-tiles';
+  if (id.startsWith('ph-')) return `ph/${id}`;
+  return id;
+}
 
 const loader = new TextureLoader();
 const texCache = new Map<string, Texture>();
@@ -26,7 +38,7 @@ function tex(id: PropTexId, map: 'diff' | 'nor' | 'rough'): Texture {
   const key = `${id}/${map}`;
   let t = texCache.get(key);
   if (t) return t;
-  t = loader.load(`${BASE}/${key}.jpg`);
+  t = loader.load(`${BASE}/${texDir(id)}/${map}.jpg`);
   t.wrapS = t.wrapT = RepeatWrapping;
   t.anisotropy = 8;
   if (map === 'diff') t.colorSpace = SRGBColorSpace;
@@ -41,13 +53,15 @@ export interface PropMatOpts {
   /** flat tint multiplied on top of the vertex colours */
   color?: number;
   transparent?: boolean;
+  /** glTF-convention (+Y) normal maps sampled through the model's own UVs: flip Y like GLTFLoader does */
+  glNormal?: boolean;
 }
 
 const matCache = new Map<string, MeshStandardMaterial>();
 
 /** A shared PBR material built from one downloaded ambientCG set. Keyed by look, never per object. */
 export function propMaterial(id: PropTexId, opts: PropMatOpts = {}): MeshStandardMaterial {
-  const key = `${id}|${opts.roughness ?? ''}|${opts.metalness ?? ''}|${opts.normalScale ?? ''}|${opts.color ?? ''}`;
+  const key = `${id}|${opts.roughness ?? ''}|${opts.metalness ?? ''}|${opts.normalScale ?? ''}|${opts.color ?? ''}|${opts.glNormal ? 'gl' : ''}`;
   let m = matCache.get(key);
   if (m) return m;
   m = new MeshStandardMaterial({
@@ -59,7 +73,7 @@ export function propMaterial(id: PropTexId, opts: PropMatOpts = {}): MeshStandar
     color: opts.color ?? 0xffffff,
     vertexColors: true,
   });
-  m.normalScale = new Vector2(opts.normalScale ?? 1, opts.normalScale ?? 1);
+  m.normalScale = new Vector2(opts.normalScale ?? 1, (opts.normalScale ?? 1) * (opts.glNormal ? -1 : 1));
   // Shared, cached and long-lived: exploration disposes an NPC's materials when it freezes the NPC
   // (src/exploration/npc.ts), which would otherwise drop the GPU program for every merged building
   // using the same instance. Only disposeAssetCaches() really frees these.
@@ -124,6 +138,58 @@ export function loadRigAnims(): Promise<RigAnims | null> {
     return { bones: header.bones, bind: header.bind, skeleton: header.skeleton, clips };
   })();
   return rigPromise;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Packed model kits (EKIT, written by tools/assets/fetch.mjs `packKit`): the MegaKit building pieces
+// and the Poly Haven prop scans. One header JSON + one float32 payload; each piece is a list of
+// indexed parts, one per material id.
+// ---------------------------------------------------------------------------------------------
+
+export interface PackedPart { mat: string; geo: BufferGeometry }
+export interface PackedPiece { min: [number, number, number]; max: [number, number, number]; tris: number; parts: PackedPart[] }
+
+interface EkitRange { off: number; len: number }
+interface EkitHeader {
+  pieces: Record<string, { min: [number, number, number]; max: [number, number, number]; tris: number;
+    parts: { mat: string; pos: EkitRange; nor: EkitRange; uv: EkitRange; idx: EkitRange }[] }>;
+}
+
+/** Parses an EKIT buffer. Geometries come back *non-indexed* (the building kit merges non-indexed
+ *  primitives) with position/normal/uv; the caller adds the colour attribute. */
+export function parsePackedKit(buf: ArrayBuffer): Map<string, PackedPiece> {
+  const view = new DataView(buf);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== 'EKIT') throw new Error('not an EKIT file');
+  const headerLen = view.getUint32(4, true);
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, headerLen))) as EkitHeader;
+  const data = new Float32Array(buf.slice(8 + headerLen));
+  const out = new Map<string, PackedPiece>();
+  for (const [name, p] of Object.entries(header.pieces)) {
+    const parts: PackedPart[] = p.parts.map((part) => {
+      const g = new BufferGeometry();
+      g.setAttribute('position', new Float32BufferAttribute(data.subarray(part.pos.off, part.pos.off + part.pos.len), 3));
+      g.setAttribute('normal', new Float32BufferAttribute(data.subarray(part.nor.off, part.nor.off + part.nor.len), 3));
+      g.setAttribute('uv', new Float32BufferAttribute(data.subarray(part.uv.off, part.uv.off + part.uv.len), 2));
+      const idx = data.subarray(part.idx.off, part.idx.off + part.idx.len);
+      g.setIndex(Array.from(idx, (v) => v | 0));
+      return { mat: part.mat, geo: g.toNonIndexed() };
+    });
+    out.set(name, { min: p.min, max: p.max, tris: p.tris, parts });
+  }
+  return out;
+}
+
+/** Fetches and parses one packed kit. Resolves null (silently) when the file is missing or there is
+ *  no fetch (unit tests): every consumer has a procedural fallback. */
+export async function loadPackedKit(url: string): Promise<Map<string, PackedPiece> | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return parsePackedKit(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
 export function disposeAssetCaches(): void {

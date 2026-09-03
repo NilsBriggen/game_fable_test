@@ -33,12 +33,12 @@ import { rockGeometry, rockScanMaterial, type RockKind } from './look/rocks';
 
 type Tier = 'full' | 'mid' | 'impostor';
 
-const SPACING: Record<Tier, number> = { full: 8.0, mid: 9.5, impostor: 12 };
+const SPACING: Record<Tier, number> = { full: 8.0, mid: 9.5, impostor: 10.5 };
 /** Chunks the terrain itself has dropped to LOD2/3 are ≥900 m away; thin the forest there.
  *  Tighter than the 24 m it used to be — that is what made a wooded slope read as scattered
  *  individual trees from across the Urnersee — but not so tight that a whole valley of overlapping
  *  alpha-tested billboards becomes the frame's dominant cost. */
-const IMPOSTOR_SPACING_FAR = 17;
+const IMPOSTOR_SPACING_FAR = 14;
 /** Tier by distance from the camera to the nearest point of the chunk, not by terrain chunk LOD:
  *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m. */
 const TIER_DIST = { full: 70, mid: 250 };
@@ -56,7 +56,7 @@ const TREE_SPECIES: { kind: TreeKind; weight: number }[] = [
 ];
 
 /** Per-pool starting capacity. Sized from the measured worst case, then allowed to grow. */
-const CAPACITY: Record<string, number> = { full: 4200, mid: 6000, impostor: 26000, rock: 2400, cover: 9000 };
+const CAPACITY: Record<string, number> = { full: 4200, mid: 6000, impostor: 36000, rock: 2400, cover: 9000 };
 const HARD_CAP = 70000;
 
 interface Pool {
@@ -333,7 +333,9 @@ export class VegetationManager {
             this.setInstance(pool, idx, x, y, z, rng.next() * Math.PI * 2, scale, lean, rng.next() * Math.PI * 2, scaleY);
             // foliage tint: cooler/darker in the shade of a closed stand, warmer on an open edge,
             // and drained toward grey-brown once the snow uniform says it is winter
-            const t = 0.86 + rng.next() * 0.26;
+            // beech leaves come out of the shrub_01 sheet already lime-bright; unscaled they read as
+            // lollipops next to the dark conifers
+            const t = (kind === 'beech' ? 0.70 : 0.84) + rng.next() * 0.22;
             const wnt = this.snowiness();
             const r = t * (0.94 + rng.next() * 0.12), g = t, b = t * (0.9 + rng.next() * 0.14);
             this.setTint(pool, idx, r * (1 + wnt * 0.35), g * (1 - wnt * 0.22), b * (1 - wnt * 0.05));

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Every entry produces committed files under public/assets/**. Re-run `node tools/assets/fetch.mjs` to reproduce. `node tools/assets/albedo.mjs` prints each committed diffuse map's mean linear albedo; those numbers are the per-channel tint gains in src/world/models.ts (TINT_GAIN) and src/world/characters.ts (SkinBuilder.gain) \u2014 re-measure whenever a texture here is swapped.",
+  "note": "Every entry produces committed files under public/assets/**. Re-run `node tools/assets/fetch.mjs` to reproduce. `node tools/assets/albedo.mjs` prints each committed diffuse map's mean linear albedo; those numbers are the per-channel tint gains in src/world/models.ts (TINT_GAIN) and src/world/characters.ts (SkinBuilder.gain) — re-measure whenever a texture here is swapped.",
   "sources": {
     "ambientcg": {
       "name": "ambientCG",
@@ -29,6 +29,21 @@
       "licence": "CC0-1.0",
       "home": "https://kaylousberg.itch.io/",
       "urlTemplate": "https://{USER}.itch.io/{SLUG} (itch.io free download flow, upload id {UPLOAD})"
+    },
+    "quaternius-oga": {
+      "name": "Quaternius — Medieval Village MegaKit (Standard) on OpenGameArt",
+      "author": "Quaternius (quaternius.com)",
+      "licence": "CC0-1.0",
+      "home": "https://opengameart.org/content/medieval-village-megakit"
+    },
+    "polyhaven-models": {
+      "name": "Poly Haven models",
+      "author": "Poly Haven (per-asset author recorded from api.polyhaven.com/info)",
+      "licence": "CC0-1.0",
+      "home": "https://polyhaven.com/models",
+      "apiFiles": "https://api.polyhaven.com/files/{ASSET}",
+      "apiInfo": "https://api.polyhaven.com/info/{ASSET}",
+      "homeTemplate": "https://polyhaven.com/a/{ASSET}"
     }
   },
   "textureProfiles": {
@@ -243,7 +258,7 @@
       },
       "target": "public/assets/characters/rig-medium.anims.bin",
       "postprocess": "rig-anims",
-      "note": "Rig_Medium clip library. Post-processing keeps only the clips listed below, drops constant position/scale tracks (kept for root+hips) and stores rotations as float32 \u2014 the game rebuilds its own period-proportioned skeleton and retargets these rotations onto it (src/world/characters.ts).",
+      "note": "Rig_Medium clip library. Post-processing keeps only the clips listed below, drops constant position/scale tracks (kept for root+hips) and stores rotations as float32 — the game rebuilds its own period-proportioned skeleton and retargets these rotations onto it (src/world/characters.ts).",
       "clipFiles": [
         {
           "file": "Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
@@ -313,5 +328,188 @@
       }
     }
   ],
-  "terrainNote": "Terrain surface textures are already fetched, packed into DataArrayTextures and wired by the world-look builder's tools/assets/fetch-world.mjs + world-manifest.json (public/assets/textures/terrain/*-array.jpg, credited in public/assets/CREDITS-world.md). The entries below are the per-surface equivalents this builder would have fetched; they are NOT fetched by default (`--only terrain` forces it) so the same 8 materials are not committed twice."
+  "terrainNote": "Terrain surface textures are already fetched, packed into DataArrayTextures and wired by the world-look builder's tools/assets/fetch-world.mjs + world-manifest.json (public/assets/textures/terrain/*-array.jpg, credited in public/assets/CREDITS-world.md). The entries below are the per-surface equivalents this builder would have fetched; they are NOT fetched by default (`--only terrain` forces it) so the same 8 materials are not committed twice.",
+  "models": [
+    {
+      "id": "megakit",
+      "source": "quaternius-oga",
+      "kind": "gltf-zip",
+      "url": "https://opengameart.org/sites/default/files/medieval_village_megakitstandard.zip",
+      "page": "https://opengameart.org/content/medieval-village-megakit",
+      "dir": "glTF",
+      "target": "public/assets/models/buildings/megakit.bin",
+      "use": "town houses (Luzern/Zug rows, Landenberg), the village tavern's stone ground floor + jettied upper storey, wagon, crates, shutters, dormers, chimneys",
+      "pieces": [
+        "Wall_Plaster_Straight",
+        "Wall_Plaster_Straight_Base",
+        "Wall_Plaster_Window_Wide_Flat",
+        "Wall_Plaster_Window_Thin_Round",
+        "Wall_Plaster_Door_Flat",
+        "Wall_Plaster_WoodGrid",
+        "Wall_UnevenBrick_Straight",
+        "Wall_UnevenBrick_Window_Wide_Flat",
+        "Wall_UnevenBrick_Window_Thin_Round",
+        "Wall_UnevenBrick_Door_Flat",
+        "Wall_UnevenBrick_Door_Round",
+        "Wall_BottomCover",
+        "Wall_Arch",
+        "Corner_Exterior_Wood",
+        "Corner_ExteriorWide_Wood",
+        "Door_1_Flat",
+        "Door_1_Round",
+        "DoorFrame_Flat_WoodDark",
+        "Window_Wide_Flat1",
+        "Window_Thin_Round1",
+        "WindowShutters_Wide_Flat_Open",
+        "WindowShutters_Wide_Flat_Closed",
+        "WindowShutters_Thin_Round_Open",
+        "Roof_RoundTiles_4x6",
+        "Roof_RoundTiles_6x8",
+        "Roof_RoundTiles_6x10",
+        "Roof_Front_Brick6",
+        "Roof_Front_Brick8",
+        "Roof_Dormer_RoundTile",
+        "Roof_FrontSupports",
+        "Roof_Support2",
+        "Roof_Wooden_2x1",
+        "Roof_Wooden_2x1_L",
+        "Roof_Wooden_2x1_R",
+        "Roof_Wooden_2x1_Middle",
+        "Overhang_Plaster_Long",
+        "Overhang_Plaster_Corner",
+        "Overhang_UnevenBrick_Long",
+        "Balcony_Simple_Straight",
+        "Balcony_Simple_Corner",
+        "Prop_Chimney2",
+        "Prop_Wagon",
+        "Prop_Crate",
+        "Prop_WoodenFence_Single",
+        "Prop_Support",
+        "Stairs_Exterior_Straight",
+        "Stairs_Exterior_Platform",
+        "Floor_WoodDark"
+      ],
+      "materials": {
+        "MI_Plaster": "plaster",
+        "MI_WoodTrim": "planks",
+        "MI_WoodTrim_Wear": "planks",
+        "MI_UnevenBrick": "masonry",
+        "MI_RockTrim": "ashlar",
+        "MI_RoundTiles": "tiles",
+        "MI_Brick": "masonry",
+        "MI_WindowGlass": "glass"
+      },
+      "textures": {
+        "mk-tiles": {
+          "diff": "T_RoundTiles_BaseColor.png",
+          "nor": "T_RoundTiles_Normal.png",
+          "rough": "T_RoundTiles_Roughness.png"
+        }
+      },
+      "textureTarget": "public/assets/textures/props/megakit",
+      "textureSize": 1024,
+      "q": 0.85,
+      "note": "Only the kit's *shapes* are used: parts are re-projected with the world-scale box UVs of the ambientCG/Poly Haven PBR set above (plaster/planks/masonry/ashlar) so kit and procedural buildings share materials and draw calls; the kit's own hand-painted textures are not committed except the round-tile roof (mk-tiles), which keeps its UVs."
+    },
+    {
+      "id": "wooden_bucket_01",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_bucket_01.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "bucket on the well curb"
+    },
+    {
+      "id": "wooden_crate_01",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_crate_01.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "crate at the tavern and market stall"
+    },
+    {
+      "id": "wine_barrel_01",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wine_barrel_01.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "barrel at the tavern door"
+    },
+    {
+      "id": "wooden_ladder",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_ladder.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "ladder against the granary"
+    },
+    {
+      "id": "wooden_stool_01",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_stool_01.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "stools at the tavern bench"
+    },
+    {
+      "id": "wooden_table_02",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_table_02.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "table outside the tavern"
+    },
+    {
+      "id": "wooden_axe",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_axe.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "axe left in the chopping block by the woodpile"
+    },
+    {
+      "id": "stone_fire_pit",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/stone_fire_pit.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "camp fire ring"
+    },
+    {
+      "id": "wooden_lantern_01",
+      "source": "polyhaven-models",
+      "kind": "polyhaven",
+      "res": "1k",
+      "target": "public/assets/models/props/wooden_lantern_01.bin",
+      "textureTarget": "public/assets/textures/props/ph",
+      "textureSize": 512,
+      "q": 0.85,
+      "use": "lantern on the tavern's sign bracket"
+    }
+  ],
+  "modelsNote": "`models` entries are packed by tools/assets/fetch.mjs into the EKIT format src/world/assets.ts reads (header JSON + one float32 payload, one indexed part per material). Kit textures are converted like the ambientCG ones (ORM/ARM maps → the roughness channel only). Loaded once at boot by src/world/models/megakit.ts, then composed synchronously into the same per-material Build batches as the procedural geometry."
 }

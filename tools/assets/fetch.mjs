@@ -59,11 +59,13 @@ async function imagePage() {
   return page;
 }
 
-/** Resize `src` to at most `size` px on its long edge and re-encode as JPEG at quality `q`. */
-async function convertJpeg(src, dst, size, q) {
+/** Resize `src` to at most `size` px on its long edge and re-encode as JPEG at quality `q`.
+ *  `channel` (0/1/2) spreads one channel of a packed ORM/ARM map over RGB (→ a plain roughness map). */
+async function convertJpeg(src, dst, size, q, channel = -1) {
   const p = await imagePage();
-  const data = 'data:image/jpeg;base64,' + fs.readFileSync(src).toString('base64');
-  const out = await p.evaluate(async ([data, size, q]) => {
+  const mime = src.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const data = `data:${mime};base64,` + fs.readFileSync(src).toString('base64');
+  const out = await p.evaluate(async ([data, size, q, channel]) => {
     const img = new Image();
     img.src = data;
     await img.decode();
@@ -73,8 +75,14 @@ async function convertJpeg(src, dst, size, q) {
     const ctx = c.getContext('2d');
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0, c.width, c.height);
+    if (channel >= 0) {
+      const id = ctx.getImageData(0, 0, c.width, c.height);
+      const d = id.data;
+      for (let i = 0; i < d.length; i += 4) { const v = d[i + channel]; d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = 255; }
+      ctx.putImageData(id, 0, 0);
+    }
     return c.toDataURL('image/jpeg', q);
-  }, [data, size, q]);
+  }, [data, size, q, channel]);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.writeFileSync(dst, Buffer.from(out.slice(out.indexOf(',') + 1), 'base64'));
 }
@@ -298,6 +306,207 @@ async function fetchCharacters(entry) {
   }
 }
 
+// ---------------- model kits → EKIT (src/world/assets.ts `loadPackedKit`) ----------------
+
+/** Reads a .gltf (JSON + external .bin buffers, or a .glb) into {json, buffers[]}. */
+function readGltf(file) {
+  if (file.endsWith('.glb')) { const g = readGlb(file); return { json: g.json, buffers: [g.bin] }; }
+  const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const buffers = (json.buffers || []).map((b) => fs.readFileSync(path.join(path.dirname(file), decodeURIComponent(b.uri))));
+  return { json, buffers };
+}
+
+function gltfAccessor(g, i) {
+  const a = g.json.accessors[i];
+  const bv = g.json.bufferViews[a.bufferView];
+  const [Type] = COMP[a.componentType];
+  const n = NUM[a.type];
+  const buf = g.buffers[bv.buffer ?? 0];
+  const start = (bv.byteOffset ?? 0) + (a.byteOffset ?? 0);
+  const stride = bv.byteStride ? bv.byteStride / Type.BYTES_PER_ELEMENT : n;
+  const out = new Float32Array(a.count * n);
+  const view = new Type(buf.buffer, buf.byteOffset + start, (a.count - 1) * stride + n);
+  const norm = a.normalized ? { 5120: 127, 5121: 255, 5122: 32767, 5123: 65535 }[a.componentType] : 0;
+  for (let k = 0; k < a.count; k++) for (let c = 0; c < n; c++) { const v = view[k * stride + c]; out[k * n + c] = norm ? Math.max(-1, v / norm) : v; }
+  return out;
+}
+
+const M4 = {
+  mul(a, b) { const o = new Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; },
+  trs(n) {
+    if (n.matrix) return n.matrix;
+    const t = n.translation || [0, 0, 0], [x, y, z, w] = n.rotation || [0, 0, 0, 1], s = n.scale || [1, 1, 1];
+    const x2 = x + x, y2 = y + y, z2 = z + z, xx = x * x2, xy = x * y2, xz = x * z2, yy = y * y2, yz = y * z2, zz = z * z2, wx = w * x2, wy = w * y2, wz = w * z2;
+    return [(1 - (yy + zz)) * s[0], (xy + wz) * s[0], (xz - wy) * s[0], 0, (xy - wz) * s[1], (1 - (xx + zz)) * s[1], (yz + wx) * s[1], 0,
+      (xz + wy) * s[2], (yz - wx) * s[2], (1 - (xx + yy)) * s[2], 0, t[0], t[1], t[2], 1];
+  },
+  point(m, x, y, z) { return [m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]]; },
+  dir(m, x, y, z) { const v = [m[0] * x + m[4] * y + m[8] * z, m[1] * x + m[5] * y + m[9] * z, m[2] * x + m[6] * y + m[10] * z]; const l = Math.hypot(...v) || 1; return v.map((c) => c / l); },
+};
+
+/**
+ * Collects every primitive of a glTF scene as {mat, pos, nor, uv, idx} in world space (node transforms
+ * baked), keyed by the material name → our material id through `matMap` (a function).
+ */
+function gltfParts(g, matMap) {
+  const parts = [];
+  const walk = (i, parent) => {
+    const n = g.json.nodes[i];
+    const m = M4.mul(parent, M4.trs(n));
+    if (n.mesh !== undefined) {
+      for (const p of g.json.meshes[n.mesh].primitives) {
+        if ((p.mode ?? 4) !== 4) continue;
+        const matName = p.material !== undefined ? g.json.materials[p.material].name : 'default';
+        const mat = matMap(matName, p.material);
+        if (!mat) continue;
+        const pos = gltfAccessor(g, p.attributes.POSITION);
+        const nor = p.attributes.NORMAL !== undefined ? gltfAccessor(g, p.attributes.NORMAL) : null;
+        const uv = p.attributes.TEXCOORD_0 !== undefined ? gltfAccessor(g, p.attributes.TEXCOORD_0) : new Float32Array((pos.length / 3) * 2);
+        const idx = p.indices !== undefined ? gltfAccessor(g, p.indices) : Float32Array.from({ length: pos.length / 3 }, (_, k) => k);
+        const wpos = new Float32Array(pos.length), wnor = new Float32Array(pos.length);
+        for (let k = 0; k < pos.length; k += 3) {
+          const q = M4.point(m, pos[k], pos[k + 1], pos[k + 2]); wpos[k] = q[0]; wpos[k + 1] = q[1]; wpos[k + 2] = q[2];
+          if (nor) { const d = M4.dir(m, nor[k], nor[k + 1], nor[k + 2]); wnor[k] = d[0]; wnor[k + 1] = d[1]; wnor[k + 2] = d[2]; }
+        }
+        parts.push({ mat, pos: wpos, nor: nor ? wnor : null, uv, idx });
+      }
+    }
+    for (const c of n.children || []) walk(c, m);
+  };
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  for (const s of g.json.scenes[g.json.scene ?? 0].nodes) walk(s, I);
+  return parts;
+}
+
+/** Flat normals for a part that has none (indexed → per-face, re-expanded). */
+function flatNormals(part) {
+  const { pos, idx } = part;
+  const n = new Float32Array(pos.length);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    for (const i of [a, b, c]) { n[i] += nx; n[i + 1] += ny; n[i + 2] += nz; }
+  }
+  for (let i = 0; i < n.length; i += 3) { const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1; n[i] /= l; n[i + 1] /= l; n[i + 2] /= l; }
+  return n;
+}
+
+/** Packs {name → parts[]} into the EKIT container: 'EKIT', u32 header length, JSON header, float32 payload. */
+function packKit(pieces) {
+  const floats = [];
+  const push = (arr) => { const off = floats.length; for (const v of arr) floats.push(v); return { off, len: arr.length }; };
+  const header = { pieces: {} };
+  let totalTris = 0;
+  for (const [name, parts] of Object.entries(pieces)) {
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    let tris = 0;
+    const out = [];
+    for (const p of parts) {
+      for (let k = 0; k < p.pos.length; k += 3) for (let c = 0; c < 3; c++) { min[c] = Math.min(min[c], p.pos[k + c]); max[c] = Math.max(max[c], p.pos[k + c]); }
+      tris += p.idx.length / 3;
+      out.push({ mat: p.mat, pos: push(p.pos), nor: push(p.nor ?? flatNormals(p)), uv: push(p.uv), idx: push(p.idx) });
+    }
+    totalTris += tris;
+    header.pieces[name] = { min: min.map((v) => +v.toFixed(4)), max: max.map((v) => +v.toFixed(4)), tris, parts: out };
+  }
+  const json = JSON.stringify(header);
+  const head = Buffer.from(json + ' '.repeat((4 - ((8 + Buffer.byteLength(json)) % 4)) % 4), 'utf8');
+  const data = Buffer.from(new Float32Array(floats).buffer);
+  const buf = Buffer.alloc(8 + head.length + data.length);
+  buf.write('EKIT', 0, 'ascii');
+  buf.writeUInt32LE(head.length, 4);
+  head.copy(buf, 8);
+  data.copy(buf, 8 + head.length);
+  return { buf, totalTris };
+}
+
+async function fetchKitTextures(entry, dir, src, pageUrl) {
+  for (const [matId, maps] of Object.entries(entry.textures)) {
+    for (const [out, spec] of Object.entries(maps)) {
+      const [file, channel] = Array.isArray(spec) ? spec : [spec, -1];
+      const dst = path.join(root, entry.textureTarget, matId, `${out}.jpg`);
+      if (!fs.existsSync(dst) || FORCE) await convertJpeg(path.join(dir, file), dst, entry.textureSize, entry.q ?? 0.85, channel);
+      credits.push({ file: path.relative(path.join(root, 'public'), dst), url: pageUrl, author: src.author, licence: src.licence, bytes: fs.statSync(dst).size, note: `${entry.id} ${file} → ${out}` });
+    }
+  }
+}
+
+async function fetchGltfZipKit(entry) {
+  const src = manifest.sources[entry.source];
+  const target = path.join(root, entry.target);
+  const zip = await download(entry.url, `${entry.id}.zip`);
+  const dir = path.join(unzip(zip, path.join(CACHE, entry.id)), entry.dir ?? '');
+  const pieces = {};
+  const matMap = (name) => entry.materials[name] ?? null;
+  for (const name of entry.pieces) {
+    const parts = gltfParts(readGltf(path.join(dir, `${name}.gltf`)), matMap);
+    if (!parts.length) throw new Error(`${entry.id}: ${name} has no usable primitives`);
+    pieces[name] = parts;
+  }
+  const { buf, totalTris } = packKit(pieces);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, buf);
+  log(`${entry.id}: ${entry.pieces.length} pieces, ${totalTris} tris → ${entry.target} (${Math.round(buf.length / 1024)} KB)`);
+  credits.push({ file: entry.target.replace(/^public\//, ''), url: entry.page, author: src.author, licence: src.licence, bytes: buf.length, note: `${entry.pieces.length} MegaKit pieces, re-packed (EKIT)` });
+  await fetchKitTextures(entry, dir, src, entry.page);
+}
+
+async function fetchPolyhavenModel(entry) {
+  const src = manifest.sources[entry.source];
+  const target = path.join(root, entry.target);
+  const page = src.homeTemplate.replace(/{ASSET}/g, entry.id);
+  const info = await (await fetch(src.apiInfo.replace(/{ASSET}/g, entry.id))).json();
+  const author = Object.keys(info.authors || {}).join(', ') || src.author;
+  const files = await (await fetch(src.apiFiles.replace(/{ASSET}/g, entry.id))).json();
+  const g = files.gltf[entry.res ?? '1k'].gltf;
+  const dir = path.join(CACHE, `ph-${entry.id}`);
+  fs.mkdirSync(path.join(dir, 'textures'), { recursive: true });
+  const gltfFile = await download(g.url, `${entry.id}.gltf`);
+  fs.copyFileSync(gltfFile, path.join(dir, `${entry.id}.gltf`));
+  for (const [rel, spec] of Object.entries(g.include)) {
+    const got = await download(spec.url, path.basename(rel));
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.copyFileSync(got, path.join(dir, rel));
+  }
+  const gl = readGltf(path.join(dir, `${entry.id}.gltf`));
+  // one material id per glTF material: ph-<id> for the first, ph-<id>-<n> for the rest
+  const matIds = (gl.json.materials || []).map((m, i) => (i === 0 ? `ph-${entry.id}` : `ph-${entry.id}-${i}`));
+  const parts = gltfParts(gl, (_name, i) => (i === undefined ? `ph-${entry.id}` : matIds[i]));
+  const { buf, totalTris } = packKit({ [entry.id]: parts });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, buf);
+  log(`${entry.id}: ${totalTris} tris → ${entry.target} (${Math.round(buf.length / 1024)} KB)`);
+  credits.push({ file: entry.target.replace(/^public\//, ''), url: page, author, licence: src.licence, bytes: buf.length, note: `${entry.id} (${entry.res ?? '1k'} glTF), re-packed (EKIT)` });
+  // textures per material: diff / nor (glTF +Y) / rough (from the packed ARM's G channel, or a rough map)
+  (gl.json.materials || []).forEach((m, i) => {
+    const imgUri = (texIdx) => (texIdx === undefined ? null : decodeURIComponent(gl.json.images[gl.json.textures[texIdx].source].uri));
+    const pbr = m.pbrMetallicRoughness || {};
+    const maps = { diff: imgUri(pbr.baseColorTexture?.index), nor: imgUri(m.normalTexture?.index), rough: imgUri(pbr.metallicRoughnessTexture?.index) };
+    for (const [out, uri] of Object.entries(maps)) {
+      if (!uri) continue;
+      const dst = path.join(root, entry.textureTarget, matIds[i], `${out}.jpg`);
+      const channel = out === 'rough' ? 1 : -1;     // glTF packs roughness in G of the MR/ARM map
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      credits.push({ file: path.relative(path.join(root, 'public'), dst), url: page, author, licence: src.licence, bytes: 0, note: `${entry.id} ${path.basename(uri)} → ${out}`, convert: [path.join(dir, uri), dst, entry.textureSize, entry.q ?? 0.85, channel] });
+    }
+  });
+  for (const c of credits) if (c.convert) {
+    if (!fs.existsSync(c.convert[1]) || FORCE) await convertJpeg(...c.convert);
+    c.bytes = fs.statSync(c.convert[1]).size;
+    delete c.convert;
+  }
+}
+
+async function fetchModels() {
+  for (const entry of manifest.models || []) {
+    if (entry.kind === 'gltf-zip') await fetchGltfZipKit(entry);
+    else if (entry.kind === 'polyhaven') await fetchPolyhavenModel(entry);
+    else throw new Error(`unknown model kind ${entry.kind}`);
+  }
+}
+
 // ---------------- credits ----------------
 
 function writeCredits() {
@@ -319,12 +528,16 @@ ${rows.join('\n')}
 
 ## Not downloaded, and why
 
-* **Buildings and props are procedural geometry** (\`src/world/models.ts\`) textured with the CC0 PBR
-  materials above. Exploration merges every settlement mesh by *material instance*
-  (\`src/exploration/settlements.ts\`), and \`WorldService.spawnModel\` is synchronous, so a streamed GLB
-  cannot be part of that bake; procedural geometry also keeps the metre footprints \`src/exploration/layout.ts\`
-  assumes. KayKit's Medieval Builder Pack (CC0, downloaded and inspected) is hex-tile stylised and does not
-  match the PBR/painterly target.
+* **Alpine buildings are procedural geometry** (\`src/world/models/*\`) textured with the CC0 PBR
+  materials above: the Blockbau log house, Stadel, Spycher, Romanesque church, castle and letzi have no
+  CC0 counterpart. The **town house, the village tavern, the wagon and the crates are composed from the
+  Quaternius Medieval Village MegaKit** (\`assets/models/buildings/megakit.bin\`, 48 of its 176 glTF pieces
+  re-packed) and **small props are Poly Haven scans** (\`assets/models/props/*.bin\`). Both are loaded once at
+  boot and composed *synchronously* into the same per-material batches as the procedural geometry, so
+  exploration's per-POI merge (\`src/exploration/settlements.ts\`) still sees one mesh per material.
+  Not used: the kit's high-poly stone corners/door frames (2–3k tris each), Poly Haven's barrels set, basket,
+  stump and spinning wheel (0.6–1.4 MB of geometry each — too heavy for dressing), and KayKit's Medieval
+  Builder Pack (hex-tile stylised).
 * **Character meshes are procedural too** (\`src/world/characters.ts\`), skinned to a skeleton retargeted to
   adult human proportions; only the *animation* is third-party (KayKit Rig_Medium, CC0), re-packed to the
   31 clips the game maps onto \`CharacterAnim\`. Rigged CC0 humans that exist (KayKit Adventurers,
@@ -341,6 +554,7 @@ try {
   if (!only || only === 'textures') for (const t of manifest.textures) await fetchTexture(t);
   if (only === 'terrain') for (const t of manifest.terrain) await fetchTexture(t); // skipped by default: see manifest note
   if (!only || only === 'characters') for (const c of manifest.characters) await fetchCharacters(c);
+  if (!only || only === 'models') await fetchModels();
   if (!only) writeCredits();
   else log('partial run: CREDITS-models.md not rewritten');
 } finally {
