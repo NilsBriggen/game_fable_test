@@ -174,9 +174,13 @@ const HABSBURG_TINTS: [number, number, number][] = [[1.35, 0.82, 0.78]];   // th
 
 // Triangle counts after conversion: Peasant Man 4.6 k, Peasant Girl ~5 k, Castle Guards 4.5 k, Sporty Granny
 // 10.7 k (converted, but a cartoon tracksuit — not shipped), Vanguard 11.4 k, Knight 13.1 k, Ely 14.8 k, Kachujin 12.6 k. Remy/Brian/Leonard/Roth (35–50 k) and
-// Timmy (31 k) were converted and judged too heavy for a crowd (and modern-dressed); they are not shipped.
+// Timmy (31 k) were converted and judged too heavy for a crowd (and modern-dressed); they are not shipped. The
+// variety pass found no further male civilian body ≤ 8 k (Steve 55 k, Big Vegas 7 k is an Elvis, Prisoner a zombie),
+// so men differ by dye and headgear only; Erika Archer (20 k) is the second woman.
 const PEASANT: Body = { id: 'peasant-man', height: 1.73, tints: MEN_TINTS };
 const GIRL: Body = { id: 'peasant-girl', height: 1.62, tints: MEN_TINTS };
+/** 20.5 k tris — heavy, but women are a fifth of a crowd; the dark leathers take the dye like cloth */
+const ERIKA: Body = { id: 'erika-archer', height: 1.66, tints: MEN_TINTS };
 const GUARD1: Body = { id: 'castle-guard-01', height: 1.78 };
 const GUARD2: Body = { id: 'castle-guard-02', height: 1.78, tints: HABSBURG_TINTS };
 const KNIGHT: Body = { id: 'knight-d-pelegrini', height: 1.82 };
@@ -194,7 +198,7 @@ export const BODIES: Record<string, Body[]> = {
   merchant: [PEASANT],
   innkeeper: [PEASANT],
   'toll-collector': [PEASANT],
-  'woman-peasant': [GIRL],
+  'woman-peasant': [GIRL, GIRL, ERIKA],
   'militia-spear': [GUARD1],
   'militia-halberd': [GUARD1],
   'militia-crossbow': [GUARD1],

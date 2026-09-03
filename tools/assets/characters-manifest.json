@@ -153,6 +153,14 @@
       "use": "armoured fighter: raubritter",
       "file": "assets/characters/models/vanguard-t-choonyung.glb",
       "size": 10560904
+    },
+    {
+      "id": "erika-archer",
+      "name": "Erika Archer",
+      "tex": 512,
+      "use": "hooded woman in dark leathers and a sash: second woman-peasant body (re-dyed per seed)",
+      "file": "assets/characters/models/erika-archer.glb",
+      "size": 6343176
     }
   ],
   "clips": {
@@ -225,5 +233,5 @@
       "Standing_Block_Idle": 61972
     }
   },
-  "notShipped": "Converted and inspected but not shipped (too heavy for a crowd / modern dress): Remy 35 k tris, Brian 43 k, Leonard 50 k, Roth 50 k, Timmy 31 k; Ely 14.8 k and Kachujin 12.6 k held back until player creation carries a sex. Sporty Granny 10.7 k (cartoon tracksuit)."
+  "notShipped": "Converted and inspected but not shipped (too heavy for a crowd / modern dress): Remy 35 k tris, Brian 43 k, Leonard 50 k, Roth 50 k, Timmy 31 k; Ely 14.8 k and Kachujin 12.6 k held back until player creation carries a sex. Sporty Granny 10.7 k (cartoon tracksuit). Checked for the variety pass and rejected: Steve 54.7 k tris, Big Vegas 7.2 k (an Elvis), Prisoner B Styperek 12 k (a zombie), Maw J Laygo 13.9 k (antlered monster), Medea 17.7 k (exports at 0.16 m, modern leotard). No further male civilian body ≤ 8 k tris exists in the dataset's plausible set."
 }

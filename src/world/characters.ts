@@ -235,7 +235,11 @@ function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number]):
       {
         vec3 c = diffuseColor.rgb;
         float warm = c.r - c.b;
-        float skin = step(c.g, c.r) * step(c.b, c.g) * smoothstep(0.06, 0.16, warm) * (1.0 - smoothstep(0.42, 0.6, warm)) * smoothstep(0.22, 0.38, c.r);
+        float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+        // skin: warm mid-tones (ruddy cheeks included); grey: hair, beards, iron — neither takes the dye
+        float skin = step(c.g, c.r) * step(c.b, c.g) * smoothstep(0.03, 0.1, warm) * (1.0 - smoothstep(0.55, 0.75, warm)) * smoothstep(0.16, 0.3, c.r);
+        float grey = 1.0 - smoothstep(0.04, 0.1, sat);
+        skin = max(skin, grey);
         diffuseColor.rgb = mix(c * uDye, c, skin);
       }`);
   };
