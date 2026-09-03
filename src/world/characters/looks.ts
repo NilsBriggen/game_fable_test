@@ -164,7 +164,12 @@ export interface Body {
   tints?: [number, number, number][];
 }
 
-const MEN_TINTS: [number, number, number][] = [[1, 1, 1], [0.82, 0.78, 0.74], [0.9, 0.94, 1.02], [1.04, 0.96, 0.86], [0.78, 0.82, 0.88], [0.96, 0.9, 0.82]];
+/** Cloth dyes per seed (skin is exempted in the shader): undyed, walnut brown, woad blue, madder red, grey-blue,
+ *  weld yellow, moss green, dark, oxblood, bleached. */
+const MEN_TINTS: [number, number, number][] = [
+  [1, 1, 1], [0.62, 0.5, 0.4], [0.55, 0.65, 0.95], [1.05, 0.55, 0.5], [0.6, 0.66, 0.78],
+  [1.05, 0.95, 0.55], [0.6, 0.75, 0.5], [0.5, 0.48, 0.5], [0.7, 0.4, 0.42], [1.15, 1.1, 1.0],
+];
 const HABSBURG_TINTS: [number, number, number][] = [[1.35, 0.82, 0.78]];   // the guard's dark livery pushed toward Habsburg red
 
 // Triangle counts after conversion: Peasant Man 4.6 k, Peasant Girl ~5 k, Castle Guards 4.5 k, Sporty Granny

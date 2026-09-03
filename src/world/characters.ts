@@ -30,6 +30,7 @@ import type { CharacterAnim, CharacterHandle } from '@core/services';
 import { hashString } from '@core/rng';
 import { loadRigAnims, type RigAnims } from './assets';
 import { characterMaterial, loadCharacterModel, modelClip, type CharacterLayer, type CharacterModel } from './characterAssets';
+import { registerCsmMaterial } from './shadowCsm';
 import { MOUNT_Y, TARGET, buildLookGeometry, buildHeldKit, type Bind, type LookGeometry } from './characters/body';
 import { LOOKS, LOOK_VARIANTS, bodyFor, isUniform, lookFor, varyLook, type Body, type Look, type WeaponKind } from './characters/looks';
 
@@ -220,6 +221,29 @@ export function mixamoClipFor(anim: CharacterAnim, weapon: WeaponKind, seed: num
   }
 }
 
+/** A per-instance copy of a body material whose cloth is dyed by `tint` while skin-toned texels keep their
+ *  colour (a plain colour multiply would recolour faces and hands too: Mixamo bodies are one material).
+ *  Skin is detected per texel as warm mid-tones (r > g > b, moderate saturation). Material.clone() does not
+ *  carry the CSM hook, so the clone is registered again. */
+function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number]): MeshStandardMaterial {
+  const c = mat.clone();
+  c.onBeforeCompile = (shader) => {
+    shader.uniforms.uDye = { value: new Vector3(tint[0], tint[1], tint[2]) };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('uniform vec3 diffuse;', 'uniform vec3 diffuse;\nuniform vec3 uDye;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+      {
+        vec3 c = diffuseColor.rgb;
+        float warm = c.r - c.b;
+        float skin = step(c.g, c.r) * step(c.b, c.g) * smoothstep(0.06, 0.16, warm) * (1.0 - smoothstep(0.42, 0.6, warm)) * smoothstep(0.22, 0.38, c.r);
+        diffuseColor.rgb = mix(c * uDye, c, skin);
+      }`);
+  };
+  c.dispose = () => {};   // shared textures; exploration disposes NPC materials on freeze
+  registerCsmMaterial(c);
+  return c;
+}
+
 /** Where the procedural weapon (grip at the origin, blade along +Y) sits in the Mixamo `RightHand` bone's
  *  frame, and the shield board in `LeftForeArm`'s — tuned on the sheet renders. */
 const HAND_R_FRAME = { pos: new Vector3(0, 0.07, 0.0), quat: new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2) };
@@ -366,11 +390,7 @@ class Character implements CharacterHandle {
       m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
       if (tint) {
         const mats = Array.isArray(m.material) ? m.material : [m.material];
-        const cloned = mats.map((mat) => {
-          const c = (mat as MeshStandardMaterial).clone();
-          if (c.color) c.color.multiply(new Color(tint[0], tint[1], tint[2]));
-          return c;
-        });
+        const cloned = mats.map((mat) => tintedClone(mat as MeshStandardMaterial, tint));
         m.material = Array.isArray(m.material) ? cloned : cloned[0];
       }
       this.meshes.push(m);
