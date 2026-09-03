@@ -385,4 +385,13 @@ export function assertSaveShape(save: unknown): asserts save is SaveFile {
   if (!world || !Array.isArray(world.entities)) throw new Error('Invalid save: world.entities is not an array');
   const rngState = s.rngState as { world?: unknown } | undefined;
   if (!rngState || !Array.isArray(rngState.world)) throw new Error('Invalid save: rngState.world is not an array');
+  // core fields and per-entity shape, so a pasted file fails at import rather than inside a later load
+  if (typeof s.chapter !== 'string') throw new Error('Invalid save: missing chapter');
+  if (typeof s.playerId !== 'number') throw new Error('Invalid save: missing numeric playerId');
+  if (!Array.isArray(s.party)) throw new Error('Invalid save: party is not an array');
+  if (!s.quests || typeof s.quests !== 'object') throw new Error('Invalid save: quests is not an object');
+  for (const e of world.entities as unknown[]) {
+    const ent = e as { id?: unknown; components?: unknown };
+    if (!ent || typeof ent.id !== 'number' || !ent.components || typeof ent.components !== 'object') throw new Error('Invalid save: malformed entity');
+  }
 }

@@ -218,6 +218,15 @@ export class World {
   }
 
   clear(): void {
+    // fire remove listeners like destroy() does: a load must let mesh/collider owners release per-entity
+    // resources instead of leaving stale objects in the scene (bughunt party-save #1)
+    if (this.removeListeners.length) {
+      for (const id of [...this.alive]) {
+        for (const [name, store] of this.stores) {
+          if (store.has(id)) { const t = registry.get(name); if (t) for (const l of this.removeListeners) l(id, t); }
+        }
+      }
+    }
     this.alive.clear();
     this.tags.clear();
     this.stores.clear();

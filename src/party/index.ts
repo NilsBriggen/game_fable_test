@@ -467,11 +467,14 @@ export class PartyServiceImpl implements PartyService {
       if (!rangedDef?.weapon?.ammo || rangedDef.weapon.ammo !== def.id) return false;
     }
     if (targetSlot === 'offHand') {
-      const mainInst = eq.mainHand ? inv.items.find((i) => i.instanceId === eq.mainHand) : undefined;
-      const mainDef = mainInst ? this.content.items.get(mainInst.defId) : undefined;
-      if (mainDef?.weapon?.hands === 2) return false;
+      // a two-handed weapon in EITHER hand slot (halberd, or a crossbow/bow in `ranged`) rules out a shield
+      for (const held of [eq.mainHand, eq.ranged]) {
+        const inst = held ? inv.items.find((i) => i.instanceId === held) : undefined;
+        const hdef = inst ? this.content.items.get(inst.defId) : undefined;
+        if (hdef?.weapon?.hands === 2) return false;
+      }
     }
-    if (targetSlot === 'mainHand' && def.weapon?.hands === 2 && eq.offHand) {
+    if ((targetSlot === 'mainHand' || targetSlot === 'ranged') && def.weapon?.hands === 2 && eq.offHand) {
       delete eq.offHand;
       this.bus.emit('equipped', id, 'offHand', null); // fix round 1, issue 14 (probe H): UI must hear the auto-clear
     }
