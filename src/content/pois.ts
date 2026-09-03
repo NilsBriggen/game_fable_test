@@ -15,8 +15,8 @@ type Pop = Record<string, number>;
 
 const RADIUS_BY_KIND: Partial<Record<PoiKind, number>> = {
   village: 90, town: 160, castle: 90, church: 40, chapel: 35, monastery: 110, alp: 55, pass: 70, bridge: 45,
-  meadow: 80, landmark: 70, camp: 40, ruin: 45, port: 70, viewpoint: 90, battlefield: 130, mill: 40, hut: 30,
-  wall: 55, cross: 20,
+  meadow: 80, landmark: 50, camp: 40, ruin: 45, port: 70, viewpoint: 90, battlefield: 130, mill: 40, hut: 25,
+  wall: 40, cross: 15,
 };
 const FASTTRAVEL_BY_KIND: Partial<Record<PoiKind, boolean>> = {
   village: true, town: true, castle: true, church: false, chapel: false, monastery: true, alp: true, pass: true,
@@ -334,7 +334,7 @@ const invented_: PoiDef[] = [
     note: 'Bannalp is a real Nidwalden alp name (LORE.md §4 names it as a candidate); this specific hut and its exact position are the builder\'s invention.',
     description: 'A high grazing alp above Wolfenschiessen, its two herders\' hut roofed in split shingle.',
   }),
-  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', -20, -140, {
+  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', -28, -148, {
     kind: 'cross', historical: 'invented',
     note: 'A wayside cross on a lake-shore footpath — LORE.md §4\'s explicitly invented minor-POI category; no specific attested cross is claimed.',
     description: 'A weathered wooden wayside cross where the shore path narrows above the water.',
@@ -362,7 +362,7 @@ const invented_: PoiDef[] = [
     note: 'A hermit\'s cell above the lake — LORE.md §4\'s invented minor-POI category; lay hermits (Klausner) attached to no house were an attested medieval phenomenon in general, if not this specific man.',
     description: 'A one-room stone cell cut into the cliff above the shore, home to a solitary Klausner.',
   }),
-  invented('poi.fischerhuetten-gersau', "Fishermen's huts", 'gersau', 100, 10, {
+  invented('poi.fischerhuetten-gersau', "Fishermen's huts", 'gersau', 100, 18, {
     kind: 'hut', historical: 'invented',
     population: { fisher: 2 },
     note: "Fishermen's huts — LORE.md §4's invented minor-POI category; lake-shore fishing is independently attested for Gersau.",
@@ -374,7 +374,7 @@ const invented_: PoiDef[] = [
     note: 'A water mill on the Sarner Aa — LORE.md §4\'s invented minor-POI category; water-milling was universal period technology.',
     description: 'A creaking wheel and millhouse on the Sarner Aa, grinding grain for the Alpnach villages.',
   }),
-  invented('poi.steinbruch-axen', 'Steinbruch am Axen', 'sisikon', 340, 180, {
+  invented('poi.steinbruch-axen', 'Steinbruch am Axen', 'sisikon', 284, 204, {
     kind: 'camp', historical: 'invented',
     population: { peasant: 1 },
     note: 'A stone quarry on the Axen cliffs — LORE.md §4\'s invented minor-POI category (schema has no dedicated "quarry" kind, so this is a `camp`).',

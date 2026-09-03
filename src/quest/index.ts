@@ -348,6 +348,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
       await job();
     }
   }
+  dialogueExists(dialogueId: string): boolean {
+    return this.ctx.content.dialogues.has(dialogueId);
+  }
+
   async runDialogue(dialogueId: string, speakerEntity?: EntityId, questId?: string): Promise<DialogueOutcome> {
     this.activeDialogueId = dialogueId;
     this.sceneDepth++;

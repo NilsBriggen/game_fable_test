@@ -329,7 +329,7 @@ export class NpcSystem {
     const d = dist2(t.x, t.z, playerPos.x, playerPos.z);
     if (d > 60) { t.x = playerPos.x - 2; t.z = playerPos.z + 1.5; t.y = this.worldService.heightAt(t.x, t.z); return; }
     if (d < 2.5) return;
-    const slot = (id % 3) - 1; // spread three companions across the player's back
+    const slot = ((this.world.get(id, PartyMember)?.slot ?? 1) % 3) - 1; // party slot → left/centre/right behind the player
     const dest = { x: playerPos.x + slot * 1.8, z: playerPos.z + 2.2 };
     walkToward(t, dest, Math.min(6.5, 2 + d), dt, this.worldService);
   }

@@ -27,15 +27,17 @@ export interface LayoutInput {
 
 const MAX_SLOPE_DY = 1.6; // ≈ 28° over a 3 m probe step: buildings must not sit on ground the player cannot walk (40°)
 
-function isGentle(x: number, z: number, probe: HeightProbe): boolean {
+function isGentle(x: number, z: number, probe: HeightProbe, maxDy = MAX_SLOPE_DY): boolean {
   const h0 = probe.heightAt(x, z);
   const h1 = probe.heightAt(x + 3, z);
   const h2 = probe.heightAt(x, z + 3);
-  return Math.abs(h1 - h0) < MAX_SLOPE_DY && Math.abs(h2 - h0) < MAX_SLOPE_DY;
+  return Math.abs(h1 - h0) < maxDy && Math.abs(h2 - h0) < maxDy;
 }
 
 class Builder {
   readonly out: PlacedModel[] = [];
+  /** camps may use ground up to ~40° */
+  steepOk = false;
   constructor(private cx: number, private cz: number, private probe: HeightProbe, private allowWater = false) {}
 
   private overlaps(modelId: string, x: number, z: number): boolean {
@@ -62,7 +64,7 @@ class Builder {
       for (const da of [0, 0.52, -0.52, 1.05, -1.05, 1.57, -1.57]) {
         const a = baseAngle + da, r = baseR * shrink;
         const x = this.cx + Math.sin(a) * r, z = this.cz + Math.cos(a) * r;
-        if (this.probe.isWater(x, z) || !isGentle(x, z, this.probe) || this.overlaps(modelId, x, z)) continue;
+        if (this.probe.isWater(x, z) || !isGentle(x, z, this.probe, this.steepOk ? 2.5 : MAX_SLOPE_DY) || this.overlaps(modelId, x, z)) continue;
         this.out.push({ modelId, x, z, yaw: opts.yaw, scale: opts.scale, variant: opts.variant });
         return true;
       }
@@ -197,8 +199,11 @@ function layoutPort(b: Builder, out: Builder, rng: Rng, yaw: number, pop?: Recor
     const dz = (i - (boats - 1) / 2) * 1 + Math.cos(yaw + Math.PI / 2) * 10;
     out.add('boat', dx, dz, { yaw: yaw + rng.next() * 0.3 });
   }
-  b.add('house.blockbau', -12, -6, { yaw, variant: 'small' });
-  b.add('cross', 12, 8, { yaw });
+  // the quay hut goes on the landward side: try successively further from the water
+  const inland = yaw - Math.PI / 2;
+  let placed = false;
+  for (let d = 12; d <= 48 && !placed; d += 12) placed = b.add('house.blockbau', Math.sin(inland) * d - 6, Math.cos(inland) * d + 4, { yaw, variant: 'small' });
+  for (let d = 10; d <= 40; d += 10) if (b.add('cross', Math.sin(inland) * d + 10, Math.cos(inland) * d - 4, { yaw })) break;
 }
 
 function layoutSingle(b: Builder, modelId: string, opts: { yaw?: number; variant?: string } = {}): void {
@@ -206,8 +211,10 @@ function layoutSingle(b: Builder, modelId: string, opts: { yaw?: number; variant
 }
 
 function layoutCamp(b: Builder): void {
+  b.steepOk = true; // camps sit on scree and forest slopes
   b.add('campfire', 0, 0);
   b.add('tent', 6, 2, { yaw: 0.4 });
+  b.steepOk = false;
 }
 
 function layoutWall(b: Builder, yaw: number): void {
