@@ -3,7 +3,7 @@
   "wave": 1,
   "waves": {
     "1": {
-      "status": "in-progress",
+      "status": "save 9, party 8 passed; world in art/geometry rework",
       "modules": [
         "core",
         "world",
@@ -12,14 +12,14 @@
       ]
     },
     "2": {
-      "status": "in-progress",
+      "status": "passed (exploration 8, combat 8)",
       "modules": [
         "exploration",
         "combat"
       ]
     },
     "3": {
-      "status": "in-progress (quest started early; ui + act1 content after exploration)",
+      "status": "passed (quest 8, act1 8, ui 8)",
       "modules": [
         "quest",
         "ui",
@@ -121,13 +121,17 @@
     },
     "ui": {
       "owner": "integrator (fixes)",
-      "status": "critic-round-3",
-      "score": 7,
+      "status": "passed",
+      "score": 8,
       "fixRounds": 2,
       "openIssues": [
-        "player-turn HUD frame pending capture (engine stepAi seam fixed)"
+        "ability icons: three bare circles",
+        "enemy inspect card / reaction prompt not framed",
+        "world does not consume quality/shadow/view settings",
+        "creation preview not from party.derived",
+        "trade stock not per merchant"
       ],
-      "notes": "critic 6\u21927; all 26 findings fixed; one capture outstanding"
+      "notes": "16 tests + 29 critic probes; critic 6\u21927\u21928"
     },
     "act1-content": {
       "owner": "builder:quest",

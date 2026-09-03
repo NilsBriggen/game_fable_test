@@ -1,81 +1,83 @@
-# Wave 3 — ui — critic score (round 2/3)
+# Wave 3 — ui — critic score (round 3/3, final)
 
 Reference: BG3 combat HUD clarity + Skyrim menus (RUBRIC.md row "ui")
-Code reviewed: HEAD `73afac2` (fix commits `77e2e7b` "UI fix round 1 (integrator)", `df0e965` "Flee button placement, closeAll before load, game-over panel restored", `73afac2` "legible initiative chips, styled Flee confirm, no empty preview rule, autosave never overwritten manually; harness waitPlayerTurn scenario"); `src/ui/**`, `index.html` clean in the working tree (dirty files are `src/world/*` WIP by the world builder). Diffs `ef28447..ffa5ede`, `ffa5ede..df0e965` and `df0e965..73afac2` read in full for `src/ui/{index,combatUi,dialogueUi,helpers,menus}.ts`, `ui.css`, `src/core/{context,services}.ts`, `src/quest/dialogue.ts`, `src/exploration/interact.ts`, `src/combat/render.ts` (241 insertions / 51 deletions).
-Harness run (round 2, `--out tools/harness/out/ui2/<id>`, one at a time behind the lock): `combat-brunnen-quay` (22:07:48Z, `state: combat`, 352 calls, 6.04 M tris, 315 MB, `errors: []`, `warnings: []`; harness `pass:false` only on the *world's* triangle budget 6.0 M > 3.0 M and SwiftShader p95 — `noErrors: true`); `dialogue-gessler-hat` (00:08:49Z, `state: dialogue`, 413 calls, 5.17 M tris, 236 MB, `errors: []`, `warnings: []`; harness `pass:false` again only on the world's triangle budget and SwiftShader p95 13.6 s — `noErrors: true`); `combat-brunnen-quay-turn` (01:09:06Z, `state: combat`, 378 calls, 3.88 M tris, 262 MB, `errors: []`, `warnings: []`; `pass:false` only on the world's triangle budget and SwiftShader p95 — `noErrors: true`; first attempt at 23:57Z was killed while queued behind two other builders' runs, relaunched once). Round-1 captures of `title`, `menu-inventory`, `menu-map` (20:45–20:58Z) stand — no code touching those screens changed except the purse legend and the save-slot styling (both verified in code). Renderer: SwiftShader (SOFTWARE).
-Checks (verbatim, re-run at `73afac2`):
+Code reviewed: HEAD `36b14c3` ("Combat: stepAi advances to the next unit between turns (harness waitPlayerTurn)"). `src/ui/**` and `index.html` are byte-identical to `73afac2` (`git diff 73afac2..HEAD --stat -- src/ui index.html` → empty) and clean in the working tree; the only change since round 2 is the one-line engine seam fix I asked for (`engine.ts` `stepAi()`: `if (!u) { if (this.phase === 'active') this.advance(); return; }`). Round-2 verification of every fix (diffs `ef28447..ffa5ede`, `ffa5ede..df0e965`, `df0e965..73afac2`) therefore stands unchanged and is reproduced in the tables below.
+Harness run (round 3): `combat-brunnen-quay-turn` captured by the integrator at `tools/harness/out/ui3/combat-brunnen-quay-turn/` (`generatedAt 2026-09-03T01:47:58Z`, `state: combat`, `pass: true`, `errors: []`, `warnings: []`, 440 draw calls, 1.39 M tris, 257 MB, `budget.noErrors: true`; only `frameP95` is red, which is SwiftShader). Round-2 captures `ui2/combat-brunnen-quay` (22:07Z), `ui2/dialogue-gessler-hat` (00:08Z), `ui2/combat-brunnen-quay-turn` (01:09Z) and round-1 `title` / `menu-inventory` / `menu-map` / `combat-morgarten-setup` stand — all `errors: []`, `warnings: []`. Renderer throughout: `Google Inc. (Google) / ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)` (SOFTWARE).
+Checks (verbatim, re-run at `36b14c3`):
 - `npx vitest run src/ui` → `Test Files  1 passed (1)` / `Tests  16 passed (16)`.
 - `npx tsc --noEmit | grep -E 'src/ui|index.html'` → no lines.
-- `node tools/check-imports.mjs` → `imports ok` (at `73afac2`; the transient `src/world/models.test.ts` violation seen at `3072208` is gone).
-- Critic probes `npx vitest run --config tools/critic/probes/ui/vitest.config.ts` → first run `3 failed | 26 passed` — exactly the three tests named `DEFECT:` (−0 d, NaN d, double S chip), i.e. the defects are gone; inverted to `FIXED r2:` assertions → `Tests  29 passed (29)`.
-- Chromium cascade check re-run against the new `ui.css` (`<div id="dialogue-root" hidden>`): `{"dialogueDisplay":"none","dialogueRect":0,"hudDisplay":"none","elementAtBottomCentre":""}` (round 1: `flex`, 197 px, `#dialogue-root` under the cursor).
-- Banned-word grep over `src/ui/*.ts`, `ui.css`, `index.html`: still only the `Canton` type annotations; the new strings ("The field is lost", "Your company lies in the mud. The chroniclers will not record their names.", "Flee the field? …", "Rest at the inn", "Trade at the market", "Take the boat", purse legend "Pfund ℔ · Schilling s · Pfennig d") are clean.
+- `node tools/check-imports.mjs` → `imports ok`.
+- Critic probes `npx vitest run --config tools/critic/probes/ui/vitest.config.ts` → `Tests  29 passed (29)` (`tools/critic/probes/ui/helpers-edge.test.ts`: currency sign/fraction/non-finite, rotated-grid picking at yaw ±π/2, π, 0.3, 2.9 against the engine's `cellToWorldXZ` plus the 0.49/0.51 boundary, compass seam and single S chip, initiative chips with dead/routed/missing/duplicate ids, 7-slot save model with out-of-range/duplicate metas, hit-chance formatting bounds).
+- Chromium cascade check (`/opt/pw-browsers/chromium`, page built from `ui.css` + `<div id="dialogue-root" hidden>`) → `{"dialogueDisplay":"none","dialogueRect":0,"hudDisplay":"none","elementAtBottomCentre":""}`.
+- Banned-word grep over `src/ui/*.ts`, `ui.css`, `index.html` (`switzerland|swiss|canton|plate harness|handgun|wheellock|windlass|kapellbr|potato|tomato|maize|tobacco|chocolate|pike|musket|gunpowder`, case-insensitive) → only the `Canton` *type* annotations in `menus.ts`; no player-facing hit. "the Länder", "the Waldstätte", "Landsgemeinde", the §7 item names and the `Pfund ℔ · Schilling s · Pfennig d` legend are all in register.
 
-## Score: 7/10   (pass bar 8)  → FAIL (round 2/3) — one narrowly-scoped fix round left
+## Score: 8/10   (pass bar 8)  → PASS (round 3/3)
 
-Round 1 → 2: 6 → 7. Every round-1 issue (18), every interim finding (3) and every round-2 finding (5) is fixed in code at `73afac2` and verified against the diff (tables below); the Chromium cascade check returns `display:none` for the hidden dialogue root; the three defect probes flipped; `src/ui` tests, tsc, imports and the 29 probes are green; four round-2 harness frames report `errors: []`, `warnings: []`; the dialogue frame confirms the skip-hint fix and the new `waitPlayerTurn` frame confirms the initiative strip is now legible. **One thing keeps it under 8, and it is the rubric's own condition — score on harness-captured evidence**: the player-turn half of the BG3 reference (unit card with HP/morale/status/defense/weapon, AP pips, `Move x/y m`, hit % with named Edge/Burden sources, formation chip, ability bar with 1-9 hotkeys, End Turn, Flee, reaction prompt, enemy inspect card) has still never been photographed, because both Brunnen scenarios stop on a between-turns seam (`activeUnit: null`) that the new `waitPlayerTurn` loop cannot get past — `stepAi()` is a no-op with no active unit. This is a combat-engine/harness seam, not a UI defect; the UI code for all of it is present and reads the right fields (`combatUi.ts:117-231`). There is no other open item above "minor".
+6 → 7 → 8. The round-3 frame finally photographs the player-turn HUD, and it meets the BG3 clarity bar: on Kuoni Imhof's turn every element the rubric names is on screen, legible at 1080p, and nothing overlaps anything — turn order with the active chip ringed, action/bonus/reaction pips, movement in metres, hit chance with its Edge source named, formation status (none applicable here, code-verified), objectives, log, ability bar with hotkeys, End Turn and Flee. Every rubric 8-bar clause is now met on harness-captured evidence: every screen readable (title, inventory, map, dialogue, deploy, active combat), no overlapping text in any of the eight frames, hover previews in combat (the card's `vs Toll Collector (1d8): 91% hit — Edge: flanked` line is the same `previewAttack` path the mouse hover drives), map with markers, save/load with thumbnails. Zero console errors and zero page errors in every scenario that exercises the module. LORE compliance clean. The 22 round-1 defects I found in code (dialogue panel never hiding, combat panels never hiding, game-over soft-lock, hotkeys on the title screen, `[NN%]` without the skill, unreachable trade/rest, listener leaks, …) and the eight round-2 findings are all fixed and verified in the diff; the three probe-documented helper defects flipped. What separates this from a 9 is polish, not correctness: three of the eight ability icons are the same bare circle, the enemy inspect card and the reaction prompt are code-verified but never framed, and the settings panel still promises world-side changes the world module does not consume.
 
-**Exactly what remains for round 3 (pass on completion):**
-1. One harness frame on a player-controlled turn. Cheapest fix (combat owner, one line): in `engine.ts` `stepAi()`, replace `if (!u) return;` with `if (!u) { this.advance(); return; }` — `advance()` then picks the next unit, stops on Kuoni with `phase:'active'` and emits the view the HUD needs; the existing `combat-brunnen-quay-turn` scenario will capture it unchanged. (Alternative, harness-only: have `waitPlayerTurn` submit a real command that calls `advance()` when `activeUnit` is null.) Then re-run `combat-brunnen-quay-turn` and hover-check nothing else; the frame must show the unit card (status chips, `Defense N · weapon`), AP pips, `Move`, `vs <enemy>: NN% hit — Edge: …; Burden: …`, ability bar with hotkey numbers, End Turn and Flee.
-2. Nothing else. (Minor items below are recorded, not gating.)
+## What the round-3 frame shows (`ui3/combat-brunnen-quay-turn.png`, Kuoni Imhof's turn, round 2, 0 errors)
 
-## Round-1 issues → status
+- **Initiative strip** (top-centre, parchment panel): five 64 px chips — S "Säumer of th…", **K "Kuoni Imhof" ringed gold** (active), T "The elder's man", H "Habsburg Fo…", T "Toll Collector"; player chips green, Habsburg red; names in ink, readable. Truncation only on the two longest names.
+- **Unit card** (bottom-left, 280 px): "Kuoni Imhof" with a green *player* badge; `Defense 11 · Spiess (1d8, reach 2)`; HP bar 32/32 (red) and morale bar 42/42 (blue) with numerals; four stance buttons with **Neutral** highlighted; `Action ● Bonus ● Reaction ●` pips all filled; `Move 9.0/9.0m`; the preview rule `vs Toll Collector (1d8): **91% hit**` with `Edge: flanked` beneath — hit chance with a named Edge source, exactly the BG3 idiom. Status chips and the formation chip are absent because Kuoni has no status and no adjacent polearm (`combatUi.ts:172-179` render them when present; the Morgarten Haufen case is unit-tested in the combat module).
+- **Ability bar** (bottom-centre): eight 48 px slots with hotkey numerals 1–8 in the corner; tooltips (name, cost, range, description) appear on hover (`combatUi.ts:199-213`). Icons are ink-line glyphs; slots 3, 4 and 6 are the same bare circle — see polish item 1.
+- **End Turn (Space)** and **Flee** bottom-right, side by side (`.cbt-end-turn` right 14 px, `.cbt-flee` right 190 px); Flee opens the parchment `showConfirm`.
+- **Objectives** top-left ("⚑ Defeat all enemies"), **Log** top-right ending in "Kuoni Imhof's turn." — twelve lines at 12 px, all legible.
+- Layout: the four corner panels and the bottom bar leave the whole centre of the frame — the grid, the units and their floating HP/morale sprites — unobstructed; nothing overlaps. The floating world (no ground under the quay, house and pier in mid-air) is the world-look builder's WIP terrain material, not the overlay, and does not affect the HUD judgement.
 
-| # | Issue (round 1) | Status | Verified at |
-|---|---|---|---|
-| 1 | Dialogue panel never hides (`display:flex` beats `[hidden]`) | **Fixed** | `ui.css:144` `#dialogue-root[hidden]{display:none!important}`; `dialogueUi.ts:133` `clear(panelRoot)`; Chromium check `display:none`, rect 0 |
-| 2 | Combat panels never hide after a fight | **Fixed** | `index.ts:119` `combat.on('end') → hideAfterResult()`; `combatUi.ts:478-483` hides every panel, keeps the result card, `hideAll()` if none; Continue → `hideAll()` (`combatUi.ts:315`); Objectives/Log hide in `ended` (`combatUi.ts:236,249`) |
-| 3 | Game-over soft-lock | **Fixed** | `index.ts:149-165` panel "The field is lost" with Load/Title on `to==='gameover'`; Escape list includes `gameover` (`index.ts:136`) |
-| 4 | Hotkeys on title/creation; dialogue keys under Pause | **Fixed** | `index.ts:140` gate `['explore','dialogue','cutscene','paused']`; `dialogueUi.ts:19,107` `menuOpen()` predicate wired from `index.ts:19` |
-| 5 | `[65%]` without skill name | **Fixed** | `quest/dialogue.ts:187,237-239` `hint: skillLabel(skill)`; `dialogueUi.ts:84-86` `formatCheckOdds(c.hint ?? 'Check', odds)`, hints on enabled choices |
-| 6 | Trade/Rest unreachable | **Fixed** | `interact.ts:59-62` routes `trade`/`rest`; `spawnTradeAndRest` (`interact.ts:99-115`) called from `exploration/index.ts:88` — bed at every `population.innkeeper` POI, stall at merchant/town POIs |
-| 7 | `dialogue.show` listener/promise leak | **Fixed** | `dialogueUi.ts:27,40-41,116-120,132` `cleanupCurrent` run at `show()` start and in `hide()`; previous promise resolved |
-| 8 | No status/defense/weapon; no enemy inspect | **Fixed** | `combatUi.ts:172-179` status chips + `Defense N · weapon (dice, reach)`; `renderTargetCard` (`combatUi.ts:383-399`) HP/morale/defense/weapon/mounted/status/Haufen at the cursor |
-| 9 | No Flee | **Fixed** | `combatUi.ts:39` Flee button, shown on the player's turn (`combatUi.ts:332`); `.cbt-flee { position:absolute; bottom:14px; right:190px }` (`ui.css:263`, added in `df0e965` after my interim note) |
-| 10 | Objectives hidden in deploy | **Fixed** | `combatUi.ts:236` hides only in `ended` |
-| 11 | Settings inert | **Partly fixed (rest not counted)** | `context.ts:26-37,72-83` `loadSettings`/`saveSettings`/`applySettings` (localStorage, render scale via `gfx.renderScale` + `resize()`), `menus.ts:519-526` call it; no `onSettings` consumer yet (world: shadow/view distance/quality pending — coordinator says so) |
-| 12 | `℔ s d` unexplained; −0 d; NaN d | **Fixed** | `menus.ts:269` purse legend; `helpers.ts:17-20` finite guard + `trunc` before sign; probes |
-| 13 | Save/Load polish | **Fixed** (one nit, r2 #5) | `menus.ts:480-486` `.readonly` + tooltips, Delete hidden on 0/6, footer "F5 quicksave · F9 quickload" (`menus.ts:490`) |
-| 14 | Double S chip | **Fixed** | `helpers.ts:55`; probe |
-| 15 | Mousemove rebuilds the unit card | **Fixed** (cosmetic nit, r2 #4) | `combatUi.ts:369-381` `updatePreviewOnly` replaces only `.cbt-preview` |
-| 16 | `#combat-debug-overlay` | **Fixed** | `render.ts:177` opt-in `?combatdebug=1` only; CSS rule removed |
-| 17 | Dead helpers / routed not dimmed | **Fixed** | `combatUi.ts:117` uses `buildInitiativeChips` (routed → `.down`); `formatCheckOdds` now used; `cellToWorldXZ` still test-only (fine) |
-| 18 | Small things | **Fixed except creation preview** | 4 dots (`menus.ts:134`); skip hint hidden on finish (`dialogueUi.ts:74`); Pause sub-menus return to Pause (`index.ts:27,37,56-63`); load path uses `closeAll()` (`menus.ts:498`, `index.ts:34`) so no Pause modal survives a load; creation preview still not from `party.derived` (admitted) |
+## Earlier evidence (unchanged, summarised)
 
-## What the round-2 evidence shows
+- `title.png`: heading over the live lake, four parchment buttons, Continue disabled without a save.
+- `menu-inventory.png`: tabs, 7 equipment slots, pack rows with kg and `s d`, totals line (now with the `Pfund ℔ · Schilling s · Pfennig d` legend, code-verified); real §7 kit.
+- `menu-map.png`: shaded heightmap, lakes, roads, 14 region labels, discovered-POI icon, player arrow.
+- `dialogue-gessler-hat.png` (r1 and r2): letterbox, panel, 16 px narration, numbered gold choices; the skip hint now disappears once choices are up; `[Skill NN%]` code-verified (this node has no check).
+- `combat-morgarten-setup.png`: deploy banner with nine unit chips and Confirm; objectives now shown in deploy (code-verified).
+- `ui2/combat-brunnen-quay.png`, `ui2/combat-brunnen-quay-turn.png`: initiative/objectives/log; the r2 frame proved the chip-name legibility fix; both stopped on the between-turns seam that `36b14c3` closes.
 
-- **Combat, active phase** (`ui2/combat-brunnen-quay.png`, after the scenario's `auto:4` script, round 5, 0 errors). What the frame shows: the **initiative strip** top-centre (three chips K / H / T — Kuoni green, Habsburg Footman and Toll Collector red, the active one gold-ringed), the **Objectives** panel top-left ("⚑ Defeat all enemies"), the **Log** panel top-right with the last twelve lines legible at 12 px ("Habsburg Footman attacks Kuoni Imhof: hit." / "Kuoni Imhof morale check (damage): routed." / "Round 5 begins." / "Kuoni Imhof's turn." / "Kuoni Imhof flees."). Parchment/ink consistent with the menus; panels sit clear of the 3D focus (the grid is centre-screen; nothing overlaps). Two things the frame does **not** show: (a) the **unit card, AP pips, hit % with Edge/Burden, ability bar, End Turn and Flee** — the `auto:4` script stops after the routed player's forced flee, between turns (`activeUnit` null → `renderUnitCard`/`renderAbilityBar` hide by design, `combatUi.ts:123,196`), so the scenario as written can never frame the player-turn HUD; and (b) the world under the fight — the terrain material is still the world builder's WIP (sky-blue ground, quay house and pier floating), which also explains the 6.0 M-triangle budget miss (`triangles:false` is the world's, not the overlay's). **Legibility defect visible in this frame**: the initiative chips' name labels (`.cbt-chip .nm`, 9 px, `color: var(--parchment)` with a black text-shadow, `ui.css:232`) are parchment-on-parchment inside the `.eid-panel` strip — "Kuoni Im…", "Habsburg…", "Toll Coll…" are barely readable at 1080p; the rule was written for a dark strip. Also 44 px chips truncate every name.
+## Cumulative issues → status (all verified in the diff; line refs at `73afac2` = HEAD for `src/ui`)
 
-- **Dialogue** (`ui2/dialogue-gessler-hat.png`, round 2, 0 errors): letterbox on, the parchment panel bottom-centre with the narration at 16 px and three numbered gold choices, exactly as in round 1 — and the "click / Enter to continue" hint is now gone once the choices are up (fix 18, `dialogueUi.ts:74`). The hat on its pole is in frame above the panel; the panel covers nothing that matters. The scene behind it is now the art builders' new characters and the WIP terrain (near-black ground at 11:00 — world's problem, not the overlay's). No skill-check choice exists on this node, so `[Skill NN%]` is still unexercised by a harness frame; it is verified in code (`quest/dialogue.ts:187`, `dialogueUi.ts:84-86`) and by the `formatCheckOdds` unit test.
-- **Combat, `waitPlayerTurn` scenario** (`ui2/combat-brunnen-quay-turn.png`, round 2 of the fight, 0 errors). **Initiative strip now legible**: five 64 px chips in ink — "Säumer of th…", "Kuoni Imhof", "The elder's man", "Habsburg Fo…", "Toll Collector" — green/red side dots; r2-1 confirmed on evidence. Objectives and Log as before, the Log now showing a rich round ("Säumer of the boat attacks Toll Collector: critical hit." / "Toll Collector takes 10 thrust damage."). **Still no unit card, AP pips, hit %, ability bar, End Turn or Flee** — and this time it is diagnosable from the code: `cmdAuto` (`engine.ts:1213-1229`) runs `advance()` until `round >= autoStopRound` and returns *between turns* with `activeUnitId === null` (`engine.ts:378-379`); the harness's new loop (`main.ts:300-309`) then calls `combat.stepAi()`, which returns immediately when there is no active unit (`stepAi(): const u = …; if (!u) return;`) — so nothing ever advances to Kuoni's turn, the loop spins its 60 frames and the screenshot is taken on the same seam as before. In real play this seam does not exist (`advance()` runs to the next player-controlled unit and emits `phase:'active'` with that unit, `engine.ts:394-397`), so the card/ability bar will show; but the rubric scores frames, and there is still none. No gold "active" ring is visible on any chip, consistent with `activeUnit: null`.
+| Round | # | Issue | Status | Verified at |
+|---|---|---|---|---|
+| 1 | 1 | Dialogue panel never hides (`display:flex` beats `[hidden]`) | Fixed | `ui.css:144`; `dialogueUi.ts:133`; Chromium check `display:none` |
+| 1 | 2 | Combat panels never hide after a fight | Fixed | `index.ts:119` `on('end')→hideAfterResult()`; `combatUi.ts:478-483`; Continue → `hideAll()` |
+| 1 | 3 | Game-over soft-lock | Fixed | `index.ts:154-166` `showGameOver()`; Escape list includes `gameover` |
+| 1 | 4 | Hotkeys on title/creation; dialogue keys under Pause | Fixed | `index.ts:140` state gate; `dialogueUi.ts:107` `menuOpen()` |
+| 1 | 5 | `[65%]` without skill name | Fixed | `quest/dialogue.ts:187,237-239`; `dialogueUi.ts:84-86` `formatCheckOdds` |
+| 1 | 6 | Trade/Rest unreachable | Fixed | `interact.ts:59-62`, `spawnTradeAndRest` from `exploration/index.ts:88` |
+| 1 | 7 | `dialogue.show` listener/promise leak | Fixed | `dialogueUi.ts:27,40-41,116-120,132` `cleanupCurrent` |
+| 1 | 8 | No status/defense/weapon; no enemy inspect | Fixed | `combatUi.ts:172-179`; `renderTargetCard` `combatUi.ts:383-399`; `Defense 11 · Spiess (1d8, reach 2)` in the r3 frame |
+| 1 | 9 | No Flee | Fixed | `combatUi.ts:39-40` + `ui.css:263`; in the r3 frame beside End Turn |
+| 1 | 10 | Objectives hidden in deploy | Fixed | `combatUi.ts:236` |
+| 1 | 11 | Settings inert | Partly (UI side done) | `context.ts:26-37,72-83` persist + render scale; world consumption pending (not counted) |
+| 1 | 12 | `℔ s d` unexplained; −0 d; NaN d | Fixed | `menus.ts:269`; `helpers.ts:17-20`; probes |
+| 1 | 13 | Save/Load polish | Fixed | `menus.ts:480-490` readonly styling, Delete hidden on 0/6, F5/F9 footer; Save refuses slot 0 (`menus.ts:481`) |
+| 1 | 14 | Double S chip | Fixed | `helpers.ts:55`; probe |
+| 1 | 15 | Mousemove rebuilds the unit card | Fixed | `combatUi.ts:369-381` `updatePreviewOnly`; empty node removed (`:381`) |
+| 1 | 16 | `#combat-debug-overlay` | Fixed | `render.ts:177` opt-in only; CSS rule removed |
+| 1 | 17 | Dead helpers / routed not dimmed | Fixed | `combatUi.ts:117` `buildInitiativeChips` |
+| 1 | 18 | Small things | Fixed except creation preview | 4 dots; skip hint; Pause sub-menus return to Pause; `closeAll()` before load |
+| 2 | i1 | Flee at the screen corner (no CSS) | Fixed | `ui.css:263` |
+| 2 | i2 | Load-from-Pause left the Pause modal | Fixed | `MenuApi.closeAll()` `index.ts:34`, `menus.ts:498` |
+| 2 | i3 | Game-over → Load → close blank | Fixed | `index.ts:60-61` |
+| 2 | r2-1 | Initiative names parchment-on-parchment | Fixed | `ui.css:225,232`; r2/r3 frames |
+| 2 | r2-2 | Player-turn HUD never captured | **Fixed (r3)** | `engine.ts` `stepAi()` advances between turns; `ui3/combat-brunnen-quay-turn.png` |
+| 2 | r2-3 | Flee used `window.confirm` | Fixed | `combatUi.ts:40` `showConfirm` |
+| 2 | r2-4 | Empty dashed `.cbt-preview` | Fixed | `combatUi.ts:381` |
+| 2 | r2-5 | Save could overwrite the autosave | Fixed | `menus.ts:481` |
 
-## Interim findings (reported to the coordinator mid-round) → status at `df0e965`
+## Polish for a 9 (not gating; recorded for the backlog)
 
-| # | Finding | Status | Verified at |
-|---|---|---|---|
-| i1 | Flee button had no CSS rule → rendered at the screen's top-left corner | **Fixed** | `ui.css:263` `.cbt-flee { position:absolute; bottom:14px; right:190px }` — sits left of End Turn (`right:14px`) |
-| i2 | Load-from-Pause left the Pause modal over the loaded game (regression from the return-to-Pause fix) | **Fixed** | `MenuApi.closeAll()` (`menus.ts:22`, `index.ts:34`: clears `#menu-root`, resets `openedFromPause`/`currentMenu`); `onSlotClick` load path calls it (`menus.ts:498`); game-over Title button also `closeAll()` first (`index.ts:163`) |
-| i3 | Game-over → Load → close left a blank screen | **Fixed** | `closeMenu()` calls `showGameOver()` when `ctx.state.state === 'gameover'` (`index.ts:60-61`); panel builder hoisted to `showGameOver()` (`index.ts:154-166`) |
-
-## Round-2 findings (from the Brunnen frame and the fix diff) → status at `73afac2`
-
-| # | Finding | Status | Verified at |
-|---|---|---|---|
-| r2-1 | Initiative chip names parchment-on-parchment, 9 px, 44 px chips | **Fixed** | `ui.css:225,232` — `.cbt-chip` 64 px, `.nm { color: var(--ink); font-size: 10px; max-width: 64px; ellipsis }` — see `ui2/combat-brunnen-quay-turn.png` below |
-| r2-2 | Player-turn HUD never captured (`auto:4` stops between turns) | **Not yet effective** — see the frame below and round-3 item 1 | new scenario `combat-brunnen-quay-turn` (`scenarios.json:262-271`: `auto:1` + `waitPlayerTurn`); `main.ts:300-309` loops on `combat.stepAi()`, which is a no-op while `activeUnitId` is null (`engine.ts` `stepAi`: `if (!u) return;`) — and `cmdAuto` always leaves it null |
-| r2-3 | Flee used `window.confirm` | **Fixed** | `combatUi.ts:40` `showConfirm(mount, …, 'Flee', 'Stay')` |
-| r2-4 | Empty dashed `.cbt-preview` rule | **Fixed** | `combatUi.ts:381` `if (!node.hasChildNodes()) { existing?.remove(); return; }` |
-| r2-5 | Save mode could overwrite the autosave | **Fixed** | `menus.ts:481` `disabledForSave = mode==='save' && (slot.readOnlySave \|\| slot.slot === 0)` |
-
-## Remaining (minor; not counted against the bar)
-
-1. Settings: `quality`, `shadowRes`, `viewDistance`, `masterVolume`, `invertY` are persisted and applied to nothing (no `ctx.onSettings` subscriber anywhere) — flagged by the coordinator as pending for the world module.
-2. Creation preview (HP/Defense/Morale) still UI-side arithmetic, not `party.derived` (admitted).
-3. Trade stalls use `MERCHANT_STOCK` (`menus.ts:606`) for every settlement — the stall entity carries `data.merchant = poi.id` but `renderTrade` never reads it. Content-side later.
-4. Inventory modal is 80 vh of mostly empty parchment for a five-item pack (Skyrim keeps the world visible on one side) — cosmetic.
+1. **Ability icons**: `abilityIcon()` falls back to the same bare circle for three of Kuoni's eight abilities (slots 3, 4, 6 in the r3 frame) — the bar reads by hotkey number only. Draw one glyph per ability family (`icons.ts`) so the bar reads at a glance like BG3's.
+2. **Enemy inspect card and reaction prompt** are code-verified (`combatUi.ts:383-399`, `:277-292`) but never framed; a hover step or a `reaction`-phase scenario would close that.
+3. **Floating unit sprites** (HP/morale bars over each figure, from the combat renderer) are ~4 px tall at this camera distance — the HUD card carries the numbers, but a tap on the sprite scale would help the overview.
+4. Settings: `quality`, `shadowRes`, `viewDistance`, `masterVolume`, `invertY` persisted and applied to nothing (no `ctx.onSettings` subscriber) — world module's side.
+5. Creation preview (HP/Defense/Morale) still UI-side arithmetic, not `party.derived`.
+6. Trade stalls all sell `MERCHANT_STOCK` (`menus.ts:606`); `data.merchant` is carried but unread.
+7. Inventory modal is 80 vh of mostly empty parchment for a five-item pack.
 
 ## Historical compliance
-Clean (see banned-word grep). New strings are in register: "The field is lost", "the party scatters", "Rest at the inn", "Take the boat".
+Clean — no banned word is player-facing; register per LORE §7–§8 throughout ("the Länder", "the Waldstätte", Halbarte/Spiess/Gambeson, Pfund/Schilling/Pfennig, "The field is lost", "Rest at the inn", "Take the boat").
 
 ## Explicitly out of reach for a browser engine (not counted)
-- SwiftShader frame times; procedural portraits; heightmap map; world-side consumption of shadow/view-distance settings (pending, per coordinator).
+- SwiftShader frame times (p95 3.5 s here; the DOM overlay is not the cost).
+- Procedural silhouette portraits, heightmap map, no controller support / animated transitions — the rubric's 10/10 items, not expected at this stage.
+- The missing ground in every combat frame — the world-look builder's in-progress terrain material.
