@@ -19,7 +19,7 @@ import { buildWater, type WaterHandle } from './water';
 import { buildSky, type SkyHandle } from './sky';
 import { ModelLibrary } from './models';
 import { spawnCharacter, updateCharacters } from './characters';
-import { renderMapImage, worldToMapUv } from './map';
+import { renderMapImage, worldToMapUv, invalidateMapCache } from './map';
 import { getTerrainMaterial } from './terrainMaterial';
 import { snowLineFor } from './heightmodel';
 
@@ -182,6 +182,7 @@ export async function register(ctx: GameContext): Promise<void> {
     getWeather: () => weather,
     setSeason(s) {
       season = s;
+      invalidateMapCache(); // the parchment map bakes the snow line (bughunt world-runtime)
       sky.setSeason(s);
     },
     streamAround(x: number, z: number, radiusM = 800) {

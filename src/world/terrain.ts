@@ -24,6 +24,8 @@ function lodForDistance(d: number): number {
 
 interface ChunkEntry {
   cx: number; cz: number;
+  /** worker request the current pendingLod belongs to; a chunkDone for any other id is stale (evicted + re-requested) */
+  pendingReq?: number;
   mesh: Mesh | null;
   currentLod: number; // -1 = nothing built yet
   pendingLod: number | null;
@@ -181,6 +183,7 @@ export class TerrainManager {
     const [ox, oz] = this.chunkOrigin(cx, cz);
     const requestId = this.requestSeq++;
     e.pendingLod = lod;
+    e.pendingReq = requestId;
     this.inFlight.add(requestId);
     this.worker.postMessage({ type: 'chunk', requestId, cx, cz, lod, originX: ox, originZ: oz });
   }
@@ -197,7 +200,14 @@ export class TerrainManager {
         const ccx = ox + CHUNK_SIZE / 2, ccz = oz + CHUNK_SIZE / 2;
         const d = Math.hypot(ccx - centerX, ccz - centerZ);
         if (d > radius) continue;
-        this.ensureRequested(cx, cz, lodForDistance(d), time);
+        let lod = lodForDistance(d);
+        // hysteresis: a chunk sitting on a LOD boundary keeps its current LOD until the camera moves 12 % past it
+        const cur = this.chunks.get(this.key(cx, cz))?.currentLod ?? -1;
+        if (cur >= 0 && cur !== lod && Math.abs(cur - lod) === 1) {
+          const boundary = LOD_DIST[Math.min(cur, lod)];
+          if (Math.abs(d - boundary) < boundary * 0.12) lod = cur;
+        }
+        this.ensureRequested(cx, cz, lod, time);
       }
     }
   }
@@ -292,8 +302,10 @@ export class TerrainManager {
   private uploadChunk(msg: ChunkDoneMsg): void {
     const e = this.chunks.get(this.key(msg.cx, msg.cz));
     if (!e) return; // evicted while the worker was building it
+    if (e.pendingReq !== undefined && msg.requestId !== e.pendingReq) return; // stale build for an entry evicted and re-created since (bughunt world-runtime #1)
     if (e.mesh) { this.group.remove(e.mesh); e.mesh.geometry.dispose(); e.mesh = null; }
     e.pendingLod = null;
+    e.pendingReq = undefined;
     e.currentLod = msg.lod;
     if (msg.allWater) { this.onChunkLoaded?.({ cx: msg.cx, cz: msg.cz, lod: msg.lod, allWater: true }); return; } // fully submerged chunk: the lake mesh covers it, skip the draw call
     const geom = new BufferGeometry();

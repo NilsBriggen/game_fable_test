@@ -303,6 +303,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   function renderResult(view: CombatStateView): void {
     clear(resultHost);
     if (view.phase !== 'ended' || !view.result) return;
+    if (ctx.state.state === 'gameover') return; // the game-over screen is the one "you lost" surface (bughunt ui #3)
     const res = view.result;
     const outcomeLabel = { win: 'Victory', lose: 'Defeat', fled: 'Fled the Field' }[res.outcome];
     const xpRows = Object.entries(res.xp).filter(([, v]) => v > 0).map(([skill, v]) => el('div', { class: 'row' }, [skill, `+${v} xp`]));
@@ -327,6 +328,11 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     renderLog(view);
     renderReaction(view);
     renderResult(view);
+    if (cardUnitId !== null) {
+      // the hovered target card goes stale when its unit dies or routs without the mouse moving (bughunt ui #4)
+      const cu = view.units.find((u) => u.id === cardUnitId);
+      if (!cu || cu.down || cu.hp <= 0 || cu.routed || view.phase === 'ended') renderTargetCard(null, 0, 0);
+    }
     const active = view.units.find((u) => u.id === view.activeUnit);
     const playersTurn = !!(active && active.isPlayerControlled && view.phase === 'active');
     endTurnBtn.style.display = playersTurn ? '' : 'none';
@@ -382,7 +388,9 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     if (existing) existing.replaceWith(node); else unitCard.appendChild(node);
   }
 
+  let cardUnitId: number | null = null;
   function renderTargetCard(u: CombatantView | null, x: number, y: number): void {
+    cardUnitId = u ? u.id : null;
     if (!u) { targetCard.style.display = 'none'; return; }
     clear(targetCard);
     targetCard.style.display = '';
@@ -452,6 +460,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
     if (root.classList.contains('hidden') || !lastView) return;
+    if (ctx.state.state !== 'combat') return; // a pause menu (state 'paused') over the fight owns the keyboard (bughunt ui #1)
     const active = currentActive(lastView);
     if (!active) return;
     if (e.code === 'Space') { e.preventDefault(); submit({ type: 'end-turn', unit: active.id }); return; }

@@ -136,7 +136,7 @@ export async function register(ctx: GameContext): Promise<void> {
     if (e.key === 'Escape') {
       e.preventDefault();
       if (currentMenu) closeMenu();
-      else if (['explore', 'combat', 'dialogue', 'cutscene', 'gameover'].includes(ctx.state.state)) openMenu('pause');
+      else if (['explore', 'combat', 'dialogue', 'cutscene'].includes(ctx.state.state)) openMenu('pause'); // not over the game-over screen (bughunt ui #2)
       return;
     }
     // Combat's own hotkeys (1-9, Space) are handled inside combatUi; menus only over live play.

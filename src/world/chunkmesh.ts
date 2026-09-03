@@ -8,6 +8,8 @@ import { BLEND_GROUP } from './heightmodel';
 export const CHUNK_SIZE = 500;
 export const LOD_SPACING = [2, 4, 8, 16] as const;
 export const SKIRT_DEPTH = 24;
+/** skirt depth per LOD: a coarse far chunk beside a gorge wall can step 250 m+ against its neighbour */
+export const SKIRT_DEPTH_BY_LOD = [30, 60, 130, 320];
 
 export function segsForLod(lod: number): number {
   return Math.max(1, Math.round(CHUNK_SIZE / LOD_SPACING[Math.max(0, Math.min(3, lod))]));
@@ -108,7 +110,7 @@ export function buildChunkGeometry(
       const mi = edgeAt(i);
       const si = base + i;
       positions[si * 3] = positions[mi * 3];
-      positions[si * 3 + 1] = positions[mi * 3 + 1] - SKIRT_DEPTH;
+      positions[si * 3 + 1] = positions[mi * 3 + 1] - (SKIRT_DEPTH_BY_LOD[lod] ?? SKIRT_DEPTH);
       positions[si * 3 + 2] = positions[mi * 3 + 2];
       uvs[si * 2] = uvs[mi * 2]; uvs[si * 2 + 1] = uvs[mi * 2 + 1];
       surfaceId[si] = surfaceId[mi];
