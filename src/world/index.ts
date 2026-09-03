@@ -4,6 +4,7 @@
  * the top-down map image. Uses ctx.gfx.renderer/scene/camera created by core.
  */
 import { Group, Vector3, type Object3D, type PerspectiveCamera, type Scene, type WebGLRenderer } from 'three';
+import { lakeLevelAt } from './lakes';
 import type { GameContext } from '@core/context';
 import type { InstanceHandle, SurfaceType, TransformLike, Weather, WorldService } from '@core/services';
 import type { Rng } from '@core/rng';
@@ -163,6 +164,7 @@ export async function register(ctx: GameContext): Promise<void> {
       return terrain.heightAt(x, z) > snowLineFor(season) ? 'snow' : base;
     },
     isWater: (x, z) => terrain.isWater(x, z),
+    lakeLevelAt: (x, z, maxDist) => lakeLevelAt(x, z, maxDist),
     slopeAt: (x, z) => terrain.slopeAt(x, z),
     raycast,
     regionAt,
