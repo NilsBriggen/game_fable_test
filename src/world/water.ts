@@ -192,7 +192,7 @@ export function buildWater(): WaterHandle {
           float band = 1.0 - smoothstep(0.0, 0.052, depth);
           float wob = gShore.g + 0.35 * sin(uTime * 0.9 + vWWorld.x * 0.09 + vWWorld.z * 0.06);
           float foam = clamp(band * smoothstep(0.34, 0.86, wob), 0.0, 1.0);
-          foam += (1.0 - smoothstep(0.0, 0.012, depth)) * 0.55; // always a thin lick right at the stones
+          foam += (1.0 - smoothstep(0.0, 0.010, depth)) * 0.32; // always a thin lick right at the stones
           diffuseColor.rgb *= pow(mix(col, uFoamColor, clamp(foam, 0.0, 0.92)), vec3(2.2));
           gRough = mix(0.055, 0.75, clamp(foam, 0.0, 1.0));
         }
@@ -222,14 +222,14 @@ export function buildWater(): WaterHandle {
           vec3 shoreRefl = mix(uDeepColor * 1.5, uSkyHorizon, 0.22);
           skyCol = mix(shoreRefl, skyCol, smoothstep(0.015, 0.20, up));
           float sunLobe = pow(max(dot(R, normalize(uSunDir)), 0.0), 26.0);
-          skyCol += uSunTint * sunLobe * 0.55 * uGlitter;
+          skyCol += uSunTint * sunLobe * 0.38 * uGlitter;
           // Fresnel: nearly mirror at grazing angles, mostly body colour looking straight down
           float f = 0.02 + 0.98 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
           f *= 1.0 - clamp(gShore.r < 0.02 ? 0.6 : 0.0, 0.0, 1.0); // foam is not a mirror
           gl_FragColor.rgb = mix(gl_FragColor.rgb, pow(skyCol, vec3(2.2)), clamp(f, 0.0, 0.58));
           // sun glitter: a tight highlight the ripple normals shatter into moving sparks
           float spec = pow(max(dot(R, normalize(uSunDir)), 0.0), 900.0);
-          gl_FragColor.rgb += pow(uSunTint, vec3(2.2)) * spec * 5.0 * uGlitter;
+          gl_FragColor.rgb += pow(uSunTint, vec3(2.2)) * spec * 2.6 * uGlitter;
         }
         #include <dithering_fragment>
       `);

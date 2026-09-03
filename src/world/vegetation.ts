@@ -1,26 +1,29 @@
 /**
  * Vegetation: one global InstancedMesh per species per LOD tier, populated from the chunks the
- * terrain streamer has active. Tiers follow the chunk LOD — full mesh, reduced mesh, billboard
- * impostor — plus a grass-tuft pool that only fills the chunks within 80 m of the camera.
- * Placement is deterministic per chunk (hash of seed + chunk coords) from surface, slope and height.
+ * terrain streamer has active. Three tiers — full mesh under 95 m, reduced mesh under 250 m,
+ * billboard impostor beyond (ARCHITECTURE §5.1) — chosen from the real camera distance rather than
+ * the terrain's own chunk LOD, plus a grass-tuft pool that only fills the chunks within 80 m of the
+ * camera and scree boulders on rock. Only the near tier casts shadows: CSM re-draws every caster
+ * once per cascade, so a shadow from a tree 300 m away costs three passes for a pixel.
+ * Placement is deterministic per chunk (hash of seed + chunk coords) from surface, slope and height,
+ * and nothing is planted above the tree line (LORE §3: 1500 m a.s.l. -> game h 355).
  */
 import { DynamicDrawUsage, Group, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three';
 import { Rng, hashString } from '@core/rng';
 import type { TerrainManager } from './terrain';
 import { FOREST_MAX_H } from './heightmodel';
 import { buildTreeGeometry, treeImpostor, treeMaterial, grassTuft, type TreeKind } from './treeGeometry';
-import { registerCsmMaterial } from './shadowCsm';
+import { getViewPosition, registerCsmMaterial } from './shadowCsm';
 import { buildSplatMask, splatMaskReady } from './terrainMaterial';
-import { getViewPosition } from './shadowCsm';
 import { boulderGeometry, rockMaterial } from './propGeometry';
 
 type Tier = 'full' | 'mid' | 'impostor';
 
-const SPACING: Record<Tier, number> = { full: 8.5, mid: 11, impostor: 15 };
+const SPACING: Record<Tier, number> = { full: 8.5, mid: 11, impostor: 13 };
 const IMPOSTOR_SPACING_FAR = 24;
 /** Tier by distance from the camera to the nearest point of the chunk, not by terrain chunk LOD:
  *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m. */
-const TIER_DIST = { full: 95, mid: 250 };
+const TIER_DIST = { full: 70, mid: 250 };
 const GRASS_RADIUS = 80;
 const GRASS_SPACING = 2.6;
 
@@ -193,10 +196,12 @@ export class VegetationManager {
         const z = originZ + gz + (rng.next() - 0.5) * spacing * 0.85;
         const surface = this.terrain.surfaceAt(x, z);
         if (surface === 'water' || surface === 'road' || surface === 'settlement') continue;
-        const slope = this.terrain.slopeAt(x, z);
-        if (slope > 0.72) continue;
         const y = this.terrain.heightAt(x, z);
         if (y > TREELINE) continue; // LORE §3: nothing grows above game h 355
+        // slopeAt() goes through normalAt(), which allocates a Vector3 per call; do it last so the
+        // ~3 500 candidates per chunk only pay for it once surface and altitude have passed
+        const slope = this.terrain.slopeAt(x, z);
+        if (slope > 0.72) continue;
 
         let treeChance = 0, rockChance = 0;
         if (surface === 'forest') { treeChance = tier === 'impostor' ? 0.8 : 0.78; rockChance = 0.010; }

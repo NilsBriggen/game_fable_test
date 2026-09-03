@@ -179,20 +179,6 @@ export function buildSplatMask(
 
 export function splatMaskReady(): boolean { return maskBuilt; }
 
-/**
- * Force the terrain program to be rebuilt.
- *
- * The terrain material is created inside buildSky(), before the sky group (and therefore the
- * hemisphere light) is in the scene and before the renderer has ever collected the CSM lights'
- * shadow state. Its very first program is compiled against that half-built light state and comes
- * out with no directional-light contribution at all — the landscape renders black while the trees,
- * whose materials are created later, light correctly. Recompiling once the scene is actually
- * running produces the correct program; sky.ts calls this on its first few frames.
- */
-export function refreshTerrainMaterial(): void {
-  if (handle) handle.material.needsUpdate = true;
-}
-
 // ---------------------------------------------------------------------------------------------
 
 let handle: TerrainMaterialHandle | null = null;
@@ -217,9 +203,8 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
     uSnowLine: { value: 900 },
     uSnowDepth: { value: 0 },      // weather: extra whitening at any altitude (0..1)
     uSeasonTint: { value: new Color(0x9fb862) },
-    uAltitudeTint: { value: new Color(0xc9c58a) }, // grass drifts to this above the villages
+    uAltitudeTint: { value: new Color(0xb7bd7e) }, // pasture drifts to this dry sage above the villages
     uWetness: { value: 0 },        // rain darkens + glosses the ground
-    uLakeLevel: { value: 0 },
     uDirectScale: { value: 1 },   // see the CSM note on registerCsmMaterial below
     ...FOG_UNIFORMS,
   };
@@ -238,7 +223,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         uniform sampler2DArray tAlbedo, tNormal, tOrm;
         uniform sampler2D tMaskA, tMaskB, tMacro;
         uniform vec2 uMaskMin, uMaskSpan, uMaskTexel;
-        uniform float uSnowLine, uSnowDepth, uWetness, uLakeLevel, uDirectScale;
+        uniform float uSnowLine, uSnowDepth, uWetness, uDirectScale;
         uniform vec3 uSeasonTint, uAltitudeTint;
         varying vec3 vWorldPos;
         ${FOG_DECL}
@@ -260,18 +245,23 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         // a for loop and a TILE[i] lookup: dynamically indexed local/const arrays, in a shader that
         // CSM has also filled with unrolled per-cascade light loops, miscompile on the software
         // rasteriser the harness uses and the whole terrain comes back black.
+        //
+        // De-tiling is a macro-driven TRANSLATION plus a blend of two fixed scales, never a
+        // per-pixel rotation or scale of the world position. World x/z reach 8 000 here, so any
+        // per-pixel factor applied to them lands in the uv derivative multiplied by 8 000, the
+        // hardware picks the coarsest mip, and every slope smears into long streaks.
         float gRough = 1.0;    // written in <map_fragment>, applied in <roughnessmap_fragment>
         vec3 gMapN = vec3(0.0, 0.0, 1.0);
         vec3 gAlbAcc; vec3 gNrmAcc; vec3 gOrmAcc; float gWAcc;
         #define SPLAT(IDX, TILE, WGT) \
           if (WGT > 0.004) { \
-            float tl = (TILE) * detile; \
-            vec2 uvF = (detileRot * vWorldPos.xz) / tl; \
-            vec3 a = texture(tAlbedo, vec3(uvF, float(IDX))).rgb; \
+            vec2 uvF = vWorldPos.xz / (TILE) + detileOff; \
+            vec3 a = mix(texture(tAlbedo, vec3(uvF, float(IDX))).rgb, \
+                         texture(tAlbedo, vec3(uvF * 0.237 + 3.71, float(IDX))).rgb, detileMix); \
             vec3 nn = texture(tNormal, vec3(uvF, float(IDX))).rgb; \
             vec3 oo = texture(tOrm, vec3(uvF, float(IDX))).rgb; \
             if (steep > 0.02) { \
-              vec2 uvS = (abs(nrm.x) > abs(nrm.z)) ? vec2(vWorldPos.z, vWorldPos.y) / tl : vec2(vWorldPos.x, vWorldPos.y) / tl; \
+              vec2 uvS = ((abs(nrm.x) > abs(nrm.z)) ? vec2(vWorldPos.z, vWorldPos.y) : vec2(vWorldPos.x, vWorldPos.y)) / (TILE) + detileOff; \
               a = mix(a, texture(tAlbedo, vec3(uvS, float(IDX))).rgb, steep); \
               nn = mix(nn, texture(tNormal, vec3(uvS, float(IDX))).rgb, steep); \
               oo = mix(oo, texture(tOrm, vec3(uvS, float(IDX))).rgb, steep); \
@@ -308,14 +298,14 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           float keep = (1.0 - w5) / wsum;
           w0 *= keep; w1 *= keep; w2 *= keep; w3 *= keep; w4 *= keep; w6 *= keep; w7 *= keep;
 
-          // triplanar on anything past ~30 degrees, and a macro-driven tile scale so a 5 m repeat
-          // never reads as a grid at 500 m
-          float steep = smoothstep(0.86, 0.5, nrm.y);
-          float detile = 0.70 + 0.66 * macro.r;
-          // ...and a slowly drifting rotation of the horizontal projection, which is what actually
-          // kills the grid at 500 m: a pure scale change still repeats along the same axes.
-          float rot = (macro.g - 0.5) * 2.2;
-          mat2 detileRot = mat2(cos(rot), -sin(rot), sin(rot), cos(rot));
+          // Triplanar. §5.1 asks for it past 30 degrees (n.y = 0.866); the ramp starts earlier, at
+          // ~23 degrees, because the flat projection is already visibly stretching into vertical
+          // streaks on the 25-30 degree meadow banks above the Urnersee, and is full by ~57.
+          float steep = smoothstep(0.92, 0.55, nrm.y);
+          // De-tiling, both derivative-safe: a low-frequency uv shift (a translation leaves the uv
+          // derivative untouched) and a blend with the same layer sampled 4.2x larger.
+          vec2 detileOff = (macro.rg - 0.5) * 9.0;
+          float detileMix = 0.30 + 0.30 * macro.r;
 
           gAlbAcc = vec3(0.0); gNrmAcc = vec3(0.0); gOrmAcc = vec3(0.0); gWAcc = 0.0;
           SPLAT(0, 5.0, w0)    // grass
@@ -331,10 +321,19 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           gMapN = normalize((gNrmAcc * inv) * 2.0 - 1.0);
           vec3 orm = gOrmAcc * inv;
 
-          // season / altitude tint on the two grass layers only
-          float greenW = w0 + w1 + w2 * 0.45;
+          // season / altitude tint: both pasture layers, and the forest floor at 4/5 weight so a
+          // wood turns with the season too
+          float greenW = w0 + w1 + w2 * 0.8;
           vec3 tint = mix(uSeasonTint, uAltitudeTint, alp);
           albedo = mix(albedo, albedo * tint * 1.85, greenW * 0.88);
+
+          // A spruce stand seen from across the Urnersee has to read as forest between the trunks,
+          // not as the bare litter texture: darken the forest-floor layer toward the canopy colour.
+          albedo = mix(albedo, albedo * vec3(0.60, 0.70, 0.52), w2 * 0.78);
+
+          // old snow is not white paper: cool it, and keep the macro field visible through it so a
+          // snowfield still reads as a surface with form rather than a blown-out sheet
+          albedo = mix(albedo, albedo * vec3(0.90, 0.94, 1.03) * (0.86 + 0.20 * macro.b), w5 * 0.9);
 
           // macro variation: large-scale luminance + hue drift
           albedo *= mix(vec3(0.82), vec3(1.18), macro.b);
@@ -348,7 +347,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo *= mix(1.0, 0.68, wet);
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
-          gRough = clamp(mix(orm.y, 0.22, wet), 0.05, 1.0);
+          gRough = clamp(mix(orm.y, 0.42, wet), 0.05, 1.0);   // wet earth is damp, not a mirror
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
       `)
@@ -375,16 +374,21 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
   //
   // csm.setupMaterial() defines USE_CSM on the material and swaps in CSMShader's
   // lights_fragment_begin, which applies each cascade's DirectionalLight only to the depth slice
-  // that cascade owns. On this material that binding comes out dead on the program three compiles
-  // first: the terrain renders with zero direct light (a black landscape under a lit sky, with
-  // correctly lit trees standing on it), while every other material in the scene is fine. Forcing
-  // needsUpdate later does not rebuild it into a working state.
+  // that cascade owns. On this material, inside the full scene, that binding comes out dead: the
+  // terrain renders with zero direct light (a black landscape under a lit sky, with correctly lit
+  // trees standing on it) while every other material is fine. Measured, not guessed — deleting
+  // USE_CSM from the live material at runtime restores the light immediately, and forcing
+  // needsUpdate does not. Reproducing it outside the app (this same material, this same CSM
+  // configuration, a bare scene) does NOT fail, so the trigger is something about the full scene's
+  // material and light set that I could not isolate; hence a workaround rather than a fix.
   //
   // Left un-registered, the terrain takes three's stock directional path, so ALL `cascades` lights
   // light it (and it still receives their shadow maps — a fragment outside a cascade's map reads as
   // lit, so the three maps union correctly). That over-lights the direct term by exactly the cascade
   // count, which uDirectScale takes back out in <lights_fragment_end>; the ambient term is untouched
-  // and therefore still correct. See the note in the final report.
+  // and therefore still correct. The one cost is that a shadow cast onto the terrain only darkens
+  // the cascade that owns it, i.e. roughly a third of the direct term, so tree shadows on the ground
+  // are softer than they should be. Called out in the final report as a known gap.
   const csm = getActiveCsm() as { cascades?: number } | null;
   uniforms.uDirectScale.value = 1 / Math.max(1, csm?.cascades ?? 1);
   handle = { material, uniforms };

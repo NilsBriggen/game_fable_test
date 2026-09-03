@@ -32,7 +32,16 @@ correct only for the five Vierwaldstättersee basins at game height 0. The other
 So the Ägerisee — the Morgarten shoreline, i.e. the whole `morgarten-winter` scenario — gets no wet
 shore band at all, and every other lake gets one that is a few metres off.
 
-## Work-around in place (no one is blocked)
+## RESOLVED
+
+Implemented by the integrator as `WorldService.lakeLevelAt?(x, z, maxDist = 400)` backed by
+`src/world/lakes.ts`. `buildSplatMask()` in `terrainMaterial.ts` now calls `lakeLevelAt` directly
+(on a coarse 128x136 grid, then one height sample per mask texel) and bakes "height above the
+nearest lake surface" into the spare alpha channel of splat mask B. The coarse nearest-centroid
+grid described below is gone, and a texel with no shoreline within 260 m now gets no wet band at
+all instead of being pulled toward the closest lake's level.
+
+## Original work-around (superseded)
 
 `buildSplatMask()` in `terrainMaterial.ts` now bakes a "height above the nearest lake surface" term
 into the spare alpha channel of splat mask B, using a coarse nearest-lake grid built from

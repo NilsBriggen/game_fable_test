@@ -1,11 +1,12 @@
 /**
- * Sky, sun/moon path for 47 deg N, stars, clouds, weather, CSM cascaded shadows and the atmosphere
- * uniforms every other world material reads (aerial perspective, water reflection colours).
- * ARCHITECTURE.md §5.1.
+ * Sky, sun/moon path for 47 deg N, stars, a cumulus and an overcast cloud deck, the ground-haze
+ * disc that backs the horizon beyond the streaming radius, weather, exposure, CSM cascaded shadows,
+ * and the atmosphere uniforms every other world material reads (aerial perspective, water
+ * reflection colours). ARCHITECTURE.md §5.1.
  */
 import {
   AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, CanvasTexture, ClampToEdgeWrapping,
-  Color, FogExp2, Group, HemisphereLight, Mesh, MeshBasicMaterial, PerspectiveCamera, Points,
+  CircleGeometry, Color, DoubleSide, FogExp2, Group, HemisphereLight, Mesh, MeshBasicMaterial, PerspectiveCamera, Points,
   PointsMaterial, RepeatWrapping, SRGBColorSpace, Scene, SphereGeometry, Vector3, WebGLRenderer,
 } from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
@@ -13,7 +14,7 @@ import { CSM } from 'three/examples/jsm/csm/CSM.js';
 import type { Season } from '@core/clock';
 import type { Weather } from '@core/services';
 import { setActiveCsm, setViewPosition } from './shadowCsm';
-import { getTerrainMaterial, refreshTerrainMaterial, ATMOSPHERE, FOG_UNIFORMS } from './terrainMaterial';
+import { getTerrainMaterial, ATMOSPHERE, FOG_UNIFORMS } from './terrainMaterial';
 import { snowLineFor } from './heightmodel';
 import { fbm2D } from './noise';
 
@@ -76,10 +77,10 @@ interface SkyKey {
 }
 
 const SKY_KEYS: SkyKey[] = [
-  { el: -20, zenith: 0x04060e, horizon: 0x0a1120, haze: 0x131c31, sunGlow: 0x1b2440, light: 0x5a6ea8, ambient: 0x1a2440, exposure: 2.05 },
-  { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x2f3f66, exposure: 1.60 },
-  { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x51608c, exposure: 1.25 },
-  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x7d90b4, exposure: 1.05 },
+  { el: -20, zenith: 0x04060e, horizon: 0x0a1120, haze: 0x131c31, sunGlow: 0x1b2440, light: 0x5a6ea8, ambient: 0x1a2440, exposure: 1.42 },
+  { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x2f3f66, exposure: 1.52 },
+  { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x51608c, exposure: 1.45 },
+  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x7d90b4, exposure: 1.18 },
   { el: 10,  zenith: 0x2f639f, horizon: 0xe3bd92, haze: 0xb3bccb, sunGlow: 0xf7cf9b, light: 0xffd9a3, ambient: 0x9db4cd, exposure: 0.97 },
   { el: 28,  zenith: 0x336cb0, horizon: 0xcbdcea, haze: 0xa9c1da, sunGlow: 0xf6e3c0, light: 0xfff2d8, ambient: 0xbcd6e8, exposure: 0.92 },
   { el: 65,  zenith: 0x2f6bb8, horizon: 0xd3e3ef, haze: 0xa4bfdb, sunGlow: 0xf2ead8, light: 0xfffaf0, ambient: 0xc6dcec, exposure: 0.88 },
@@ -213,16 +214,21 @@ function moonTexture(): CanvasTexture {
   return t;
 }
 
-/** Vertical rain streak (points are screen-aligned squares, and rain falls straight down). */
+/**
+ * Vertical rain streak. The canvas MUST be square: a Points sprite is a screen-aligned square, so a
+ * 16x64 texture is squashed back to 1:1 and the streak comes out as a fat round blob that reads as
+ * snow. The streak is drawn thin inside a square instead.
+ */
 function rainTexture(): CanvasTexture {
-  const W = 16, H = 64;
-  const { canvas, ctx } = canvas2d(W, H);
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(220,235,245,0)');
-  g.addColorStop(0.45, 'rgba(220,235,245,0.85)');
+  const S = 64;
+  const { canvas, ctx } = canvas2d(S, S);
+  const g = ctx.createLinearGradient(0, 0, 0, S);
+  g.addColorStop(0, 'rgba(214,232,244,0)');
+  g.addColorStop(0.25, 'rgba(224,240,250,0.9)');
+  g.addColorStop(0.75, 'rgba(224,240,250,0.9)');
   g.addColorStop(1, 'rgba(200,220,235,0)');
   ctx.fillStyle = g;
-  ctx.fillRect(W * 0.38, 0, W * 0.24, H);
+  ctx.fillRect(S * 0.47, 0, S * 0.06, S);
   const t = new CanvasTexture(canvas);
   t.colorSpace = SRGBColorSpace;
   return t;
@@ -267,6 +273,22 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
   overcast.renderOrder = -95;
   overcast.frustumCulled = false;
   group.add(overcast);
+
+  // --- distant ground haze ---------------------------------------------------------------------
+  // The terrain streamer holds a 3 km radius on a 17 km map, so on a vista (Pilatus over the Luzern
+  // basin, the far end of the Urnersee) everything past that is simply not there and the Preetham
+  // dome shows through it — and below the horizon Preetham is almost white, so the missing distance
+  // reads as a blown-out void. This disc sits at the lake surface in the haze colour and fills that
+  // void with atmosphere. It writes no depth and is ordered before the terrain, so any chunk that
+  // does exist draws over it.
+  const hazeGeo = new CircleGeometry(DOME_R, 48);
+  const hazeMat = new MeshBasicMaterial({ color: 0xbfd2e0, depthWrite: false, side: DoubleSide, fog: false });
+  const groundHaze = new Mesh(hazeGeo, hazeMat);
+  groundHaze.name = 'ground-haze';
+  groundHaze.rotation.x = -Math.PI / 2;
+  groundHaze.renderOrder = -97;
+  groundHaze.frustumCulled = false;
+  group.add(groundHaze);
 
   // --- stars + moon --------------------------------------------------------------------------
   const starTex = discTexture(32, 0.15);
@@ -330,7 +352,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     particleMat = new PointsMaterial({
       map: kind === 'snow' ? flakeTex : rainTex,
       color: kind === 'snow' ? 0xffffff : 0xd6e6f2,
-      size: kind === 'snow' ? 0.55 : 2.4,
+      size: kind === 'snow' ? 0.55 : 3.2,
       sizeAttenuation: true,
       transparent: true,
       opacity: kind === 'snow' ? 0.95 : 0.75,
@@ -369,10 +391,10 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     if (w.desat > 0) {
       look.zenith.lerp(grey, w.desat * 0.75);
       look.horizon.lerp(grey, w.desat * 0.80);
-      look.haze.lerp(grey, w.desat * 0.70);
+      look.haze.lerp(grey, w.desat * 0.55);
       look.sunGlow.lerp(grey, w.desat * 0.85);
       look.light.lerp(grey, w.desat * 0.50);
-      look.ambient.lerp(grey, w.desat * 0.55);
+      look.ambient.lerp(grey, w.desat * 0.35);
     }
 
     sunDir.copy(bodyVector(sun.elevation, sun.azimuth));
@@ -403,16 +425,19 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     const dayI = Math.max(0, Math.sin(Math.max(0, sun.elevation)));
     // three r155+ lighting is physical: a 0.1-linear-albedo meadow needs irradiance around 6 to
     // land in the middle of the ACES curve at exposure ~0.9. 1.8 (the pre-r155 habit) renders night.
+    // The falloff is pow(sin el, 0.45), not sin el: the beam only loses ~half its strength to air
+    // mass at 3 degrees, and N.L already accounts for how obliquely it lands. Scaling the light by
+    // sin(el) as well double-counts the angle and turns a 19:00 village into a black frame.
     const intensity = night
       ? (moonUp ? 0.28 + moonP.phase * 0.55 : 0.14) * w.sunMul
-      : (0.55 + dayI * 6.4) * w.sunMul;
+      : (0.45 + 5.6 * Math.pow(dayI, 0.45)) * w.sunMul;
     csm.lightIntensity = intensity;
     for (const l of csm.lights) { l.color.copy(night ? nightLight : look.light); l.intensity = intensity; }
     csm.updateFrustums();
 
     hemi.color.copy(look.ambient);
     hemi.groundColor.setHex(night ? 0x141821 : 0x40382a).lerp(look.ambient, 0.25);
-    hemi.intensity = (night ? 0.42 + (moonUp ? moonP.phase * 0.30 : 0) : 0.95 + dayI * 1.55) * w.ambientMul;
+    hemi.intensity = (night ? 0.42 + (moonUp ? moonP.phase * 0.30 : 0) : 0.55 + 1.9 * Math.pow(dayI, 0.5)) * w.ambientMul;
 
     // --- clouds ----------------------------------------------------------------------------------
     // Cloud bodies take the colour of whatever is lighting them: white at noon, orange at dusk, blue at night.
@@ -436,6 +461,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     // --- fog / aerial perspective / shared atmosphere uniforms -----------------------------------
     const fog = scene.fog as FogExp2;
     fog.color.copy(look.haze);
+    hazeMat.color.copy(look.haze);
     fog.density = w.fogDensity;
     (scene.background as Color | null)?.copy?.(look.horizon);
 
@@ -455,7 +481,9 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
     (tu.uSeasonTint.value as Color).copy(seasonTint(season));
     tu.uWetness.value = w.wetness;
-    tu.uSnowDepth.value = Math.max(w.snowDepth, season === 'winter' ? 0.30 : 0);
+    // Winter lies below the season's snow line too: at Morgarten (game h 102, real 740 m a.s.l. in
+    // November) the ground is patchy white, not green, so winter adds a floor of snow everywhere.
+    tu.uSnowDepth.value = Math.max(w.snowDepth, season === 'winter' ? 0.45 : 0);
 
     ensureParticles(w.particles);
     exposure = look.exposure * w.exposureMul;
@@ -463,7 +491,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
   function seasonTint(s: Season): Color {
     switch (s) {
-      case 'winter': return new Color(0xa8b3a4);
+      case 'winter': return new Color(0x8b8a70);
       case 'spring': return new Color(0x9fc466);
       case 'autumn': return new Color(0xc09048);
       default: return new Color(0x9fb862);
@@ -478,7 +506,6 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
   applySun();
 
   let clock = 0;
-  let frames = 0;
   return {
     group,
     csm,
@@ -497,13 +524,11 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     },
     update(dt: number, glRenderer: WebGLRenderer) {
       clock += dt;
-      // See refreshTerrainMaterial(): the terrain program built on frame 0 has no directional light.
-      if (frames === 2 || frames === 30 || frames === 120 || frames === 300) refreshTerrainMaterial();
-      frames++;
       camera.updateMatrixWorld(true);
       setViewPosition(camera.position.x, camera.position.y, camera.position.z);
       // Sky/cloud/star domes ride with the camera so they stay at "infinity" across a 17 km map.
       group.position.set(camera.position.x, camera.position.y, camera.position.z);
+      groundHaze.position.y = -camera.position.y - 4;   // world y = -4, just under the lake surface
       cloudTex.offset.x = (clock * 0.0016) % 1;
       // CSM refreshes CSM_cascades/cameraNear/shadowFar ONLY inside updateFrustums(); update() alone
       // leaves them stale, and stale cascade bounds put the whole landscape in permanent shadow.
@@ -536,6 +561,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
       (sky.material as any).dispose();
       sky.geometry.dispose();
       domeGeo.dispose(); cumulusMat.dispose();
+      hazeGeo.dispose(); hazeMat.dispose();
       overcastGeo.dispose(); overcastMat.dispose();
       cloudTex.dispose();
       stars.geometry.dispose(); (stars.material as PointsMaterial).dispose(); starTex.dispose();
