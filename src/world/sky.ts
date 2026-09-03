@@ -79,8 +79,9 @@ interface SkyKey {
 const SKY_KEYS: SkyKey[] = [
   { el: -20, zenith: 0x04060e, horizon: 0x0a1120, haze: 0x131c31, sunGlow: 0x1b2440, light: 0x5a6ea8, ambient: 0x1a2440, exposure: 1.42 },
   { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x2f3f66, exposure: 1.52 },
-  { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x51608c, exposure: 1.45 },
-  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x7d90b4, exposure: 1.18 },
+  // twilight ambient lifted (was 0x51608c / 0x7d90b4): a dusk vista of shadowed flanks read as mud at 19:00
+  { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x6f7fa8, exposure: 1.5 },
+  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x9aabc8, exposure: 1.3 },
   { el: 10,  zenith: 0x2f639f, horizon: 0xe3bd92, haze: 0xb3bccb, sunGlow: 0xf7cf9b, light: 0xffd9a3, ambient: 0x9db4cd, exposure: 0.97 },
   { el: 28,  zenith: 0x336cb0, horizon: 0xcbdcea, haze: 0xa9c1da, sunGlow: 0xf6e3c0, light: 0xfff2d8, ambient: 0xbcd6e8, exposure: 0.92 },
   { el: 65,  zenith: 0x2f6bb8, horizon: 0xd3e3ef, haze: 0xa4bfdb, sunGlow: 0xf2ead8, light: 0xfffaf0, ambient: 0xc6dcec, exposure: 0.88 },
