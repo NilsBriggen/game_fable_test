@@ -5,7 +5,7 @@
  */
 import { BufferAttribute, BufferGeometry, Group, Mesh, Vector3 } from 'three';
 import { MAP_BOUNDS } from '@content/gazetteer';
-import { DEFAULT_GRID_H, DEFAULT_GRID_W, surfaceNameOf, type SurfaceName } from './heightmodel';
+import { BLEND_GROUP, DEFAULT_GRID_H, DEFAULT_GRID_W, surfaceNameOf, type SurfaceName } from './heightmodel';
 import { CHUNK_SIZE, LOD_SPACING } from './chunkmesh';
 import { loadCachedGrid, saveCachedGrid } from './idbcache';
 import { getTerrainMaterial } from './terrainMaterial';
@@ -200,6 +200,66 @@ export class TerrainManager {
         this.ensureRequested(cx, cz, lodForDistance(d), time);
       }
     }
+  }
+
+  private farMesh: Mesh | null = null;
+
+  /**
+   * One static low-resolution mesh of the whole map, drawn behind the streamed chunks so long views end in
+   * the Rigi and the Luzern basin rather than haze at VIEW_RADIUS (requests/worldlook-2). Built once from
+   * the CPU grid after `ready`; ~256×272 vertices, ~140 k triangles, one draw call, terrain material as-is.
+   * Sits 1.5 m under the true surface so the nearer chunks always win the depth test without z-fighting.
+   */
+  buildFarMesh(step = 8): Mesh | null {
+    if (!this.heights || !this.surface || this.farMesh) return this.farMesh;
+    const w = this.cpuWidth, h = this.cpuHeight;
+    const cols = Math.floor((w - 1) / step) + 1, rows = Math.floor((h - 1) / step) + 1;
+    const count = cols * rows;
+    const positions = new Float32Array(count * 3);
+    const normals = new Float32Array(count * 3);
+    const uvs = new Float32Array(count * 2);
+    const surfaceId = new Float32Array(count);
+    const H = this.heights, S = this.surface;
+    const gx = (c: number) => Math.min(w - 1, c * step), gz = (r: number) => Math.min(h - 1, r * step);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const ix = gx(c), iz = gz(r);
+        const i = r * cols + c;
+        const x = MAP_BOUNDS.minX + ix * this.cpuScaleX, z = MAP_BOUNDS.minZ + iz * this.cpuScaleZ;
+        positions[i * 3] = x; positions[i * 3 + 1] = H[iz * w + ix] - 1.5; positions[i * 3 + 2] = z;
+        const xl = Math.max(0, ix - step), xr = Math.min(w - 1, ix + step), zn = Math.max(0, iz - step), zs = Math.min(h - 1, iz + step);
+        const dhdx = (H[iz * w + xr] - H[iz * w + xl]) / ((xr - xl) * this.cpuScaleX);
+        const dhdz = (H[zs * w + ix] - H[zn * w + ix]) / ((zs - zn) * this.cpuScaleZ);
+        const nl = Math.hypot(dhdx, 1, dhdz);
+        normals[i * 3] = -dhdx / nl; normals[i * 3 + 1] = 1 / nl; normals[i * 3 + 2] = -dhdz / nl;
+        uvs[i * 2] = x / 40; uvs[i * 2 + 1] = z / 40;
+        surfaceId[i] = BLEND_GROUP[S[iz * w + ix]] ?? 0;
+      }
+    }
+    const indices = new Uint32Array((cols - 1) * (rows - 1) * 6);
+    let k = 0;
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const a = r * cols + c, b = a + 1, d = a + cols, e = d + 1;
+        indices[k++] = a; indices[k++] = d; indices[k++] = b;
+        indices[k++] = b; indices[k++] = d; indices[k++] = e;
+      }
+    }
+    const geom = new BufferGeometry();
+    geom.setAttribute('position', new BufferAttribute(positions, 3));
+    geom.setAttribute('normal', new BufferAttribute(normals, 3));
+    geom.setAttribute('uv', new BufferAttribute(uvs, 2));
+    geom.setAttribute('surfaceId', new BufferAttribute(surfaceId, 1));
+    geom.setIndex(new BufferAttribute(indices, 1));
+    geom.computeBoundingSphere();
+    const mesh = new Mesh(geom, getTerrainMaterial().material);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.name = 'terrain-far';
+    this.group.add(mesh);
+    this.farMesh = mesh;
+    return mesh;
   }
 
   /** Called every frame by the world system with the current camera position. */

@@ -41,6 +41,7 @@ export async function register(ctx: GameContext): Promise<void> {
   const terrain = new TerrainManager(ctx.seed, (info) => ctx.events.emit('chunk-loaded', info));
   terrainRoot.add(terrain.group);
   await terrain.ready;
+  terrain.buildFarMesh(); // whole-map backdrop behind the 3 km streamed ring (requests/worldlook-2)
 
   const water: WaterHandle = buildWater();
   waterRoot.add(water.group);
@@ -200,7 +201,7 @@ export async function register(ctx: GameContext): Promise<void> {
     },
     isSettled: () => terrain.isSettledAround(camera.position.x, camera.position.z, STREAM_CORE_RADIUS),
     placeInstances,
-    spawnModel: (modelId: string, opts?: { variant?: string; scale?: number }) => models.spawn(modelId, opts),
+    spawnModel: (modelId: string, opts?: { variant?: string; scale?: number; seed?: number }) => models.spawn(modelId, opts),
     spawnCharacter: (archetype: string, opts?: { variant?: string; mounted?: boolean; seed?: number }) => spawnCharacter(archetype, opts),
     registerModel: (modelId: string, factory: (o: { variant?: string; scale?: number; rng: Rng }) => Object3D) => models.register(modelId, factory),
     hasModel: (modelId: string) => models.has(modelId),
