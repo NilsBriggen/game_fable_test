@@ -6,7 +6,7 @@
   },
   {
     "id": "lake-overview-seelisberg",
-    "description": "Urnersee from the Seelisberg viewpoint above the R\u00fctli, morning",
+    "description": "Urnersee from the Seelisberg viewpoint above the Rütli, morning",
     "state": "explore",
     "hour": 8,
     "weather": "clear",
@@ -25,7 +25,7 @@
   },
   {
     "id": "free-altdorf",
-    "description": "Free camera: Altdorf and the Reuss valley toward Fl\u00fcelen (no player needed)",
+    "description": "Free camera: Altdorf and the Reuss valley toward Flüelen (no player needed)",
     "state": "explore",
     "hour": 12,
     "weather": "clear",
@@ -44,7 +44,7 @@
   },
   {
     "id": "free-morgarten",
-    "description": "Free camera: Morgarten slope above the \u00c4gerisee, winter (no player needed)",
+    "description": "Free camera: Morgarten slope above the Ägerisee, winter (no player needed)",
     "state": "explore",
     "hour": 9,
     "weather": "overcast",
@@ -64,7 +64,7 @@
   },
   {
     "id": "free-schoellenen",
-    "description": "Free camera: Sch\u00f6llenen gorge (no player needed)",
+    "description": "Free camera: Schöllenen gorge (no player needed)",
     "state": "explore",
     "hour": 10,
     "weather": "overcast",
@@ -102,7 +102,7 @@
   },
   {
     "id": "ruetli-dawn",
-    "description": "The R\u00fctli meadow at dawn, follow camera",
+    "description": "The Rütli meadow at dawn, follow camera",
     "state": "explore",
     "hour": 6,
     "weather": "clear",
@@ -121,7 +121,7 @@
   },
   {
     "id": "gotthard-schoellenen",
-    "description": "Sch\u00f6llenen gorge and Teufelsbr\u00fccke",
+    "description": "Schöllenen gorge and Teufelsbrücke",
     "state": "explore",
     "hour": 10,
     "weather": "overcast",
@@ -148,7 +148,7 @@
   },
   {
     "id": "morgarten-winter",
-    "description": "Morgarten slope above the \u00c4gerisee, November",
+    "description": "Morgarten slope above the Ägerisee, November",
     "state": "explore",
     "hour": 9,
     "weather": "overcast",
@@ -158,7 +158,7 @@
   },
   {
     "id": "flyover-streaming",
-    "description": "Camera flight Fl\u00fcelen \u2192 Brunnen \u2192 Luzern; hitch detection",
+    "description": "Camera flight Flüelen → Brunnen → Luzern; hitch detection",
     "state": "explore",
     "hour": 11,
     "weather": "clear",
@@ -267,5 +267,15 @@
     "encounter": "enc.brunnen-quay",
     "combatScript": "auto:1",
     "waitPlayerTurn": true
+  },
+  {
+    "id": "save-load-roundtrip",
+    "description": "Altdorf at noon, saved to slot 1 and loaded back before capture (state round-trip proof in notes)",
+    "state": "explore",
+    "hour": 12,
+    "weather": "clear",
+    "spawnAt": "poi.altdorf",
+    "camera": "follow",
+    "saveLoad": 1
   }
 ]

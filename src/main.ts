@@ -4,7 +4,7 @@
  */
 import { GameContext } from '@core/context';
 import type { GameState } from '@core/state';
-import { Name } from '@core/components';
+import { Name, Transform } from '@core/components';
 import { loadContent } from './content';
 import * as worldMod from './world';
 import * as saveMod from './save';
@@ -240,6 +240,8 @@ interface Scenario {
   flyover?: { pos: number[]; lookAt: number[] }[];
   encounter?: string; ambush?: 'player' | 'enemy'; combatScript?: string | CombatCommand[]; waitPlayerTurn?: boolean;
   dialogue?: string; menu?: string; freshGame?: boolean;
+  /** save to this manual slot, then load it back before the screenshot (round-trip proof) */
+  saveLoad?: number;
 }
 
 async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string }> {
@@ -318,6 +320,19 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
   if (sc.dialogue) {
     if (!quest) notes.push('no quest module');
     else void quest.runDialogue(sc.dialogue);
+  }
+  if (typeof sc.saveLoad === 'number') {
+    const save = svc.tryGet('save');
+    if (!save) notes.push('no save module');
+    else {
+      const snap = () => { const pid = ex?.getPlayer() ?? null; const t = pid !== null ? ctx.world.get(pid, Transform) : null; return { pos: t ? [Math.round(t.x), Math.round(t.z)] : null, stage: quest?.stage('quest.der-eid') ?? null, hour: Math.round(ctx.clock.hour) }; };
+      const before = snap();
+      await save.save(sc.saveLoad, 'harness round-trip');
+      await save.load(sc.saveLoad);
+      const after = snap();
+      const same = JSON.stringify(before) === JSON.stringify(after);
+      notes.push(`save/load slot ${sc.saveLoad}: ${same ? 'round-trip identical' : `MISMATCH before=${JSON.stringify(before)} after=${JSON.stringify(after)}`}`);
+    }
   }
   if (sc.menu) {
     const ui = svc.tryGet('ui');
