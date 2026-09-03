@@ -77,8 +77,9 @@ interface SkyKey {
 }
 
 const SKY_KEYS: SkyKey[] = [
-  { el: -20, zenith: 0x04060e, horizon: 0x0a1120, haze: 0x131c31, sunGlow: 0x1b2440, light: 0x5a6ea8, ambient: 0x1a2440, exposure: 1.42 },
-  { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x2f3f66, exposure: 1.52 },
+  // night floor lifted (was 0x1a2440 / 0x2f3f66): a moonless November pre-dawn rendered as a black frame
+  { el: -20, zenith: 0x04060e, horizon: 0x0a1120, haze: 0x131c31, sunGlow: 0x1b2440, light: 0x5a6ea8, ambient: 0x2c3a5c, exposure: 1.5 },
+  { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x3d4f7c, exposure: 1.56 },
   // twilight ambient lifted (was 0x51608c / 0x7d90b4): a dusk vista of shadowed flanks read as mud at 19:00
   { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x6f7fa8, exposure: 1.5 },
   { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x9aabc8, exposure: 1.3 },
@@ -438,7 +439,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
     hemi.color.copy(look.ambient);
     hemi.groundColor.setHex(night ? 0x141821 : 0x40382a).lerp(look.ambient, 0.25);
-    hemi.intensity = (night ? 0.42 + (moonUp ? moonP.phase * 0.30 : 0) : 0.55 + 1.9 * Math.pow(dayI, 0.5)) * w.ambientMul;
+    hemi.intensity = (night ? 0.6 + (moonUp ? moonP.phase * 0.30 : 0) : 0.55 + 1.9 * Math.pow(dayI, 0.5)) * w.ambientMul;
 
     // --- clouds ----------------------------------------------------------------------------------
     // Cloud bodies take the colour of whatever is lighting them: white at noon, orange at dusk, blue at night.
