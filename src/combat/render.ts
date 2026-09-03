@@ -459,6 +459,11 @@ export class CombatRenderer {
         else this.playOn(rec.unit, 'attack');
         break;
       }
+      case 'turn-start': {
+        // brace/flee/cheer loop until told otherwise (requests/art-2): a unit's own turn returns it to idle
+        if (rec.unit !== undefined && this.unitPose.get(rec.unit) === 'up') this.playOn(rec.unit, 'idle');
+        break;
+      }
       case 'morale': {
         if (rec.unit !== undefined && /rout|flee|breaks/i.test(rec.text) && this.unitPose.get(rec.unit) === 'up') this.playOn(rec.unit, 'flee');
         break;
