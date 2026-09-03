@@ -298,6 +298,9 @@ export class CombatRenderer {
 
   update(view: CombatStateView | null): void {
     if (!view) { this.hide(); return; }
+    // the engine keeps emitting its final state after 'end' (result card, save thumbnails); never re-show
+    // the grid for it — the Einsiedeln grid lines hung in the sky for the rest of Act 1
+    if (view.phase === 'ended') { this.clearAfterEnd(); return; }
     this.show();
     const world = this.ctx.services.tryGet('world');
     if (!this.grid || this.grid.cols !== view.grid.cols || this.grid.rows !== view.grid.rows || this.grid.origin.x !== view.grid.origin.x || this.grid.origin.z !== view.grid.origin.z) {

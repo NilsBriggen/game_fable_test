@@ -36,6 +36,9 @@ export async function register(ctx: GameContext): Promise<void> {
   const frameCamera = (): void => {
     const view = engine.getState();
     if (!view || framing) return;
+    // the engine emits its final state after 'end' too (result card, save thumbnails): re-entering combat
+    // camera mode then froze the view over the last battlefield for the rest of the chapter
+    if (view.phase === 'ended') return;
     framing = true;
     try {
       const cx = view.grid.origin.x;
