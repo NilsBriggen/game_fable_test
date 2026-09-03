@@ -169,6 +169,12 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
   // A beat's target stage can be entered and left inside one awaited fight (escort → quay fight → travel-ruetli),
   // so "reached" means seen at any point since the beat began, not "is the current stage".
   const seenStages = new Set<string>();
+  // authored stage order as a fallback: a stage past the target counts as reached even if the event was missed
+  const stageIndex = (questId: string, stage: string | null): number => {
+    if (!stage) return -1;
+    const def = ctx.content.quests.get(questId);
+    return def ? def.stages.findIndex((st) => st.id === stage) : -1;
+  };
   const offStages = quest.on('quest-advanced', (q, st) => seenStages.add(`${q}:${st}`));
   // Auto-answer dialogues by wrapping the UI service (rendering still happens so screenshots show the panel).
   if (ui) {
@@ -218,11 +224,11 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
       }
       if (ctx.state.state === 'gameover') { note = 'party wiped (gameover)'; break; }
       if (beat.untilDone && quest.isDone(beat.untilDone)) { ok = true; break; }
-      if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || seenStages.has(`${beat.untilStage[0]}:${beat.untilStage[1]}`) || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
+      if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || seenStages.has(`${beat.untilStage[0]}:${beat.untilStage[1]}`) || stageIndex(beat.untilStage[0], quest.stage(beat.untilStage[0])) > stageIndex(beat.untilStage[0], beat.untilStage[1]) || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
       // keep the player at the beat's POI (dialogues/cutscenes may move the camera, not the player)
       await nextFrame();
     }
-    if (!ok && !note) note = `timeout; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
+    if (!ok && !note) note = `timeout; seen=[${[...seenStages].join(' ')}]; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
     if (opts.screenshot) await opts.screenshot(beat.name);
     log.push({ beat: beat.name, ok, seconds: Math.round((performance.now() - t0) / 100) / 10, stage: beat.untilStage ? quest.stage(beat.untilStage[0]) : null, note, dialogues, fights });
     if (!ok) break;

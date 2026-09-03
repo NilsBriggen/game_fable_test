@@ -18,7 +18,11 @@ const PREVIEW = flag('--preview');
 const OUT = path.resolve(root, opt('--out', 'tools/harness/out'));
 const ONLY = opt('--scenario', null)?.split(',');
 // Always use a private port with HMR/watch disabled so concurrent builders editing files cannot reload the page mid-scenario.
-const PORT = Number(opt('--port', 0)) || (PREVIEW ? 4300 : 5300) + Math.floor(Math.random() * 500);
+
+// A free ephemeral port from the OS (a random pick collided with another queued harness's server and
+// the run silently attached to that server instead of its own).
+async function freePort() { const net = await import('node:net'); return new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); }); }
+const PORT = Number(opt('--port', 0)) || await freePort();
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 const BUDGET = { drawCalls: 2000, triangles: 3_000_000, frameP95: 16.6, heapMB: 512 };
 
