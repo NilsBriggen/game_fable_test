@@ -94,7 +94,7 @@ const REGION_SEEDS: RegionSeed[] = [
   },
   {
     id: 'schwyz-arth-morgarten', name: 'Arth & Morgarten', owner: 'schwyz', note: 'LORE.md §3: Arth, Sattel, the Morgarten battlefield, the Ägerisee south shore.',
-    places: ['arth', 'goldau', 'steinerberg', 'sattel', 'sattel-letzi', 'morgarten', 'rossberg', 'fronalpstock', 'grosser-mythen'],
+    places: ['arth', 'goldau', 'steinerberg', 'sattel', 'sattel-letzi', 'morgarten', 'rossberg', 'fronalpstock', 'grosser-mythen', 'oberarth'],
   },
   {
     id: 'schwyz-march-einsiedeln', name: 'March & Einsiedeln', owner: 'einsiedeln', note: 'LORE.md §3: the disputed March pastures and Einsiedeln abbey.',
@@ -118,7 +118,7 @@ const REGION_SEEDS: RegionSeed[] = [
   },
   {
     id: 'zug', name: 'Zug', owner: 'habsburg', note: "LORE.md §3: Zug town, Zugersee north end, Ägeri, Leopold's 1315 staging camp.",
-    places: ['zug', 'baar', 'oberaegeri', 'unteraegeri'],
+    places: ['zug', 'baar', 'cham', 'oberaegeri', 'unteraegeri', 'walchwil', 'oberwil'],
   },
   {
     id: 'alps-high', name: 'High Uri Alps', owner: 'none', note: 'LORE.md §3: impassable high country, visual backdrop only (Urirotstock, Glärnisch direction).',

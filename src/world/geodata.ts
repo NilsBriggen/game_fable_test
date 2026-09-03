@@ -246,6 +246,10 @@ export function valleyProfile(dist: number, floorH: number, p: SegParams): numbe
   if (p.shape === 'cliff') t = 1 - Math.exp(-d / 90);
   else if (p.shape === 'steepV') t = Math.pow(Math.min(d / 260, 3), 0.9);
   else t = Math.pow(Math.min(d / 520, 3), 0.55);
+  // a power < 1 has an infinite slope at d = 0: ease the first 50 m so a river running parallel to a
+  // shore (the Lorze along the Zugersee's north end) does not put a wall at its own bed edge
+  const ease = clamp(d / 50, 0, 1);
+  t *= ease * ease * (3 - 2 * ease);
   return floorH + p.riseRate * t;
 }
 
@@ -320,7 +324,9 @@ export function shoreProfile(dist: number, levelH: number, D: number, steep: boo
   // start and the point it hands off to the existing mountainside), so the transition has no kink.
   const halfWidth = 25;
   if (dist <= halfWidth) return levelH;
-  const riseRate = steep ? 250 : 120;
+  // The smoothstep's steepest point is 1.5·rise/(D−halfWidth); cap it at tan 28° (0.53) so the
+  // authored shore never exceeds the 6 m-per-10 m continuity bound on its own (Axen: 250/575 → 0.65).
+  const riseRate = Math.min(steep ? 250 : 120, 0.48 * (D - halfWidth) / 1.5);
   const t = clamp((dist - halfWidth) / Math.max(1, D - halfWidth), 0, 1);
   const shaped = t * t * (3 - 2 * t);
   return levelH + riseRate * shaped;

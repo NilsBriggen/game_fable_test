@@ -12,7 +12,7 @@
  *  7. settlement pads flattened
  * A final classification pass produces the (season-independent) surface mask.
  */
-import { MAP_BOUNDS } from '@content/gazetteer';
+import { MAP_BOUNDS, PLACES } from '@content/gazetteer';
 import { clamp, pointInPolygon, polygonSdf, smoothstep } from '@core/math';
 import { fbm2D, ridge2D } from './noise';
 import {
@@ -152,6 +152,24 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // detail noise + relaxation applied afterward doesn't push a couple of samples back over the line.
   const MAX_GRADE_TAN = Math.tan((14 * Math.PI) / 180);
   for (const c of geo.corridors) {
+    // A corridor hugging a lake is authored at the lake: gazetteer-interpolated heights put the Lorze
+    // mouth 49 m above the Zugersee and the Arth road 40 m above the Lauerzersee within a texel or two
+    // of the water, which the shore pass then had to protect as a wall. Clamp every point within
+    // reach of a shore to lake level plus a ≤24° rise from the waterline (rivers: ≤11°, they meet the
+    // lake at its level), then grade-limit as before so the along-corridor profile stays walkable.
+    const riseTan = c.kind === 'river' ? 0.05 : 0.12; // a shore road is an embankment otherwise (Zug's quay road stood 20 m over the water)
+    for (const pt of c.pts) {
+      // inside a settlement the road follows the pad's gazetteer height (Meggen sits 12 m up its bank)
+      if (geo.pads.some((pd) => Math.hypot(pd.x - pt.x, pd.z - pt.z) < pd.radius * 1.2)) continue;
+      for (const lake of geo.lakes) {
+        const d = polygonSdf(pt.x, pt.z, lake.poly);
+        if (d > 160) continue;
+        // a road already 60 m+ above a lake it merely passes near in plan (Steinerberg over the
+        // Lauerzersee, Seelisberg over the Urnersee) is a mountain road, not a shore road: leave it
+        if (pt.h - lake.levelGameH > 60) continue;
+        pt.h = Math.min(pt.h, lake.levelGameH + 2 + riseTan * Math.max(0, d));
+      }
+    }
     const limitedH = limitGrade(c.pts, MAX_GRADE_TAN);
     for (let pi = 1; pi < c.pts.length; pi++) {
       const a = c.pts[pi - 1], b = c.pts[pi];
@@ -284,7 +302,10 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       const fine = fbm2D(x, z, { octaves: 3, frequency: 1 / 46, seed: seed + 900 }) * (2 + slope01 * 9);
       const rockGate = smoothstep(0.45, 0.72, slope01); // ~scree/rock threshold, see classification below
       const jag = ridge2D(x, z, { octaves: 2, frequency: 1 / 130, seed: seed + 1900 }) * rockGate * 3;
-      heights[idx] += fine + jag;
+      // a road/river bed keeps its authored profile: a bed cell beside a steep bank has a huge
+      // pre-noise slope and would otherwise get the full 11 m amplitude stamped onto the road surface
+      const bed = 1 - smoothstep(8, 30, bestDist[idx]);
+      heights[idx] += (fine + jag) * (1 - bed);
     }
   }
 
@@ -321,6 +342,12 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   const shoreTouched = new Uint8Array(n);
   for (const lake of geo.lakes) {
     const D = MAJOR_LAKES.has(lake.id) ? 600 : 300;
+    // The blend hands back to the existing terrain over D; where that terrain is a mountain flank
+    // 300 m above the water (Rigi Hochflue over the Lauerzersee, Rossberg over the Zugersee) a 300 m
+    // hand-off is a 12 m-per-10 m ramp at its mid-point. Per cell, widen the hand-off so the blend's
+    // steepest point (1.5·Δh/D) stays under tan 29°, capped at D_MAX so summits are still reached.
+    const D_MAX = 1000;
+    const dLocal = (existing: number, target: number) => clamp((1.5 * Math.abs(existing - target)) / 0.33, D, D_MAX);
     let cx = 0, cz = 0;
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const [px, pz] of lake.poly) {
@@ -328,10 +355,10 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
       if (px < minX) minX = px; if (px > maxX) maxX = px; if (pz < minZ) minZ = pz; if (pz > maxZ) maxZ = pz;
     }
     cx /= lake.poly.length; cz /= lake.poly.length;
-    const gx0 = Math.max(0, Math.floor((minX - D - MAP_BOUNDS.minX) / scaleX));
-    const gx1 = Math.min(width - 1, Math.ceil((maxX + D - MAP_BOUNDS.minX) / scaleX));
-    const gz0 = Math.max(0, Math.floor((minZ - D - MAP_BOUNDS.minZ) / scaleZ));
-    const gz1 = Math.min(height - 1, Math.ceil((maxZ + D - MAP_BOUNDS.minZ) / scaleZ));
+    const gx0 = Math.max(0, Math.floor((minX - D_MAX - MAP_BOUNDS.minX) / scaleX));
+    const gx1 = Math.min(width - 1, Math.ceil((maxX + D_MAX - MAP_BOUNDS.minX) / scaleX));
+    const gz0 = Math.max(0, Math.floor((minZ - D_MAX - MAP_BOUNDS.minZ) / scaleZ));
+    const gz1 = Math.min(height - 1, Math.ceil((maxZ + D_MAX - MAP_BOUNDS.minZ) / scaleZ));
     for (let gz = gz0; gz <= gz1; gz++) {
       const z = toZ(gz);
       const row = gz * width;
@@ -344,18 +371,26 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         // whatever raw pre-shore terrain height was there right at the waterline. Any cell with d<0
         // this pass touches gets overwritten again by the interior drop (step 7, runs after), so
         // covering a bit of the interior here too is harmless.
-        if (d > D) continue;
+        if (d > D_MAX) continue;
         const idx = row + gx;
         const ad = Math.abs(d);
         if (ad >= shoreDist[idx]) continue; // a nearer lake already claimed this cell
+        const steepPre = lake.id === 'urnersee' && x > cx && z < 1000;
+        const Dl = dLocal(heights[idx], shoreProfile(d, lake.levelGameH, D, steepPre));
+        if (d > Dl) continue;
         shoreDist[idx] = ad;
         shoreTouched[idx] = 1;
         // real Axen cliff: the Urnersee's east shore rises faster, but still continuously — restricted
         // to the actual Axen stretch (roughly Sisikon/Tellsplatte, z<1000) so the flat Flüelen/Reuss
         // delta at the lake's south end (z>1000, same x>cx side) doesn't also get force-steepened.
         const steep = lake.id === 'urnersee' && x > cx && z < 1000;
-        shoreTarget[idx] = shoreProfile(d, lake.levelGameH, D, steep);
-        shoreW[idx] = smoothstep(0, D, d); // 0 at the shoreline (full target), 1 at D (fully back to existing terrain)
+        // Pull DOWN only: the profile removes walls above the water, it must not raise a flat river
+        // valley meeting the lake (the Lorze at Zug, the Reuss delta at Flüelen) into a berm along the
+        // shore. Terrain already under the profile keeps its height, lifted to just above the waterline
+        // where it had sunk below it.
+        const profileH = shoreProfile(d, lake.levelGameH, D, steep);
+        shoreTarget[idx] = Math.min(profileH, Math.max(heights[idx], lake.levelGameH + 0.3));
+        shoreW[idx] = smoothstep(0, Dl, d); // 0 at the shoreline (full target), 1 at Dl (fully back to existing terrain)
       }
     }
   }
@@ -418,7 +453,26 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   const padMask = new Uint8Array(n);
   for (const pad of geo.pads) {
     const padCore = pad.radius * 0.35;
-    const padOuter = pad.radius * 1.6;
+    const padOuterMin = pad.radius * 1.6;
+    // The ramp widens with the height it has to bridge: a fixed 1.6·radius ramp next to a mountain
+    // flank (Lauerz under the Rigi, Zug) pulled the ring down to village height and left a wall right
+    // behind it. A smoothstep's steepest point is 1.5·Δh/(outer−core); keep it under tan 22° (0.40).
+    const PAD_RAMP_TAN = 0.4;
+    let padOuter = padOuterMin;
+    {
+      const rr = padOuterMin / Math.min(scaleX, scaleZ) + 1;
+      const gcx = Math.round((pad.x - MAP_BOUNDS.minX) / scaleX), gcz = Math.round((pad.z - MAP_BOUNDS.minZ) / scaleZ);
+      let maxDh = 0;
+      for (let gz = Math.max(0, gcz - rr); gz <= Math.min(height - 1, gcz + rr); gz++) {
+        for (let gx = Math.max(0, gcx - rr); gx <= Math.min(width - 1, gcx + rr); gx++) {
+          const d = Math.hypot(toX(gx) - pad.x, toZ(gz) - pad.z);
+          if (d > padOuterMin || d < padCore) continue;
+          const dh = Math.abs(heights[gz * width + gx] - pad.h);
+          if (dh > maxDh) maxDh = dh;
+        }
+      }
+      padOuter = Math.max(padOuterMin, padCore + (1.5 * maxDh) / PAD_RAMP_TAN);
+    }
     const rx = padOuter / scaleX, rz = padOuter / scaleZ;
     const gx0 = Math.max(0, Math.floor((pad.x - MAP_BOUNDS.minX) / scaleX - rx));
     const gx1 = Math.min(width - 1, Math.ceil((pad.x - MAP_BOUNDS.minX) / scaleX + rx));
@@ -436,7 +490,15 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         // (x,z) — flattening this alp's pad would otherwise overwrite the mountain's actual summit
         // target with the alp's lower height. Fade the pad blend out wherever a true peak summit
         // (peakProtect) already owns this cell, same principle as the shore/relaxation protections.
-        const w = (1 - smoothstep(padCore, padOuter, d)) * (1 - peakProtect[idx]);
+        // A road bed keeps its own grade-limited profile through the village: the pad used to hold the
+        // road flat at pad.h to the pad edge, after which the road had to catch up at ~29° (Steinen →
+        // Sattel). The authored road passes through the village centre at the same gazetteer height
+        // as the pad, so there is no seam where the two meet.
+        // …but only where the road's own profile actually disagrees with the pad (Steinen's road climbs
+        // 22 m by the pad edge); a road within a few metres of the pad height lets the pad win, so the
+        // village centre still sits at its gazetteer height (Steinerberg) and the road crosses on a ≤8° bump.
+        const roadBed = (1 - smoothstep(8, 20, bestRoadDist[idx])) * smoothstep(3, 30, Math.abs(bestValleyH[idx] - pad.h));
+        const w = (1 - smoothstep(padCore, padOuter, d)) * (1 - peakProtect[idx]) * (1 - roadBed);
         heights[idx] = heights[idx] + (pad.h - heights[idx]) * w;
         if (d < padCore && peakProtect[idx] < 0.5) padMask[idx] = 1;
       }
