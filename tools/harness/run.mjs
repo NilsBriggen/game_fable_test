@@ -72,6 +72,7 @@ const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(String(e.message || e)));
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+page.on('response', (r) => { if (r.status() >= 400) consoleErrors.push(`HTTP ${r.status()} ${r.url()}`); });
 
 const report = { generatedAt: new Date().toISOString(), mode: PREVIEW ? 'preview(build)' : 'dev', renderer: null, budgets: BUDGET, scenarios: [] };
 await page.goto(`${URL_BASE}/?harness=1`, { waitUntil: 'load' });

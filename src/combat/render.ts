@@ -9,7 +9,7 @@ import {
   SpriteMaterial, CanvasTexture, Object3D,
 } from 'three';
 import type { GameContext } from '@core/context';
-import type { CellView, CombatStateView, SurfaceType, WorldService } from '@core/services';
+import type { CellView, CharacterAnim, CharacterHandle, CombatEventRecord, CombatStateView, SurfaceType, WorldService } from '@core/services';
 import { cellToWorldXZ, type GridInfo } from './rules/grid';
 
 /** issue 12: a subtle tint per cell surface, drawn under the grid lines — the terrain types combat actually
@@ -162,6 +162,12 @@ export class CombatRenderer {
   private highlightGroup = new Group();
   private unitGroup = new Group();
   private unitMeshes = new Map<number, Object3D>();
+  /** rigged characters (WorldService.spawnCharacter) per unit — absent when only the capsule fallback exists */
+  private unitHandles = new Map<number, CharacterHandle>();
+  /** last pose we asked a unit's character for, so `update()` only re-plays on a transition */
+  private unitPose = new Map<number, 'up' | 'down' | 'dead'>();
+  /** units walking a `move` event's path; while present, `update()` leaves their position alone */
+  private moving = new Map<number, { points: [number, number, number][]; idx: number }>();
   private damagePops: DamagePop[] = [];
   private debugEl: HTMLDivElement | null = null;
   private grid: GridInfo | null = null;
@@ -322,7 +328,17 @@ export class CombatRenderer {
       let mesh = this.unitMeshes.get(u.id);
       if (!mesh) {
         const modelId = u.modelId && world?.hasModel(u.modelId) ? u.modelId : 'char.peasant';
-        mesh = world ? world.spawnModel(modelId, { variant: u.mounted ? 'mounted' : undefined }) : new Group();
+        if (world?.spawnCharacter) {
+          const handle = world.spawnCharacter(modelId.replace(/^char\./, ''), { mounted: u.mounted, seed: u.id * 7919 + 17 });
+          this.unitHandles.set(u.id, handle);
+          mesh = handle.object;
+        } else {
+          mesh = world ? world.spawnModel(modelId, { variant: u.mounted ? 'mounted' : undefined }) : new Group();
+        }
+        const [sx, sy, sz] = this.cellCenter(u.q, u.r);
+        mesh.position.set(sx, sy, sz);
+        // face the middle of the field: deployed squads start looking at each other, not all north
+        this.face(mesh, view.grid.origin.x, view.grid.origin.z);
         const nameSprite = makeTextSprite(u.name, u.side === 'player' ? '#bfe3ff' : u.side === 'enemy' ? '#ffb0b0' : '#e8dcb8');
         nameSprite.position.y = 2.05;
         nameSprite.name = 'nameSprite';
@@ -336,10 +352,25 @@ export class CombatRenderer {
         this.unitGroup.add(mesh);
         this.unitMeshes.set(u.id, mesh);
       }
-      const [x, y, zc] = this.cellCenter(u.q, u.r);
-      mesh.position.set(x, y, zc);
-      mesh.visible = !u.down || true;
-      mesh.rotation.y = u.down ? Math.PI / 2 : 0;
+      const handle = this.unitHandles.get(u.id);
+      if (!this.moving.has(u.id)) {
+        const [x, y, zc] = this.cellCenter(u.q, u.r);
+        mesh.position.set(x, y, zc);
+      }
+      const dead = u.hp <= 0 && !u.down;
+      const pose: 'up' | 'down' | 'dead' = dead ? 'dead' : u.down ? 'down' : 'up';
+      if (handle) {
+        // rigged: pose transitions only (a save loaded mid-fight has no events to replay), never every frame
+        const prev = this.unitPose.get(u.id);
+        if (prev !== pose) {
+          this.unitPose.set(u.id, pose);
+          if (pose === 'dead') void handle.play('dead');
+          else if (pose === 'down') void handle.play('down');
+          else if (prev !== undefined) void handle.play('idle');
+        }
+      } else {
+        mesh.rotation.z = pose === 'up' ? 0 : Math.PI / 2;
+      }
       const hpBar = mesh.children.find((c) => c.name === 'hpBar') as Sprite | undefined;
       const moraleBar = mesh.children.find((c) => c.name === 'moraleBar') as Sprite | undefined;
       if (hpBar) { const t = hpBar.material.map as CanvasTexture; this.redrawBar(t, u.hp / Math.max(1, u.hpMax), '#c23b3b'); }
@@ -359,10 +390,89 @@ export class CombatRenderer {
       }
     }
     for (const [id, mesh] of this.unitMeshes) {
-      if (!seen.has(id)) { this.unitGroup.remove(mesh); this.unitMeshes.delete(id); }
+      if (!seen.has(id)) this.removeUnit(id, mesh);
     }
 
     this.updateDebugOverlay(view);
+  }
+
+  private removeUnit(id: number, mesh: Object3D): void {
+    this.unitGroup.remove(mesh);
+    this.unitMeshes.delete(id);
+    this.unitHandles.get(id)?.dispose();
+    this.unitHandles.delete(id);
+    this.unitPose.delete(id);
+    this.moving.delete(id);
+  }
+
+  /** Exploration's yaw convention (npc.ts/index.ts): yaw 0 faces −Z, `rotation.y = atan2(dx, −dz)`. */
+  private face(mesh: Object3D, x: number, z: number): void {
+    const dx = x - mesh.position.x, dz = z - mesh.position.z;
+    if (Math.abs(dx) + Math.abs(dz) < 1e-3) return;
+    mesh.rotation.y = Math.atan2(dx, -dz);
+  }
+
+  private playOn(id: number | undefined, anim: CharacterAnim): void {
+    if (id === undefined) return;
+    const h = this.unitHandles.get(id);
+    if (h) void h.play(anim);
+  }
+
+  /** Engine event → character animation (requests/art-2): attacker swings/shoots facing the target, the
+   *  target flinches on damage, goes down, dies; movers walk their path (see `tick`) instead of teleporting. */
+  onEvent(rec: CombatEventRecord): void {
+    const mesh = rec.unit !== undefined ? this.unitMeshes.get(rec.unit) : undefined;
+    const targetId = typeof rec.data?.target === 'number' ? (rec.data.target as number) : rec.target;
+    const targetMesh = targetId !== undefined ? this.unitMeshes.get(targetId) : undefined;
+    switch (rec.kind) {
+      case 'move': {
+        if (rec.unit === undefined || !mesh) return;
+        const path = (rec.data?.path as { q: number; r: number }[] | undefined) ?? (rec.data?.cell ? [rec.data.cell as { q: number; r: number }] : []);
+        if (path.length === 0) return;
+        const points = path.map((c) => this.cellCenter(c.q, c.r));
+        this.moving.set(rec.unit, { points, idx: 0 });
+        break;
+      }
+      case 'attack':
+      case 'ability': {
+        if (!mesh) return;
+        if (targetMesh) { this.face(mesh, targetMesh.position.x, targetMesh.position.z); this.face(targetMesh, mesh.position.x, mesh.position.z); }
+        if (rec.kind === 'ability' && /reloads/.test(rec.text)) { this.playOn(rec.unit, 'reload'); break; }
+        if (rec.kind === 'ability' && !targetMesh) break; // brace, shield wall, rally… static abilities
+        const attacker = rec.unit !== undefined ? this.ctx.services.tryGet('combat')?.getState()?.units.find((u) => u.id === rec.unit) : undefined;
+        const ranged = !!attacker?.weapon?.ranged || /bolt|shoot|loose|crossbow/i.test(rec.text);
+        this.playOn(rec.unit, ranged ? 'shoot' : 'attack');
+        break;
+      }
+      case 'damage': {
+        const amount = typeof rec.data?.amount === 'number' ? (rec.data.amount as number) : 0;
+        if (amount <= 0 || rec.unit === undefined) return;
+        if (this.unitPose.get(rec.unit) === 'up') this.playOn(rec.unit, 'hit');
+        break;
+      }
+      case 'reaction': {
+        if (!mesh) return;
+        if (targetMesh) this.face(mesh, targetMesh.position.x, targetMesh.position.z);
+        if (/brace/i.test(rec.text)) this.playOn(rec.unit, 'brace');
+        else if (/bolt/i.test(rec.text)) this.playOn(rec.unit, 'shoot');
+        else if (/block/i.test(rec.text)) this.playOn(rec.unit, 'hit');
+        else this.playOn(rec.unit, 'attack');
+        break;
+      }
+      case 'morale': {
+        if (rec.unit !== undefined && /rout|flee|breaks/i.test(rec.text) && this.unitPose.get(rec.unit) === 'up') this.playOn(rec.unit, 'flee');
+        break;
+      }
+      case 'end': {
+        const view = this.ctx.services.tryGet('combat')?.getState();
+        if (!view?.result) return;
+        const winners = view.result.outcome === 'win' ? 'player' : view.result.outcome === 'lose' ? 'enemy' : null;
+        for (const u of view.units) if (u.side === winners && this.unitPose.get(u.id) === 'up') this.playOn(u.id, 'cheer');
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   private redrawBar(tex: CanvasTexture | null, frac: number, color: string): void {
@@ -383,6 +493,24 @@ export class CombatRenderer {
   }
 
   tick(dt: number): void {
+    // movers: 3.2 m/s along the path (a 6-cell dash ≈ 3 s), then snap to the final cell
+    for (const [id, m] of this.moving) {
+      const mesh = this.unitMeshes.get(id);
+      if (!mesh) { this.moving.delete(id); continue; }
+      let budget = dt * (this.unitPose.get(id) === 'up' ? 3.2 : 1.2);
+      while (budget > 0 && m.idx < m.points.length) {
+        const [tx, ty, tz] = m.points[m.idx];
+        const dx = tx - mesh.position.x, dy = ty - mesh.position.y, dz = tz - mesh.position.z;
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist <= budget) { mesh.position.set(tx, ty, tz); m.idx++; budget -= dist; continue; }
+        this.face(mesh, tx, tz);
+        mesh.position.x += (dx / dist) * budget;
+        mesh.position.y += (dy / dist) * budget;
+        mesh.position.z += (dz / dist) * budget;
+        budget = 0;
+      }
+      if (m.idx >= m.points.length) this.moving.delete(id);
+    }
     for (let i = this.damagePops.length - 1; i >= 0; i--) {
       const p = this.damagePops[i];
       p.life -= dt;
@@ -442,6 +570,7 @@ export class CombatRenderer {
   }
 
   dispose(): void {
+    for (const [id, mesh] of [...this.unitMeshes]) this.removeUnit(id, mesh);
     this.root.parent?.remove(this.root);
     if (this.debugEl) this.debugEl.remove();
   }

@@ -166,6 +166,10 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
   const rng = ctx.rng.ambient;
   const log: { beat: string; ok: boolean; seconds: number; stage: string | null; note?: string; dialogues: number; fights: number }[] = [];
   let dialogues = 0, fights = 0;
+  // A beat's target stage can be entered and left inside one awaited fight (escort → quay fight → travel-ruetli),
+  // so "reached" means seen at any point since the beat began, not "is the current stage".
+  const seenStages = new Set<string>();
+  const offStages = quest.on('quest-advanced', (q, st) => seenStages.add(`${q}:${st}`));
   // Auto-answer dialogues by wrapping the UI service (rendering still happens so screenshots show the panel).
   if (ui) {
     const orig = ui.dialogue.show.bind(ui.dialogue);
@@ -214,7 +218,7 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
       }
       if (ctx.state.state === 'gameover') { note = 'party wiped (gameover)'; break; }
       if (beat.untilDone && quest.isDone(beat.untilDone)) { ok = true; break; }
-      if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
+      if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || seenStages.has(`${beat.untilStage[0]}:${beat.untilStage[1]}`) || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
       // keep the player at the beat's POI (dialogues/cutscenes may move the camera, not the player)
       await nextFrame();
     }
@@ -223,6 +227,7 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
     log.push({ beat: beat.name, ok, seconds: Math.round((performance.now() - t0) / 100) / 10, stage: beat.untilStage ? quest.stage(beat.untilStage[0]) : null, note, dialogues, fights });
     if (!ok) break;
   }
+  offStages();
   return { log, chapter: quest.chapter(), reputation: ['uri', 'schwyz', 'unterwalden', 'habsburg', 'einsiedeln'].map((f) => [f, quest.reputation(f)]), party: svc.get('party').getParty().length, journal: quest.journal().length };
 }
 

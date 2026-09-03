@@ -287,7 +287,8 @@ export class NpcSystem {
     const r = this.world.get(id, Renderable);
     if (!r) return;
     if (!this.worldService.hasModel(r.modelId)) return; // combat/exploration model registration hasn't happened yet
-    const obj = this.worldService.spawnModel(r.modelId, { variant: r.variant });
+    // seed = entity id: the same villager keeps the same face/cloth across freeze/re-entry and reloads (N5)
+    const obj = this.worldService.spawnModel(r.modelId, { variant: r.variant, seed: id });
     obj.position.set(t.x, t.y, t.z);
     obj.rotation.y = t.yaw;
     this.dynamicRoot.add(obj);

@@ -50,7 +50,7 @@ export interface WorldService {
   isSettled(): boolean;
   placeInstances(modelId: string, transforms: TransformLike[]): InstanceHandle;
   /** load (cached) a prop/character model as a fresh Object3D you own */
-  spawnModel(modelId: string, opts?: { variant?: string; scale?: number }): Object3D;
+  spawnModel(modelId: string, opts?: { variant?: string; scale?: number; /** stable per-entity look (character variants) */ seed?: number }): Object3D;
   /**
    * Animated character from the asset library (rigged GLB when available, procedural fallback otherwise).
    * Callers own the returned object; call `update(dt)` each frame and `dispose()` when done.

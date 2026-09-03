@@ -44,6 +44,7 @@ const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, de
 page.setDefaultTimeout(180000);
 const pageErrors = []; page.on('pageerror', (e) => pageErrors.push(String(e.message || e)));
 const consoleErrors = []; page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+page.on('response', (r) => { if (r.status() >= 400) consoleErrors.push(`HTTP ${r.status()} ${r.url()}`); });
 const shots = [];
 await page.exposeFunction('__shot', async (name) => {
   const file = path.join(OUT, `${name}.png`);

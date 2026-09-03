@@ -25,6 +25,7 @@ export async function register(ctx: GameContext): Promise<void> {
   const renderer = new CombatRenderer(ctx);
   engine.on('state', (view) => renderer.update(view));
   engine.on('event', (rec) => {
+    renderer.onEvent(rec);
     if (rec.kind === 'damage' && rec.data && typeof rec.data.amount === 'number' && rec.unit) {
       const u = engine.getState()?.units.find((x) => x.id === rec.unit);
       if (u) renderer.spawnDamageNumber({ q: u.q, r: u.r }, rec.data.amount as number);
