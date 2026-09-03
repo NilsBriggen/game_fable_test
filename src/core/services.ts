@@ -35,6 +35,8 @@ export interface WorldService {
   normalAt(x: number, z: number): Vector3;
   surfaceAt(x: number, z: number): SurfaceType;
   isWater(x: number, z: number): boolean;
+  /** game height of the lake surface nearest (x,z) within maxDist metres, else null */
+  lakeLevelAt?(x: number, z: number, maxDist?: number): number | null;
   slopeAt(x: number, z: number): number; // radians
   raycast(origin: Vector3, dir: Vector3, maxDist: number): { point: Vector3; normal: Vector3; entity?: EntityId } | null;
   regionAt(x: number, z: number): RegionDef | null;

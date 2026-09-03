@@ -76,7 +76,7 @@ function collectBaked(obj: Object3D, x: number, y: number, z: number, yaw: numbe
 
 /** Merges each material's accumulated geometry into one static mesh and adds it to `propsRoot` — the
  *  actual draw-call reduction: N buildings sharing a material become 1 draw call, not N×(meshes/building). */
-function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group): void {
+function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, clusterName = 'settlements'): void {
   for (const [mat, geos] of byMat) {
     if (geos.length === 0) continue;
     let merged: BufferGeometry | null = null;
@@ -87,8 +87,10 @@ function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group): v
     }
     if (!merged) continue;
     const mesh = new Mesh(merged, mat);
+    mesh.name = clusterName;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    merged.computeBoundingSphere();
     propsRoot.add(mesh);
   }
 }
@@ -96,17 +98,20 @@ function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group): v
 export function buildSettlements(content: ContentRegistry, world: WorldService, propsRoot: Group, showGesslerHat: boolean): BuiltSettlements {
   const probe: HeightProbe = { heightAt: (x, z) => world.heightAt(x, z), isWater: (x, z) => world.isWater(x, z) };
   const colliders: Collider[] = [];
-  const byMat = new Map<Material, BufferGeometry[]>();
 
+  // One merged mesh per (POI, material): a per-settlement bounding sphere keeps far villages frustum- and
+  // shadow-culled (requests/art-1.md), while everything within one settlement stays one draw call per material.
   for (const poi of content.pois.values()) {
     if (!SETTLEMENT_KINDS.has(poi.kind)) continue;
     const yaw = roadFacingYaw(poi.id);
     const layout = generateLayout({ id: poi.id, kind: poi.kind, x: poi.x, z: poi.z, yaw, population: poi.population }, probe);
+    const byMat = new Map<Material, BufferGeometry[]>();
     for (const m of layout) {
       const obj = world.spawnModel(m.modelId, { variant: m.variant });
       const y = world.heightAt(m.x, m.z) + (m.dy ?? 0);
       collectBaked(obj, m.x, y, m.z, m.yaw ?? 0, m.scale ?? 1, byMat);
     }
+    emitMerged(byMat, propsRoot, poi.id);
     colliders.push(...buildColliders(layout));
   }
 
@@ -128,6 +133,5 @@ export function buildSettlements(content: ContentRegistry, world: WorldService, 
     colliders.push({ x, z, radius: 1 });
   }
 
-  emitMerged(byMat, propsRoot);
   return { colliders, gallowsPole };
 }
