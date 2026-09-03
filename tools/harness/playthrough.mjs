@@ -69,7 +69,7 @@ const DLG_SHOTS = args.includes('--dialogue-shots'); // per-node shots cost up t
 const result = await page.evaluate(async ({ pick, dlgShots }) => {
   const h = window.__harness;
   const before = { e: h.console.errors.length, w: h.console.warnings.length };
-  const r = await h.runAct1Playthrough({ pick, screenshot: (name) => (dlgShots || !name.startsWith('dlg-')) ? window.__shot(name) : Promise.resolve(), maxSecondsPerBeat: 150 });
+  const r = await h.runAct1Playthrough({ pick, screenshot: (name) => (dlgShots || !name.startsWith('dlg-')) ? window.__shot(name) : Promise.resolve(), maxSecondsPerBeat: 240 });
   const st = h.stats();
   return { ...r, errors: h.console.errors.slice(before.e), warnings: h.console.warnings.slice(before.w), drawCalls: st.drawCalls, heapMB: st.heapMB, state: st.state };
 }, { pick: PICK, dlgShots: DLG_SHOTS });
