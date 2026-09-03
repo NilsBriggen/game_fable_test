@@ -82,12 +82,13 @@ class ExplorationServiceImpl implements ExplorationService {
     if (this.populatedChapter === chapter && this.ctx.world.count(Poi) > 0) return;
     this.populatedChapter = chapter;
     this.lastChapter = chapter;
+    // settlements (and their colliders) first, so NPCs can be kept out of house footprints when they spawn
+    this.rebuildSettlements();
     this.npcSystem.populate(chapter);
     this.poiSystem.spawnPoiEntities();
     spawnContainers(this.ctx.world, this.ctx.content);
     spawnBoatTravel(this.ctx.world, this.ctx.content);
     spawnTradeAndRest(this.ctx.world, this.ctx.content);
-    this.rebuildSettlements();
   }
 
   private rebuildSettlements(): void {
@@ -95,7 +96,11 @@ class ExplorationServiceImpl implements ExplorationService {
     this.settlementsGroup.clear();
     const built: BuiltSettlements = buildSettlements(this.ctx.content, this.world, this.settlementsGroup, this.lastChapter === 'ch1-1307');
     this.colliders = built.colliders;
+    this.settlementsChapter = this.lastChapter;
+    this.npcSystem.setColliders(built.colliders);
+    this.cameraRig.setColliders(built.colliders);
   }
+  private settlementsChapter: string | null = null;
 
   private teardownTransientMeshes(): void {
     if (this.playerMesh) { disposeObject3D(this.playerMesh); this.playerMesh = null; }
@@ -109,7 +114,9 @@ class ExplorationServiceImpl implements ExplorationService {
     if (id !== null) this.ensurePlayerMesh(id);
     this.npcSystem.rebindPatrols();
     this.populatedChapter = null;
-    if (this.settlementsGroup.children.length === 0) this.rebuildSettlements();
+    // a load into another chapter must rebuild the settlement geometry/colliders too (Gessler's hat pole,
+    // burnt castles), not only when nothing was built yet (bughunt exploration)
+    if (this.settlementsGroup.children.length === 0 || this.settlementsChapter !== this.lastChapter) this.rebuildSettlements();
   }
 
   // ---------------- player ----------------

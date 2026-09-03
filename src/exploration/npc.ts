@@ -15,6 +15,7 @@ import type { NpcDef, ScheduleEntry } from '@core/schemas';
 import type { PartyService, WorldService } from '@core/services';
 import { Rng, hashString } from '@core/rng';
 import { dist2 } from '@core/math';
+import { resolveCollisions, type Collider } from './colliders';
 import { PLACES, ROADS } from '@content/gazetteer';
 import { resolveSchedule, analyticPosition } from './schedule';
 
@@ -99,11 +100,25 @@ export class NpcSystem {
     this.spawnPatrols();
   }
 
+  private colliders: Collider[] = [];
+  /** settlement building footprints, so no one spawns inside a house or the church */
+  setColliders(c: Collider[]): void { this.colliders = c; }
+  /** a spawn point on dry land outside every building footprint (falls back to the POI centre) */
+  private dryStand(cx: number, cz: number, x: number, z: number): { x: number; z: number } {
+    const p = { x, z };
+    if (this.worldService.isWater(p.x, p.z)) { p.x = cx; p.z = cz; }
+    resolveCollisions(p, this.colliders, 0.6);
+    if (this.worldService.isWater(p.x, p.z)) { p.x = cx; p.z = cz; resolveCollisions(p, this.colliders, 0.6); }
+    return p;
+  }
+
   spawnNamed(def: NpcDef): EntityId {
     const pos = this.poiPos(def.home) ?? { x: 0, z: 0 };
     const id = this.party.createCharacter(def);
     const jitter = jitterFor(def.id, 6);
-    const x = pos.x + jitter.x, z = pos.z + jitter.z;
+    const stand = this.dryStand(pos.x, pos.z, pos.x + jitter.x, pos.z + jitter.z);
+    const x = stand.x, z = stand.z;
+    jitter.x = x - pos.x; jitter.z = z - pos.z;
     const t = this.world.get(id, Transform)!;
     t.x = x; t.y = this.worldService.heightAt(x, z); t.z = z; t.yaw = 0;
     // Falls back to the quest builder's `dlg.generic.<archetype>` (requests/quest-1.md) for the vast
@@ -128,8 +143,8 @@ export class NpcSystem {
       return null;
     }
     const jitter = jitterFor(`${homePoi}:${archId}:${salt}`, 14);
-    let jx = x + jitter.x, jz = z + jitter.z;
-    if (this.worldService.isWater(jx, jz)) { jx = x; jz = z; } // fall back to POI centre rather than the lake
+    const stand = this.dryStand(x, z, x + jitter.x, z + jitter.z); // dry, and outside every building footprint
+    const jx = stand.x, jz = stand.z;
     const offset: [number, number] = [jx - x, jz - z]; // the *actual* jitter used, post water-fallback
     const rng = new Rng(hashString(`${homePoi}:${archId}:${salt}:life`));
     const market: [number, number] = [Math.cos(rng.next() * 6.283) * (4 + rng.next() * 6), Math.sin(rng.next() * 6.283) * (4 + rng.next() * 6)];

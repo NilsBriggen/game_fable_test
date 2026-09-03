@@ -71,17 +71,23 @@ export class CameraRigImpl implements CameraRig {
     }
   }
 
+  private readonly tmpOrbit = new Vector3();
+  private readonly tmpTarget = new Vector3();
+  /** allocation-free (called every frame): the result is a shared scratch vector, consume it before the next call */
   private orbitPosition(x: number, y: number, z: number, distance: number, pitch: number, yaw: number): Vector3 {
-    const back = new Vector3(-Math.sin(yaw), 0, Math.cos(yaw));
-    return new Vector3(x, y, z)
-      .add(back.multiplyScalar(distance * Math.cos(pitch)))
-      .add(new Vector3(0, distance * Math.sin(pitch), 0));
+    const horiz = distance * Math.cos(pitch);
+    return this.tmpOrbit.set(x - Math.sin(yaw) * horiz, y + distance * Math.sin(pitch), z + Math.cos(yaw) * horiz);
   }
 
   /** Pull the camera in along its own line back toward the target until it's not embedded in terrain
    *  (task spec: "collision-adjusted against terrain via heightAt"). Cheap ray-march, ≤ 12 samples. */
+  private colliders: { x: number; z: number; radius: number }[] = [];
+  /** settlement building footprints the boom must not pass through (bughunt exploration #3) */
+  setColliders(c: { x: number; z: number; radius: number }[]): void { this.colliders = c; }
+  private readonly tmpDir = new Vector3();
+  private readonly tmpOut = new Vector3();
   private collisionAdjust(target: Vector3, desired: Vector3): Vector3 {
-    const dir = desired.clone().sub(target);
+    const dir = this.tmpDir.copy(desired).sub(target);
     const fullDist = dir.length();
     if (fullDist < 0.01) return desired;
     dir.normalize();
@@ -92,12 +98,20 @@ export class CameraRigImpl implements CameraRig {
       const px = target.x + dir.x * t, pz = target.z + dir.z * t;
       const py = target.y + dir.y * t;
       const ground = this.world.heightAt(px, pz) + 0.35;
-      if (py < ground) {
+      let blocked = py < ground;
+      if (!blocked && py < ground + 9) {
+        // inside a building footprint (buildings are ~4–9 m tall): stop the boom before the wall
+        for (const c of this.colliders) {
+          const dx = px - c.x, dz = pz - c.z;
+          if (dx * dx + dz * dz < (c.radius + 0.4) * (c.radius + 0.4)) { blocked = true; break; }
+        }
+      }
+      if (blocked) {
         bestT = Math.max(0.6, (fullDist * (i - 1)) / steps);
         break;
       }
     }
-    return target.clone().add(dir.multiplyScalar(bestT));
+    return this.tmpOut.copy(target).addScaledVector(dir, bestT);
   }
 
   update(dt: number): void {
@@ -106,7 +120,7 @@ export class CameraRigImpl implements CameraRig {
 
     if (this.mode === 'combat' && this.combatFocus) {
       const f = this.combatFocus;
-      const target = new Vector3(f.x, f.y, f.z);
+      const target = this.tmpTarget.set(f.x, f.y, f.z);
       const desired = this.orbitPosition(f.x, f.y, f.z, f.distance, f.pitch, f.yaw);
       const adjusted = this.collisionAdjust(target, desired);
       if (!this.initialized) { this.smoothedPos.copy(adjusted); this.smoothedTarget.copy(target); this.initialized = true; }
@@ -120,7 +134,7 @@ export class CameraRigImpl implements CameraRig {
     // follow
     const p = this.getPlayerPos();
     if (!p) return;
-    const target = new Vector3(p.x, p.y + EYE_HEIGHT, p.z);
+    const target = this.tmpTarget.set(p.x, p.y + EYE_HEIGHT, p.z);
     const desired = this.orbitPosition(p.x, p.y + EYE_HEIGHT, p.z, this.distance, this.pitch, this.yaw);
     const adjusted = this.collisionAdjust(target, desired);
     if (!this.initialized) { this.smoothedPos.copy(adjusted); this.smoothedTarget.copy(target); this.initialized = true; }
