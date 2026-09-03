@@ -752,7 +752,7 @@ export function clipFor(anim: CharacterAnim, weapon: WeaponKind, seed: number, s
       if (ranged) return { name: 'Holding_B', loop: true };
       // Anything held in the hand slot must use a clip whose hand *grips*: in the pack's empty-handed
       // idles the wrist rolls over and a staff or spear ends up floating horizontally.
-      if (weapon === 'staff') return { name: seed % 3 === 0 ? 'Working_A' : 'Melee_2H_Idle', loop: true };
+      if (weapon === 'staff') return { name: 'Melee_2H_Idle', loop: true };   // `Working_A` splays the arms out
       if (twoHand) return { name: 'Melee_2H_Idle', loop: true };
       if (weapon === 'sword' || weapon === 'lance') return { name: 'Melee_Unarmed_Idle', loop: true };
       // Empty hands: only the two neutral standing idles. `Working_A`/`Holding_B` shape the hands around
@@ -820,6 +820,7 @@ class Character implements CharacterHandle {
   rigged = false;
   private mixer: AnimationMixer | null = null;
   private actions = new Map<string, AnimationAction>();
+  private clips: Map<string, AnimationClip> | null = null;
   private current: AnimationAction | null = null;
   private currentAnim: CharacterAnim | null = null;
   private locomotion: CharacterAnim = 'idle';
@@ -850,11 +851,12 @@ class Character implements CharacterHandle {
     this.weapon = main === 'dagger' ? 'none' : main;   // a sheathed sidearm leaves the hands free
     this.hasShield = (look.offHand ?? 'none') !== 'none';
     this.object.name = `char.${archetype}`;
-    const mounted = opts.mounted || opts.variant === 'mounted' || !!look.mounted;
-    ensureRig().then((r) => {
-      if (this.disposed) return;
-      this.build(look, mounted, r);
-    });
+    // an explicit `mounted: false` (combat fighting a knight on foot) wins over the look's own default
+    const mounted = opts.mounted ?? (opts.variant === 'mounted' || !!look.mounted);
+    registerTicker(this);          // ticked from now on, whatever happens to the async build below
+    ensureRig()
+      .then((r) => { if (!this.disposed) this.build(look, mounted, r); })
+      .catch(() => { /* the rest pose set in build() still stands; never leave a T-posed character */ });
   }
 
   private build(baseLook: Look, mounted: boolean, r: Rig | null): void {
@@ -896,30 +898,25 @@ class Character implements CharacterHandle {
         .filter((b): b is Bone => !!b);
     }
 
-    if (!r) {
-      this.fbBones = new Map(bones.map((b) => [b.name, b]));
-      this.poseFallback(0, 0);
-    }
+    // Relaxed rest pose first, for everyone: the bind pose is a T-pose, so anything that later keeps a
+    // mixer from running (a build that races a teardown, a character the scheduler never reaches) would
+    // otherwise leave a scarecrow standing in the square.
+    this.fbBones = new Map(bones.map((b) => [b.name, b]));
+    this.poseFallback(0, 0);
     if (r) {
       this.mixer = new AnimationMixer(rigRoot);
+      this.clips = r.clips;
       this.rigged = true;
-      for (const [name, clip] of r.clips) {
-        const a = this.mixer.clipAction(clip);
-        a.enabled = true;
-        this.actions.set(name, a);
-      }
-      const startAnim: CharacterAnim = mounted ? 'idle' : this.currentAnim ?? 'idle';
       if (mounted) {
-        const sit = this.actions.get('Sit_Chair_Idle');
+        const sit = this.action('Sit_Chair_Idle');
         if (sit) { sit.play(); this.current = sit; this.currentAnim = 'idle'; }
       } else {
-        this.start(startAnim, 0);
+        this.start('idle', 0);
       }
       // Apply frame 0 straight away: a character built while the game is paused (dialogue, cutscene) or
       // one spawned in the frame the screenshot is taken would otherwise render in its bind T-pose.
       this.mixer.update(0);
     }
-    registerTicker(this);
   }
 
   /** crossfade into `anim`; returns when a one-shot has finished (immediately for loops). */
@@ -934,9 +931,21 @@ class Character implements CharacterHandle {
 
   private pending: { at: number; resolve: () => void }[] = [];
 
+  /** Clip actions are created the first time a character actually plays that clip. */
+  private action(name: string): AnimationAction | null {
+    const hit = this.actions.get(name);
+    if (hit) return hit;
+    const clip = this.clips?.get(name);
+    if (!clip || !this.mixer) return null;
+    const a = this.mixer.clipAction(clip);
+    a.enabled = true;
+    this.actions.set(name, a);
+    return a;
+  }
+
   private start(anim: CharacterAnim, fade: number, speed = 1, loopOverride?: boolean): number {
     const pick = clipFor(anim, this.weapon, this.seed, this.hasShield);
-    const next = this.actions.get(pick.name);
+    const next = this.action(pick.name);
     this.currentAnim = anim;
     if (!next) return 0.5;
     const loop = loopOverride ?? pick.loop;
@@ -988,7 +997,7 @@ class Character implements CharacterHandle {
       this.autoSpeed = inst > 12 ? 0 : this.autoSpeed + (inst - this.autoSpeed) * Math.min(1, dt * 6);
       this.applySpeed(this.autoSpeed);
     }
-    if (this.fbBones) this.poseFallback(dt, this.explicitSpeed ? this.fbSpeed : this.autoSpeed);
+    if (this.fbBones && !this.mixer) this.poseFallback(dt, this.explicitSpeed ? this.fbSpeed : this.autoSpeed);
     this.mixer?.update(dt);
     for (const leg of this.mountLegs) leg.rotateX(-0.75);  // chair-sit → straddle
     if (this.pending.length && this.time >= this.pending[0].at) {

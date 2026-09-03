@@ -435,11 +435,27 @@ function churchInto(b: Build, ox = 0, oz = 0): void {
   for (let i = -1; i <= 1; i++) for (const sx of [-1, 1]) {
     b.box('ashlar', STONE_TONE, [0.55, wallH * 0.8, 0.9], [ox + sx * (naveW / 2 + 0.2), wallH * 0.4, oz + i * 3.6]);
   }
-  // round-arched windows: a tall slot plus a stone arch head
+  // ashlar quoins on all four corners, so no elevation is a blank plastered slab
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (let i = 0; i < 9; i++) {
+    b.box('ashlar', 0x9f9a90, [0.66, 0.5, 0.66], [ox + sx * (naveW / 2 - 0.1), 0.85 + i * 0.8, oz + sz * (naveD / 2 - 0.1)]);
+  }
+  // round-arched windows: a tall slot plus a stone arch head — long walls…
   for (let i = -1; i <= 1; i++) for (const sx of [-1, 1]) {
     const z = oz + i * 3.6 + 1.8;
     b.box('planks', 0x1a1610, [0.12, 1.9, 0.62], [ox + sx * (naveW / 2 + 0.02), wallH * 0.55, z]);
     b.cyl('ashlar', STONE_TONE, 0.36, 0.36, 0.2, [ox + sx * (naveW / 2 + 0.04), wallH * 0.55 + 0.95, z], [0, 0, Math.PI / 2], 8);
+  }
+  // …and both gable ends, outboard of the tower (±2.2) and the apse (±2.4) that stand in front of them
+  for (const sz of [-1, 1]) for (const dx of [-3.2, 3.2]) {
+    b.box('planks', 0x1a1610, [0.5, 1.6, 0.12], [ox + dx, wallH * 0.5, oz + sz * (naveD / 2 + 0.02)]);
+    b.cyl('ashlar', STONE_TONE, 0.31, 0.31, 0.2, [ox + dx, wallH * 0.5 + 0.8, oz + sz * (naveD / 2 + 0.04)], [Math.PI / 2, 0, 0], 8);
+  }
+  // west front: a stone-framed portal beside the tower, and an oculus high in each gable
+  b.box('ashlar', STONE_TONE, [2.2, 3.2, 0.3], [ox, 1.6, oz - naveD / 2 - 0.04]);
+  doorway(b, ox, 0, oz - naveD / 2 - 0.16, 1.3, 2.4);
+  for (const sz of [-1, 1]) {
+    b.cyl('ashlar', STONE_TONE, 0.62, 0.62, 0.22, [ox, wallH + 1.3, oz + sz * (naveD / 2 + 0.42)], [Math.PI / 2, 0, 0], 10);
+    b.cyl('planks', 0x1a1610, 0.42, 0.42, 0.16, [ox, wallH + 1.3, oz + sz * (naveD / 2 + 0.46)], [Math.PI / 2, 0, 0], 10);
   }
   b.box('ashlar', STONE_TONE, [naveW + 0.24, 0.22, naveD + 0.24], [ox, wallH * 0.52, oz]);   // stringcourse
   // south door with a stone surround
@@ -966,7 +982,7 @@ function treeModel(kind: TreeKind, rng: Rng): Object3D {
 
 // ---------------- registry ----------------
 
-export type ModelFactory = (opts: { variant?: string; scale?: number; rng: Rng }) => Object3D;
+export type ModelFactory = (opts: { variant?: string; scale?: number; rng: Rng; seed?: number }) => Object3D;
 
 export class ModelLibrary {
   private factories = new Map<string, ModelFactory>();
@@ -1008,7 +1024,9 @@ export class ModelLibrary {
     // Animated, period-dressed characters (characters.ts). Registered here so exploration's crowd and
     // combat's squads pick them up through their existing first-registration-wins `hasModel` guards.
     for (const id of CHARACTER_MODEL_IDS) {
-      this.register(id, (o) => characterModel(id, { variant: o.variant, seed: (o.rng.next() * 0xffffffff) >>> 0 }));
+      // `seed` (when the caller has a stable per-entity one) keeps an NPC's cloth/headwear variant
+      // identical across the 300 m freeze/unfreeze cycle; otherwise fall back to the spawn RNG.
+      this.register(id, (o) => characterModel(id, { variant: o.variant, seed: o.seed ?? ((o.rng.next() * 0xffffffff) >>> 0) }));
     }
     for (const k of ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff']) this.register(`weapon.${k}`, () => weaponModel(k));
     for (const k of ['heater', 'buckler']) this.register(`shield.${k}`, () => shieldModel(k));
@@ -1024,15 +1042,15 @@ export class ModelLibrary {
   list(): string[] {
     return [...this.factories.keys()];
   }
-  spawn(id: string, opts?: { variant?: string; scale?: number }): Object3D {
+  spawn(id: string, opts?: { variant?: string; scale?: number; seed?: number }): Object3D {
     if (!this.factories.has(id) && !this.warnedUnknown.has(id)) {
       this.warnedUnknown.add(id);
       console.warn(`[world] spawnModel: unknown model id "${id}", falling back to placeholder`);
     }
     const factory = this.factories.get(id) ?? this.factories.get('placeholder')!;
-    const salt = hashString(`${id}:${opts?.variant ?? ''}:${this.spawnCount++}`);
+    const salt = hashString(`${id}:${opts?.variant ?? ''}:${opts?.seed ?? this.spawnCount++}`);
     const rng = new Rng((this.seed ^ salt) >>> 0);
-    const obj = factory({ variant: opts?.variant, rng });
+    const obj = factory({ variant: opts?.variant, rng, seed: opts?.seed });
     const scale = opts?.scale ?? 1;
     if (scale !== 1) obj.scale.setScalar(scale);
     return obj;

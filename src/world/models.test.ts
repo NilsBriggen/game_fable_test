@@ -3,7 +3,7 @@
  * draw calls and triangles per model, the shared-material count across all buildings, footprints the
  * exploration layout assumes, and that every animation the game asks for exists in the CC0 clip pack.
  */
-import { Box3, Mesh, type Material, type Object3D } from 'three';
+import { Box3, Group, Mesh, Vector3, type Material, type Object3D } from 'three';
 
 interface Buffer { toString(enc: string, start?: number, end?: number): string; readUInt32LE(offset: number): number }
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -158,6 +158,39 @@ describe('characters', () => {
     expect(soldier.size, 'a livery is a livery').toBe(1);
   });
 
+  it('never stands in the rig bind pose, even before anything ticks it', async () => {
+    // The T-pose is the skin's bind pose; a character that is spawned and never updated (or whose mixer
+    // never starts) must still be posed — this is the scarecrow-in-the-square regression.
+    const h = spawnCharacter('woman-peasant', { seed: 3 });
+    await new Promise((r) => setTimeout(r, 30));
+    h.object.updateMatrixWorld(true);
+    let hand: Object3D | null = null;
+    h.object.traverse((c) => { if (c.name === 'hand_l') hand = c; });
+    expect(hand, 'no hand bone').toBeTruthy();
+    const p = (hand as unknown as Object3D).getWorldPosition(new Vector3());
+    // bind pose holds the hand out at (0.75, 1.42); any real idle drops it to the hip
+    expect(p.y, `hand at y=${p.y.toFixed(2)} — still in the T-pose`).toBeLessThan(1.25);
+    expect(Math.abs(p.x), `hand at x=${p.x.toFixed(2)} — arm still stretched out`).toBeLessThan(0.45);
+    h.dispose();
+  });
+
+  it('is advanced by updateCharacters() without the owner calling update()', async () => {
+    const { updateCharacters } = await import('./characters');
+    const h = spawnCharacter('peasant', { seed: 5 });
+    const holder = new Group();
+    holder.add(h.object);                      // parented like exploration/combat do, so it is not pruned
+    await new Promise((r) => setTimeout(r, 30));
+    h.object.updateMatrixWorld(true);
+    let hand: Object3D | null = null;
+    h.object.traverse((c) => { if (c.name === 'hand_l') hand = c; });
+    const before = (hand as unknown as Object3D).getWorldPosition(new Vector3()).clone();
+    for (let i = 0; i < 60; i++) updateCharacters(1 / 30);   // the world module's per-frame tick
+    h.object.updateMatrixWorld(true);
+    const after = (hand as unknown as Object3D).getWorldPosition(new Vector3());
+    expect(before.distanceTo(after), 'idle never advanced').toBeGreaterThan(1e-4);  // breathing idle: mm-scale
+    h.dispose();
+  });
+
   it('falls back to a procedural skeleton when the clip pack cannot be fetched', async () => {
     const h = spawnCharacter('militia-halberd');
     await new Promise((r) => setTimeout(r, 20));   // ensureRig() settles (fetch fails under node)
@@ -169,5 +202,20 @@ describe('characters', () => {
     await h.play('idle');
     h.update(0.1);
     h.dispose();
+  });
+});
+
+describe('per-entity seed', () => {
+  it('gives the same look back for the same seed and different looks for different seeds', async () => {
+    const lib = new ModelLibrary(11);
+    const cloth = async (seed: number): Promise<string> => {
+      const o = lib.spawn('char.peasant', { seed });
+      await new Promise((r) => setTimeout(r, 20));      // the character builds once the rig settles
+      const m = o.children[0]?.children.find((c) => (c as Mesh).isMesh) as Mesh | undefined;
+      const c = m?.geometry.getAttribute('color');
+      return c ? `${c.getX(0).toFixed(3)},${c.getY(0).toFixed(3)},${c.getZ(0).toFixed(3)}` : 'pending';
+    };
+    expect(await cloth(7)).toBe(await cloth(7));        // freeze/unfreeze must not restyle an NPC
+    expect(new Set([await cloth(1), await cloth(2), await cloth(3), await cloth(4)]).size).toBeGreaterThan(1);
   });
 });

@@ -1,5 +1,10 @@
 # art-2 — drive `CharacterHandle` animations from combat's renderer
 
+> **Status: applied.** The integrator wired this in `src/combat/render.ts` (a `CharacterHandle` per unit,
+> `play()` on attack/shoot/hit/down/dead/brace/flee/cheer, idle at turn start) and added `seed` to
+> `WorldService.spawnModel`'s options; `src/world/models.ts` now forwards that seed into the character
+> factory, so an NPC keeps its look across the 300 m freeze. Kept for the record.
+
 **From:** asset & character art builder · **To:** combat builder / integrator
 **File:** `src/combat/render.ts` (not mine to edit) · **API:** `WorldService.spawnCharacter` (`src/core/services.ts`)
 
