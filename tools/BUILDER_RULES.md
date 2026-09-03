@@ -10,9 +10,11 @@ implement) and `src/content/gazetteer.ts` (shared real-place coordinates).
 - If you need a change in `src/core` (new component field, new service method, schema tweak): write
   `requests/<your-module>-<n>.md` (what / why / proposed diff), then WORK AROUND it inside your own module for now
   (private types, local helper). Do not block on the integrator.
-- No new npm dependencies. Three.js r170 (+ `three/addons/*`), vanilla TS. No external asset downloads; generate
-  textures/models procedurally (canvas textures, noise, geometry code) — they must still look like the real thing, not
-  flat-coloured primitives. Style target: readable, painterly-realistic, PBR (`MeshStandardMaterial`) with normal/roughness.
+- No new npm dependencies. Three.js r170 (+ `three/addons/*`), vanilla TS. External asset downloads ARE allowed from
+  any source and under any licence (owner's decision): every file goes under `public/assets/**` with a row in the
+  relevant `tools/assets/*-manifest.json` (URL, author, licence as found, files, sizes) and a line in
+  `public/assets/CREDITS-*.md`. Procedural generation is still fine where it reaches the bar. Style target: readable,
+  painterly-realistic, PBR (`MeshStandardMaterial`) with normal/roughness.
 - Import rule: your module may import `@core/*`, `@content/*`, `three`, and its own files. Nothing from other modules.
   `node tools/check-imports.mjs` must stay clean.
 - Do NOT run `git commit` / `git push`. The integrator commits. Do not run `git checkout`/`git stash`/`git reset`.
