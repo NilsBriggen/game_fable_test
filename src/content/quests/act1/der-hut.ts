@@ -49,7 +49,7 @@ export const derHut: QuestDef = {
     {
       id: 'hohle-gasse-recover', journal: "The escort drives you back up the sunken road. Tell pulls back into the trees to wait for a second chance.",
       marker: 'poi.hohle-gasse', objectiveText: 'Regroup and hold the Hohle Gasse again.',
-      onEnter: [{ quest: ['advance', 'quest.der-hut', 'hohle-gasse'] }],
+      onEnter: [{ rest: 8 }, { quest: ['advance', 'quest.der-hut', 'hohle-gasse'] }],
     },
     {
       id: 'aftermath', journal: "Gessler is dead in the Hohle Gasse — as it is told in Uri.",

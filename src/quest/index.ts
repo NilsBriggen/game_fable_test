@@ -207,6 +207,10 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
       console.warn(`[quest] runEncounter: no combat service registered — resolving "${id}" as a default win`);
       return { outcome: 'win', rounds: 0, downed: [], dead: [], xp: {}, loot: [], log: [] };
     }
+    if (this.ctx.state.state === 'gameover') {
+      // the whole party is dead: no retry loop from here — the player loads a save
+      return { outcome: 'lose', rounds: 0, downed: [], dead: [], xp: {}, loot: [], log: [] };
+    }
     return combat.start(id);
   }
   teleport(poiId: string): void {

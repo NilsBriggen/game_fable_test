@@ -29,7 +29,7 @@ export const derEid: QuestDef = {
     {
       id: 'escort-recover', journal: "The toll-men beat you back from the quay. The elder's boat pulls off to a hidden inlet to wait out the hour — you will have to try the quay again.",
       marker: 'poi.brunnen', objectiveText: 'Regroup and try the Brunnen quay again.',
-      onEnter: [{ quest: ['advance', 'quest.der-eid', 'escort'] }],
+      onEnter: [{ rest: 8 }, { quest: ['advance', 'quest.der-eid', 'escort'] }],
     },
     {
       id: 'travel-ruetli', journal: 'Word passes quietly: gather at the Rütli meadow after dark.',

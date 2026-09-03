@@ -212,12 +212,13 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
         if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-end`);
         // a lost fight: let the quest's lose branch run
       }
+      if (ctx.state.state === 'gameover') { note = 'party wiped (gameover)'; break; }
       if (beat.untilDone && quest.isDone(beat.untilDone)) { ok = true; break; }
       if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
       // keep the player at the beat's POI (dialogues/cutscenes may move the camera, not the player)
       await nextFrame();
     }
-    if (!ok) note = `timeout; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
+    if (!ok && !note) note = `timeout; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
     if (opts.screenshot) await opts.screenshot(beat.name);
     log.push({ beat: beat.name, ok, seconds: Math.round((performance.now() - t0) / 100) / 10, stage: beat.untilStage ? quest.stage(beat.untilStage[0]) : null, note, dialogues, fights });
     if (!ok) break;
