@@ -138,7 +138,9 @@ function gameTimeForStart(): number {
 
 
 // ---------- harness: Act 1 playthrough driver (final gate) ----------
-interface PlaythroughBeat { name: string; poi?: string; talkTo?: string; dwellSeconds?: number; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number }
+interface PlaythroughBeat { name: string; poi?: string; talkTo?: string; dwellSeconds?: number; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number   /** recruit beats: done once the party has at least this many members */
+  untilPartySize?: number;
+}
 // Mirrors src/quest/walkthrough.test.ts: arrive (presence gates), talk to the quest NPC where the stage needs it, fights auto-play.
 const ACT1_BEATS: PlaythroughBeat[] = [
   { name: '01-fluelen-news', poi: 'poi.fluelen', dwellSeconds: 8, untilStage: ['quest.der-eid', 'fluelen-news'] },
@@ -146,6 +148,11 @@ const ACT1_BEATS: PlaythroughBeat[] = [
   { name: '03-altdorf-fuerst', poi: 'poi.altdorf', talkTo: 'npc.walter-fuerst', untilStage: ['quest.der-eid', 'escort'] },
   { name: '04-brunnen-quay-fight', poi: 'poi.brunnen', combatRounds: 40, untilStage: ['quest.der-eid', 'travel-ruetli'] },
   { name: '05-ruetli-oath', poi: 'poi.ruetli', hour: 22, untilDone: 'quest.der-eid' },
+  // companions (LORE §5 pool) are optional recruits in the game; the driver takes all three so the Act 1
+  // fights are fought at the party size the encounters were balanced for
+  { name: '05b-recruit-jost', poi: 'poi.fluelen', talkTo: 'npc.jost-imhof', untilPartySize: 2 },
+  { name: '05c-recruit-mechthild', poi: 'poi.steinen', talkTo: 'npc.mechthild-schorno', untilPartySize: 3 },
+  { name: '05d-recruit-heini', poi: 'poi.stans', talkTo: 'npc.heini-odermatt', untilPartySize: 4 },
   { name: '06-altdorf-1307-hat', poi: 'poi.altdorf', untilStage: ['quest.der-hut', 'travel-tellsplatte'], maxSeconds: 360 },
   { name: '07-tellsplatte', poi: 'poi.tellsplatte', untilStage: ['quest.der-hut', 'travel-hohle-gasse'] },
   { name: '08-hohle-gasse-fight', poi: 'poi.hohle-gasse', combatRounds: 40, untilStage: ['quest.der-hut', 'burgenbruch'] },
@@ -235,6 +242,7 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
       }
       if (ctx.state.state === 'gameover') { note = 'party wiped (gameover)'; break; }
       if (beat.untilDone && quest.isDone(beat.untilDone)) { ok = true; break; }
+      if (beat.untilPartySize && svc.get('party').getParty().length >= beat.untilPartySize) { ok = true; break; }
       if (beat.untilStage && (quest.stage(beat.untilStage[0]) === beat.untilStage[1] || seenStages.has(`${beat.untilStage[0]}:${beat.untilStage[1]}`) || stageIndex(beat.untilStage[0], quest.stage(beat.untilStage[0])) > stageIndex(beat.untilStage[0], beat.untilStage[1]) || quest.isDone(beat.untilStage[0]))) { ok = true; break; }
       // keep the player at the beat's POI (dialogues/cutscenes may move the camera, not the player)
       await nextFrame();
