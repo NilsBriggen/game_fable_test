@@ -27,7 +27,7 @@ const t0 = Date.now();
 while (true) {
   try { fs.mkdirSync(LOCK); fs.writeFileSync(path.join(LOCK, 'pid'), String(process.pid)); break; } catch {}
   try { if (Date.now() - fs.statSync(LOCK).mtimeMs > 45 * 60 * 1000) { fs.rmSync(LOCK, { recursive: true, force: true }); continue; } } catch { continue; }
-  if (Date.now() - t0 > 90 * 60 * 1000) { console.error('playthrough: lock timeout'); process.exit(3); }
+  if (Date.now() - t0 > 240 * 60 * 1000) { console.error("playthrough: lock timeout"); process.exit(3); }
   await new Promise((r) => setTimeout(r, 2000));
 }
 const release = () => { try { fs.rmSync(LOCK, { recursive: true, force: true }); } catch {} };
