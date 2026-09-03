@@ -43,7 +43,7 @@ async function acquireLock() {
       try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; return; } catch {}
       try { const age = Date.now() - fs.statSync(slot).mtimeMs; if (age > 45 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); } catch {}
     }
-    if (Date.now() - t0 > 60 * 60 * 1000) { console.error('harness: could not acquire lock after 60 min'); process.exit(3); }
+    if (Date.now() - t0 > 240 * 60 * 1000) { console.error('harness: could not acquire lock after 240 min'); process.exit(3); }
     if ((Date.now() - t0) % 60000 < 2500) console.log('harness: waiting for another run to finish…');
     await new Promise((r) => setTimeout(r, 2000));
   }
