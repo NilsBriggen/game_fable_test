@@ -16,7 +16,7 @@ import { MAP_BOUNDS, PLACES } from '@content/gazetteer';
 import { clamp, pointInPolygon, polygonSdf, smoothstep } from '@core/math';
 import { fbm2D, ridge2D } from './noise';
 import {
-  buildWorldGeo, nearestOnSpline, valleyProfile, peakShape, lakeShelf, segmentDistT, limitGrade, shoreProfile,
+  buildWorldGeo, nearestOnSpline, valleyProfile, peakShape, lakeShelf, segmentDistT, limitGrade, shoreProfile, insideAnyLake,
   type WorldGeo, type Corridor,
 } from './geodata';
 
@@ -486,6 +486,9 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         const d = Math.hypot(x - pad.x, z - pad.z);
         if (d >= padOuter) continue;
         const idx = row + gx;
+        // a shore village's pad stops at the waterline: flattening the lake bed up to village height
+        // made the Rütli a disc island in the Urnersee
+        if (d > padCore && insideAnyLake(x, z, geo)) continue; // a port's quay core stays flat even where the coarse polygon reads water
         // 'rigi' (alp, h=389) and 'rigi-kulm' (landmark peak, h=455) share the exact same gazetteer
         // (x,z) — flattening this alp's pad would otherwise overwrite the mountain's actual summit
         // target with the alp's lower height. Fade the pad blend out wherever a true peak summit

@@ -86,7 +86,7 @@ const REGION_SEEDS: RegionSeed[] = [
   },
   {
     id: 'schwyz-talkessel', name: 'Schwyz basin', owner: 'schwyz', note: 'LORE.md §3: Schwyz under the two Mythen, Steinen, Brunnen, Lauerz.',
-    places: ['schwyz', 'steinen', 'brunnen', 'ibach', 'seewen', 'lauerz', 'gersau'],
+    places: ['schwyz', 'steinen', 'brunnen', 'ibach', 'seewen', 'lauerz', 'gersau', 'kindli'],
   },
   {
     id: 'schwyz-muotathal', name: 'Muotatal', owner: 'schwyz', pad: 900, note: 'LORE.md §3: Muotathal village, alps, the Pragel.',

@@ -17,6 +17,7 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'ruetli': { id: 'ruetli', name: 'Rütli', x: -186, z: -74, kind: 'meadow', owner: 'uri', asl: 500, h: 22 },
   'seelisberg': { id: 'seelisberg', name: 'Seelisberg', x: -405, z: -247, kind: 'viewpoint', owner: 'uri', asl: 800, h: 122 },
   'treib': { id: 'treib', name: 'Treib', x: -51, z: -124, kind: 'port', owner: 'uri', asl: 434, h: 0 },
+  'kindli': { id: 'kindli', name: 'Kindlimord chapel', x: -700, z: -560, kind: 'church', owner: 'schwyz', asl: 440, h: 2 },
   'bauen': { id: 'bauen', name: 'Bauen', x: -507, z: 766, kind: 'village', owner: 'uri', asl: 440, h: 2 },
   'isleten': { id: 'isleten', name: 'Isleten', x: -169, z: 1112, kind: 'hut', owner: 'uri', asl: 440, h: 2 },
   'fluelen': { id: 'fluelen', name: 'Flüelen', x: 270, z: 1483, kind: 'port', owner: 'uri', asl: 440, h: 2 },
@@ -45,7 +46,7 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'lauerz': { id: 'lauerz', name: 'Lauerz', x: -490, z: -1705, kind: 'village', owner: 'schwyz', asl: 460, h: 9 },
   'muotathal': { id: 'muotathal', name: 'Muotathal', x: 2618, z: -272, kind: 'village', owner: 'schwyz', asl: 620, h: 62 },
   'stoos': { id: 'stoos', name: 'Stoos alp', x: 844, z: -371, kind: 'alp', owner: 'schwyz', asl: 1300, h: 289 },
-  'gersau': { id: 'gersau', name: 'Gersau', x: -1436, z: -717, kind: 'village', owner: 'schwyz', asl: 440, h: 2 },
+  'gersau': { id: 'gersau', name: 'Gersau', x: -1436, z: -300, /* north shore under the Rigi; was 200 m inside the basin */ kind: 'village', owner: 'schwyz', asl: 440, h: 2 },
   'vitznau': { id: 'vitznau', name: 'Vitznau', x: -2128, z: -1112, kind: 'village', owner: 'luzern', asl: 440, h: 2 },
   'weggis': { id: 'weggis', name: 'Weggis', x: -3006, z: -1656, kind: 'village', owner: 'luzern', asl: 440, h: 2 },
   'rigi': { id: 'rigi', name: 'Rigi alp', x: -2111, z: -2273, kind: 'alp', owner: 'schwyz', asl: 1600, h: 389 },
@@ -144,5 +145,5 @@ export const ROADS: { id: string; name: string; via: string[] }[] = [
   { id: 'luzern-road', name: 'Luzern–Horw–Hergiswil–Stansstad', via: ["luzern", "horw", "hergiswil", "stansstad"] },
   { id: 'schaechental-road', name: 'Altdorf–Bürglen–Klausen', via: ["altdorf", "buerglen", "spiringen", "unterschaechen", "klausenpass", "urnerboden"] },
   { id: 'muota-road', name: 'Schwyz–Muotathal', via: ["schwyz", "muotathal"] },
-  { id: 'gersau-path', name: 'Brunnen–Gersau–Vitznau–Weggis', via: ["brunnen", "gersau", "vitznau", "weggis", "kuessnacht"] },
+  { id: 'gersau-path', name: 'Brunnen–Gersau–Vitznau–Weggis', via: ["brunnen", "kindli", "gersau", "vitznau", "weggis", "kuessnacht"] },
 ];
