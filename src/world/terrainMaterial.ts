@@ -385,11 +385,14 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
 
           // limestone is grey-white, not the green-grey the season tint would drag it toward, and a
           // cliff face is brighter on its bedding ledges than in the joints
-          albedo = mix(albedo, albedo * vec3(0.98, 0.98, 0.96) * (0.80 + 0.28 * grainC), w3 * 0.7);
+          albedo = mix(albedo, albedo * vec3(0.72, 0.72, 0.70) * (0.80 + 0.28 * grainC), w3 * 0.8);
+          // Rocks024L is a near-white plate talus out of the box; at 2 km under haze a scree fan
+          // that bright is indistinguishable from a snowfield (wave-2 Seelisberg capture)
+          albedo = mix(albedo, albedo * vec3(0.60, 0.61, 0.60), w4 * 0.85);
 
           // The yard set (Ground081) is a pale grey-beige path gravel out of the box; a village
           // trodden by cattle and emptied of chamber pots is browner and duller than that.
-          albedo = mix(albedo, albedo * vec3(0.84, 0.77, 0.63), w7 * 0.75);
+          albedo = mix(albedo, albedo * vec3(0.80, 0.71, 0.56), w7 * 0.8);
           // the track is packed and darker than the yard it cuts through
           albedo *= mix(1.0, 0.74 + 0.16 * grainA, w8 * 0.9);
 
@@ -404,6 +407,11 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // near-field grain: without it every ground layer is a smooth wash within a few metres of
           // the camera whatever its texture resolution, because one 512px tile covers 3-5 m
           albedo *= mix(1.0, 0.82 + 0.38 * grainA, nearK * 0.85) * mix(1.0, 0.86 + 0.28 * grainB, fineK * 0.7);
+          // The detail normal is what streaks at grazing angles under a low sun (Schwyz at dusk):
+          // once a pixel covers more ground than the map's features, the anisotropic filter hands
+          // back a smeared normal along the view ray. Fade it by the same footprint as the grain.
+          gMapN.xy *= 1.0 - smoothstep(0.12, 0.5, foot);
+          gMapN = normalize(gMapN);
           if (nearK > 0.02) {
             // central-difference gradient of the same field, so the bumps the shading shows line up
             // with the bumps the albedo shows instead of being an unrelated wobble

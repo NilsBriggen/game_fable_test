@@ -95,7 +95,7 @@ export function getTerrainArrays(): TerrainArrays {
     t.magFilter = LinearFilter;
     t.minFilter = LinearMipmapLinearFilter;
     t.generateMipmaps = true;
-    t.anisotropy = 16;   // grazing-angle slopes are the whole game; take whatever the driver allows
+    t.anisotropy = 8;    // grazing-angle slopes are the whole game; 16 streaked along the view ray
     return t;
   };
   const albedo = mk(126, 134, 104);

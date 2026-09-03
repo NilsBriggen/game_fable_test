@@ -1,6 +1,6 @@
 /**
  * Vegetation: one global InstancedMesh pool per species per LOD tier, populated from the chunks the
- * terrain streamer has active. Three tiers — full mesh under 70 m, reduced mesh under 250 m,
+ * terrain streamer has active. Three tiers — full mesh under 60 m, reduced mesh under 250 m,
  * billboard impostor beyond (ARCHITECTURE §5.1) — chosen from the real camera distance rather than
  * the terrain's own chunk LOD, plus ground cover (grass tufts, ferns, herbs, loose stones) in the
  * near ring. Only the near tier casts shadows: CSM re-draws every caster once per cascade, so a
@@ -33,15 +33,27 @@ import { rockGeometry, rockScanMaterial, type RockKind } from './look/rocks';
 
 type Tier = 'full' | 'mid' | 'impostor';
 
-const SPACING: Record<Tier, number> = { full: 8.0, mid: 9.5, impostor: 10.5 };
-/** Chunks the terrain itself has dropped to LOD2/3 are ≥900 m away; thin the forest there.
- *  Tighter than the 24 m it used to be — that is what made a wooded slope read as scattered
- *  individual trees from across the Urnersee — but not so tight that a whole valley of overlapping
- *  alpha-tested billboards becomes the frame's dominant cost. */
-const IMPOSTOR_SPACING_FAR = 14;
-/** Tier by distance from the camera to the nearest point of the chunk, not by terrain chunk LOD:
- *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m. */
-const TIER_DIST = { full: 70, mid: 250 };
+/** One candidate grid for every tier, so a tree keeps its place when its cell changes tier and
+ *  only the mesh swaps under it. */
+const SPACING = 9.0;
+/** Chunks the terrain itself has dropped to LOD2/3 are ≥900 m away; keep this fraction of the
+ *  candidates there. Sparser than that made a wooded slope read as scattered individual trees from
+ *  across the Urnersee; denser and a whole valley of overlapping alpha-tested billboards becomes the
+ *  frame's dominant cost. */
+const FAR_KEEP = 0.38;
+/** Same idea for the impostor tier inside 900 m (≈ one tree per 10.8 m). */
+const IMPOSTOR_KEEP = 0.7;
+/** Tier by distance from the camera to the nearest point of a 125 m CELL, not of the 500 m chunk:
+ *  the terrain switches LOD at 180/420/900 m, but §5.1 wants tree impostors from 250 m, and a whole
+ *  chunk at LOD0 put ~4 000 full-detail trees on screen for a camera that could see 70 m of them
+ *  (wave-2 capture: 11.4 M triangles at Altdorf against a 3 M budget). */
+const TIER_DIST = { full: 60, mid: 250 };
+const CELL = 125;
+const CELLS = 4;                       // per chunk side
+const TIER_CODE: Record<Tier, number> = { full: 0, mid: 1, impostor: 2 };
+const TIER_OF = ['full', 'mid', 'impostor'] as const;
+/** 2 bits per cell, 16 cells: the signature of a chunk with every cell in the impostor tier. */
+const ALL_IMPOSTOR = 0xaaaaaaaa;
 /** Grass tufts; the ring the bar cares about ("near-field ground within 40 m") plus a margin. */
 const GRASS_RADIUS = 52;
 const GRASS_SPACING = 2.4;
@@ -55,8 +67,9 @@ const TREE_SPECIES: { kind: TreeKind; weight: number }[] = [
   { kind: 'spruce', weight: 0.5 }, { kind: 'fir', weight: 0.19 }, { kind: 'larch', weight: 0.13 }, { kind: 'beech', weight: 0.18 },
 ];
 
-/** Per-pool starting capacity. Sized from the measured worst case, then allowed to grow. */
-const CAPACITY: Record<string, number> = { full: 4200, mid: 6000, impostor: 36000, rock: 2400, cover: 9000 };
+/** Per-pool starting capacity: a typical scene, not the worst case — grow() covers the rest, and a
+ *  worst-case pool for every species up front is heap that is never used. */
+const CAPACITY: Record<string, number> = { full: 1200, mid: 3000, impostor: 12000, rock: 500, cover: 5000 };
 const HARD_CAP = 70000;
 
 interface Pool {
@@ -91,7 +104,8 @@ export class VegetationManager {
   readonly group = new Group();
   private pools = new Map<string, Pool>();
   private chunkAlloc = new Map<string, Alloc[]>();
-  private chunkTier = new Map<string, Tier | 'grass' | 'none'>();
+  /** per-chunk tier signature: 2 bits per 125 m cell (see TIER_CODE) */
+  private chunkTier = new Map<string, number>();
   private chunkGrass = new Map<string, Alloc[]>();
   private maskKicked = false;
   private overflowWarned = false;
@@ -236,11 +250,22 @@ export class VegetationManager {
       const ddx = Math.max(c.originX - camX, 0, camX - (c.originX + 500));
       const ddz = Math.max(c.originZ - camZ, 0, camZ - (c.originZ + 500));
       const d = Math.hypot(ddx, ddz);
-      const tier: Tier = d < TIER_DIST.full ? 'full' : d < TIER_DIST.mid ? 'mid' : 'impostor';
-      if (this.chunkTier.get(c.key) !== tier) {
+      let sig = ALL_IMPOSTOR;
+      if (d < TIER_DIST.mid) {
+        sig = 0;
+        for (let i = 0; i < CELLS * CELLS; i++) {
+          const x0 = c.originX + (i % CELLS) * CELL, z0 = c.originZ + Math.floor(i / CELLS) * CELL;
+          const cdx = Math.max(x0 - camX, 0, camX - (x0 + CELL));
+          const cdz = Math.max(z0 - camZ, 0, camZ - (z0 + CELL));
+          const cd = Math.hypot(cdx, cdz);
+          sig |= (cd < TIER_DIST.full ? 0 : cd < TIER_DIST.mid ? 1 : 2) << (2 * i);
+        }
+        sig >>>= 0;
+      }
+      if (this.chunkTier.get(c.key) !== sig) {
         this.freeChunk(c.key);
-        this.chunkTier.set(c.key, tier);
-        this.populateChunk(c.key, c.cx, c.cz, c.originX, c.originZ, tier, c.lod);
+        this.chunkTier.set(c.key, sig);
+        this.populateChunk(c.key, c.cx, c.cz, c.originX, c.originZ, sig, c.lod);
       }
       const near = d < GRASS_RADIUS;
       const hasGrass = this.chunkGrass.has(c.key);
@@ -294,15 +319,28 @@ export class VegetationManager {
     return Math.min(1, Math.max(0, (n + 0.42) * 1.35));
   }
 
-  private populateChunk(key: string, cx: number, cz: number, originX: number, originZ: number, tier: Tier, lod: number): void {
-    const rng = new Rng(hashString(`${this.seed}:veg:${cx}:${cz}`) >>> 0);
-    const spacing = tier === 'impostor' && lod >= 2 ? IMPOSTOR_SPACING_FAR : SPACING[tier];
-    const size = 500;
+  private populateChunk(key: string, cx: number, cz: number, originX: number, originZ: number, sig: number, lod: number): void {
     const allocs: Alloc[] = [];
+    for (let cell = 0; cell < CELLS * CELLS; cell++) {
+      const tier: Tier = TIER_OF[(sig >>> (2 * cell)) & 3] ?? 'impostor';
+      const ox = originX + (cell % CELLS) * CELL, oz = originZ + Math.floor(cell / CELLS) * CELL;
+      // one RNG stream per cell: a cell changing tier must not reshuffle its neighbours' trees
+      const rng = new Rng(hashString(`${this.seed}:veg:${cx}:${cz}:${cell}`) >>> 0);
+      this.populateCell(rng, ox, oz, tier, lod, allocs);
+    }
+    this.chunkAlloc.set(key, allocs);
+  }
+
+  private populateCell(rng: Rng, originX: number, originZ: number, tier: Tier, lod: number, allocs: Alloc[]): void {
+    const spacing = SPACING;
+    const size = CELL;
+    const keep = tier !== 'impostor' ? 1 : lod >= 2 ? FAR_KEEP : IMPOSTOR_KEEP;
     for (let gz = 0; gz < size; gz += spacing) {
       for (let gx = 0; gx < size; gx += spacing) {
         const x = originX + gx + (rng.next() - 0.5) * spacing * 0.85;
         const z = originZ + gz + (rng.next() - 0.5) * spacing * 0.85;
+        // consumed on every tier so the stream stays aligned; only the far impostors are thinned
+        if (rng.next() > keep) continue;
         const surface = this.terrain.surfaceAt(x, z);
         if (surface === 'water' || surface === 'road' || surface === 'settlement') continue;
         const y = this.terrain.heightAt(x, z);
@@ -317,6 +355,10 @@ export class VegetationManager {
         else if (surface === 'grass' || surface === 'meadow') { treeChance = tier === 'impostor' ? 0.03 : 0.05; rockChance = 0.008; }
         else if (surface === 'scree' || surface === 'rock') { treeChance = y < TREELINE * 0.8 ? 0.03 : 0; rockChance = 0.06; }
         else if (surface === 'mud') { treeChance = 0.03; }
+        // The scans are 260-640 triangles each; scattered over every chunk in the 3 km stream radius
+        // they were several million triangles of stones nobody could see. Past 250 m the scree and
+        // rock layers of the terrain carry the stones.
+        if (tier === 'impostor') rockChance = 0;
 
         const roll = rng.next();
         if (roll < treeChance) {
@@ -342,7 +384,7 @@ export class VegetationManager {
             allocs.push({ poolKey: pool.key, index: idx });
           }
         } else if (roll < treeChance + rockChance) {
-          const pool = this.rockPool(rng.next() < 0.4 ? 'large' : 'small');
+          const pool = this.rockPool(rng.next() < 0.4 && tier === 'full' ? 'large' : 'small');
           const idx = this.alloc(pool);
           if (idx !== null) {
             this.setInstance(pool, idx, x, y, z, rng.next() * Math.PI * 2, 0.6 + rng.next() * 0.9);
@@ -351,7 +393,6 @@ export class VegetationManager {
         }
       }
     }
-    this.chunkAlloc.set(key, allocs);
   }
 
   /**
