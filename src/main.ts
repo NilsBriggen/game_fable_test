@@ -215,7 +215,12 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
     const player = ex.getPlayer();
     if (beat.poi && player !== null) {
       const at = ex.poiPosition(beat.poi);
-      if (at) { ex.teleport(player, at.x, at.z); await world.streamAround(at.x, at.z, 600); ex.discover(beat.poi); }
+      if (at) {
+        ex.teleport(player, at.x, at.z); await world.streamAround(at.x, at.z, 600); ex.discover(beat.poi);
+        // streamAround resolves on request, not upload: wait (bounded) until the chunks under the player are in
+        const s0 = performance.now();
+        while (!world.isSettled() && performance.now() - s0 < 60000) await nextFrame();
+      }
     }
     if (typeof beat.hour === 'number') { ctx.clock.setHour(beat.hour); world.setTimeOfDay(beat.hour); }
     const limit = (beat.maxSeconds ?? opts.maxSecondsPerBeat ?? 90) * 1000;
