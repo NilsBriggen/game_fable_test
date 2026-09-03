@@ -21,12 +21,14 @@ const DIST = Number(opt('--dist', 3.2));
 const YAW = Number(opt('--yaw', 0.6));
 const [W, H] = String(opt('--size', '900x1100')).split('x').map(Number);
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
-const files = { '/model.glb': path.resolve(modelFile), ...(ANIM ? { '/anim.glb': path.resolve(ANIM) } : {}) };
+const modelDir = path.dirname(path.resolve(modelFile));
+const modelUrl = '/model_dir/' + encodeURIComponent(path.basename(modelFile)); // served from its own directory so a .gltf's relative textures resolve
+const files = { ...(ANIM ? { '/anim.glb': path.resolve(ANIM) } : {}) };
 
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);
   if (url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><html><head><script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script><style>body{margin:0;background:#88a}</style></head><body></body></html>'); return; }
-  const file = files[url] ?? path.join(root, url);
+  const file = url.startsWith('/model_dir/') ? path.join(modelDir, url.slice('/model_dir/'.length)) : (files[url] ?? path.join(root, url));
   fs.readFile(file, (err, data) => { if (err) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'content-type': file.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); res.end(data); });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -35,7 +37,7 @@ const browser = await chromium.launch({ headless: true, executablePath: fs.exist
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 page.on('console', (m) => { if (m.type() === 'error') console.error('[page]', m.text()); });
 await page.goto(`http://127.0.0.1:${port}/`);
-const info = await page.evaluate(async ({ ANIM, T, DIST, YAW, W, H }) => {
+const info = await page.evaluate(async ({ ANIM, T, DIST, YAW, W, H, MODEL_URL }) => {
   const THREE = await import('three');
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -46,7 +48,7 @@ const info = await page.evaluate(async ({ ANIM, T, DIST, YAW, W, H }) => {
   scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x6a5a40, 1.1));
   const ground = new THREE.Mesh(new THREE.CircleGeometry(3, 48), new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
   const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync('/model.glb');
+  const gltf = await loader.loadAsync(MODEL_URL);
   const model = gltf.scene; scene.add(model);
   model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   const norm = (n) => n.replace(/[:\s]/g, '');
@@ -77,7 +79,7 @@ const info = await page.evaluate(async ({ ANIM, T, DIST, YAW, W, H }) => {
   renderer.render(scene, cam);
   await new Promise((r) => setTimeout(r, 50));
   return { height: hgt.toFixed(2), minY: box.min.y.toFixed(2), clipName, tracks, bound };
-}, { ANIM, T, DIST, YAW, W, H });
+}, { ANIM, T, DIST, YAW, W, H, MODEL_URL: modelUrl });
 await page.screenshot({ path: outFile });
 console.log(`${path.basename(modelFile)} → ${outFile}: height ${info.height} m, minY ${info.minY}${info.clipName ? `, clip ${info.clipName} (${info.bound}/${info.tracks} tracks bound)` : ''}`);
 await browser.close();
