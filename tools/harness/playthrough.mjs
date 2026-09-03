@@ -32,7 +32,7 @@ const t0 = Date.now();
 while (!LOCK) {
   for (const slot of SLOTS) {
     try { fs.mkdirSync(slot); fs.writeFileSync(path.join(slot, 'pid'), String(process.pid)); LOCK = slot; break; } catch {}
-    try { if (Date.now() - fs.statSync(slot).mtimeMs > 3 * 60 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); // heartbeat below keeps a live run's slot fresh } catch {}
+    try { if (Date.now() - fs.statSync(slot).mtimeMs > 3 * 60 * 60 * 1000) fs.rmSync(slot, { recursive: true, force: true }); } catch {} // the heartbeat keeps a live run's slot fresh
   }
   if (LOCK) break;
   if (Date.now() - t0 > 240 * 60 * 1000) { console.error("playthrough: lock timeout"); process.exit(3); }
