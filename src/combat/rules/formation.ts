@@ -61,7 +61,9 @@ export function formationBonus(unit: FormationUnit, all: FormationUnit[]): Forma
   if (unit.down) return { adjacentPolearms: 0, inHaufen: false, defenseBonus: 0 };
   const allies = all.filter((u) => u.side === unit.side && u.id !== unit.id && !u.down);
   const adjacentPolearms = allies.filter((a) => a.polearm && adjacent(unit, a)).length;
-  const defenseBonus = Math.min(3, adjacentPolearms);
+  // §5.3: "a unit WITH a reach polearm gains +1 Defense per adjacent polearm ally" — a swordsman standing
+  // in the hedge does not (bughunt combat-engine #1)
+  const defenseBonus = unit.polearm ? Math.min(3, adjacentPolearms) : 0;
   let inHaufen = false;
   let haufenId: number | undefined;
   if (unit.polearm) {

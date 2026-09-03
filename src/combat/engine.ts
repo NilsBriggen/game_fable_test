@@ -1779,6 +1779,7 @@ export class CombatEngineImpl implements CombatService {
       // rendered text — `SerializedCombat.log` is `unknown[]` precisely so combat can round-trip its own shape
       // through it without core depending on combat's types.
       log: this.log,
+      roundState: { moraleChecked: [...this.moraleCheckedThisRound.entries()].map(([id, set]) => [id, [...set]] as [EntityId, string[]]), scriptedRoundFired: [...this.scriptedRoundFired], stalemateFingerprint: this.stalemateFingerprint, stalemateRounds: this.stalemateRounds },
     };
   }
 
@@ -1817,6 +1818,12 @@ export class CombatEngineImpl implements CombatService {
     // issue 11 / probe 8: `serialize()` now stores full CombatEventRecord objects — restore them as-is rather
     // than collapsing every entry to a bare {kind:'log', text}.
     this.log = (s.log as CombatEventRecord[]).map((l) => ({ ...l }));
+    if (s.roundState) {
+      this.moraleCheckedThisRound = new Map(s.roundState.moraleChecked.map(([id, reasons]) => [id, new Set(reasons)]));
+      this.scriptedRoundFired = new Set(s.roundState.scriptedRoundFired);
+      this.stalemateFingerprint = s.roundState.stalemateFingerprint;
+      this.stalemateRounds = s.roundState.stalemateRounds;
+    }
   }
 }
 

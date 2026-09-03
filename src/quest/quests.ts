@@ -98,7 +98,14 @@ export class QuestMachine {
   }
 
   async advance(id: string, stageId: string): Promise<void> {
-    if (!this.isStarted(id) || this.isDone(id)) return;
+    if (this.isDone(id)) return;
+    // a giver dialogue may `advance` a quest nobody has started yet (all six side quests did): start it
+    // first — the first stage's journal line is the natural "quest started" entry — then move on
+    if (!this.isStarted(id)) {
+      if (!this.deps.getQuestDef(id)) return;
+      await this.start(id);
+      if (this.isDone(id)) return;
+    }
     if (this.stage(id) === stageId) return;
     await this.enterStage(id, stageId);
   }
@@ -115,7 +122,9 @@ export class QuestMachine {
       console.warn(`[quest] ${id}: unknown stage "${stageId}"`);
       return;
     }
-    if (!q.silentJournal) this.addJournal(stage.journal, id);
+    // a retry loop (escort-recover → escort) re-enters a stage the journal already carries: don't repeat it
+    const last = [...this.journalEntries].reverse().find((j) => j.questId === id);
+    if (!q.silentJournal && last?.text !== stage.journal) this.addJournal(stage.journal, id);
     await this.deps.runEffects(stage.onEnter, id);
   }
 

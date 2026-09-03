@@ -1,0 +1,18 @@
+# Combat engine bug hunt — src/combat
+
+Scope: `engine.ts`, `ai.ts`, `rules/*.ts` vs ARCHITECTURE.md §5.3. Existing 84 combat tests all pass
+(`npx vitest run src/combat`) — this codebase carries heavy prior hardening (comments trace "issue N" /
+"round-2/3 critic issue" fixes). Findings below are new, each proven by a failing probe under
+`tools/critic/probes/combat/` (`npx vitest run --config tools/critic/probes/combat/vitest.config.ts`).
+
+| # | File:line | Repro / failing input | Expected (§5.3) | Actual | Severity |
+|---|---|---|---|---|---|
+| 1 | `rules/formation.ts:60-64` (`formationBonus`) | `formationBonus(unit, allies)` where `unit.polearm=false` and 3 allies adjacent have `polearm=true`. Probe: `formation-defensebonus.test.ts` | "A unit **with a reach polearm** gains +1 Defense per adjacent allied polearm unit (max +3)" — non-polearm units get +0 | `defenseBonus` is computed from `adjacentPolearms` with no check on `unit.polearm` at all — **any** unit (crossbowman, dagger footman, …) standing next to allied pikemen gets up to +3 Defense. Feeds `effectiveDefense()` (`engine.ts:1010`) and the morale-check DC (`engine.ts:1681`, `rollMorale`'s `formationBonus` input), so it's a live-combat under/over-hit and morale skew, not cosmetic. | wrong-rule |
+| 2 | `engine.ts:1767-1820` (`serialize`/`restore`) | Trigger a morale check for `(unit, 'damage')` this round (suppressed on a 2nd call, correctly), then `serialize()` → `restore()` into a fresh engine same round, retrigger `(unit, 'damage')`. Probe: `restore-moralelimiter.test.ts` | "at most one morale check per unit per *reason* per round" (engine.ts:110 comment, §5.3's moraleCheck rule) must hold across a save/load | `moraleCheckedThisRound` (also `scriptedRoundFired`, `stalemateFingerprint`/`stalemateRounds`) is never written into `SerializedCombat` and `resetState()` (called from `restore()`) clears it — a quicksave/quickload mid-round forgets which (unit,reason) pairs already resolved, so the very next damage/flank/etc. re-rolls a fresh morale check for a unit that already passed or failed one this round. | wrong-rule (save/restore round-trip field loss) |
+
+## Notes on things checked and NOT found to be bugs (verified by reading, some by probe)
+- Edge/Burden pairwise cancellation, crit "double dice", blunt-soak-halved, fumble→Burden-next-attack: all match §5.3 (`rules/attack.ts`).
+- Reach-gated flanking, Haufen immunity to flanking, Brace's 3-cell charge threshold, Cover Fire, Shield Block queued-reaction ordering, stalemate detection, `rout` threshold denominator, gameover-only-on-total-wipe: all correct, each already has its own regression test from a prior round.
+- `cmdMove`/`cmdAbility` don't re-check `u.down/dead/routed` the way `cmdStance` explicitly does — but every path that could put the *active* unit into that state (self-damage from a fall, a reaction fired during its own move) is always followed by `this.advance()` in the same call, which sweeps a down/dead/routed `activeUnitId` back to `null` before another command can be accepted. Traced the full call graph (`performMove`, `queueReaction`/`queueBrace`/`queueCoverFire` auto-resolve paths, `decideAndAct`'s own `u.dead||u.down` guard) and found no reachable sequence of legal commands that lets a down/dead/routed unit actually act — not reported as a bug.
+- Mounted unit in a 1-wide corridor with a `letzi-wall` segment: no exception, wall correctly blocks only the mounted mover (`mounted-corridor.test.ts`, passes).
+- Empty-units encounter (`enc.units: []`, no real party): `checkEndConditions()` resolves `lose` on the very first `advance()`, no crash/hang.

@@ -180,6 +180,13 @@ export async function runDialogue(
     }
 
     const shown = buildChoiceViews(node, rt);
+    if (shown.length > 0 && !shown.some((sc) => sc.enabled)) {
+      // every choice gated off: never hand the UI a dead end — show the line, run the node's effects, end
+      console.warn(`[dialogue:${dialogueId}] node "${nodeId}" has no enabled choice; ending`);
+      if (ui) { await ui.show({ speakerName, speakerPortrait, text, choices: [] }); ui.hide(); }
+      if (node.effects) { await runEffects(node.effects, rt, questId); effectsRun += node.effects.length; }
+      break;
+    }
     const views = shown.map(({ c, enabled }) => ({
       text: c.text,
       enabled,

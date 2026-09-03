@@ -400,6 +400,8 @@ export interface SerializedCombat {
   objectivesState: unknown;
   /** CombatEventRecord[] (typed loosely so core does not depend on the view types) */
   log: unknown[];
+  /** per-round bookkeeping that must survive a mid-round save (bughunt combat-engine #2) */
+  roundState?: { moraleChecked: [EntityId, string[]][]; scriptedRoundFired: number[]; stalemateFingerprint: string; stalemateRounds: number };
 }
 
 export interface SaveMeta {

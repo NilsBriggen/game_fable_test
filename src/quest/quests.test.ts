@@ -66,10 +66,11 @@ describe('QuestMachine', () => {
     expect(machine.journalEntries[1]).toEqual({ time: 2000, questId: 'quest.a', text: 'Stage two begins.' });
   });
 
-  it('advance on an unstarted quest is a no-op', async () => {
+  it('advance on an unstarted quest starts it first (giver dialogues only ever advance)', async () => {
     const { machine } = makeMachine();
     await machine.advance('quest.a', 'stage2');
-    expect(machine.isStarted('quest.a')).toBe(false);
+    expect(machine.isStarted('quest.a')).toBe(true);
+    expect(machine.stage('quest.a')).toBe('stage2');
   });
 
   it('checkAdvance fires advanceWhen once its condition holds, and only for started+active quests', async () => {
