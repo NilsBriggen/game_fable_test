@@ -177,17 +177,24 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
   };
   const offStages = quest.on('quest-advanced', (q, st) => seenStages.add(`${q}:${st}`));
   // Auto-answer dialogues by wrapping the UI service (rendering still happens so screenshots show the panel).
+  const trace: string[] = [];
+  const tr = (m: string) => { trace.push(`${Math.round(performance.now() / 100) / 10}s ${m}`); if (trace.length > 40) trace.shift(); };
+  ctx.state.onChange((from, to) => tr(`state ${from}→${to}`));
+  quest.on('quest-advanced', (q, st) => tr(`advanced ${q}:${st}`));
+  quest.on('dialogue-ended', (d) => tr(`dialogue-ended ${d}`));
   if (ui) {
     const orig = ui.dialogue.show.bind(ui.dialogue);
     ui.dialogue.show = async (node) => {
       dialogues++;
+      tr(`show#${dialogues} "${node.text.slice(0, 30)}" choices=${node.choices.length}`);
       void orig(node); // render, but do not wait for a click
       await nextFrame(); await nextFrame();
-      if (opts.screenshot && dialogues <= 40) await opts.screenshot(`dlg-${String(dialogues).padStart(2, '0')}`);
+      if (opts.screenshot && dialogues <= 40) { tr('shot…'); await opts.screenshot(`dlg-${String(dialogues).padStart(2, '0')}`); tr('shot done'); }
       const enabled = node.choices.map((c, i) => (c.enabled ? i : -1)).filter((i) => i >= 0);
-      if (enabled.length === 0) return 0;
+      if (enabled.length === 0) { tr('resolve 0 (no choices)'); return 0; }
       const idx = pickMode === 'first' ? enabled[0] : pickMode === 'last' ? enabled[enabled.length - 1] : enabled[rng.int(0, enabled.length - 1)];
       ui.dialogue.hide();
+      tr(`resolve ${idx}`);
       return idx;
     };
     const origConfirm = ui.confirm.bind(ui);
@@ -231,7 +238,7 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
       // keep the player at the beat's POI (dialogues/cutscenes may move the camera, not the player)
       await nextFrame();
     }
-    if (!ok && !note) note = `timeout; seen=[${[...seenStages].join(' ')}]; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
+    if (!ok && !note) note = `timeout; trace=[${trace.slice(-14).join(' | ')}]; seen=[${[...seenStages].join(' ')}]; stages: ${['quest.der-eid', 'quest.der-hut', 'quest.burgenbruch', 'quest.marchenstreit', 'quest.muster-1315', 'quest.morgarten', 'quest.brunnen-1315'].map((q) => `${q.split('.')[1]}=${quest.stage(q) ?? (quest.isDone(q) ? 'done' : '-')}`).join(' ')}; state=${ctx.state.state}`;
     if (opts.screenshot) await opts.screenshot(beat.name);
     log.push({ beat: beat.name, ok, seconds: Math.round((performance.now() - t0) / 100) / 10, stage: beat.untilStage ? quest.stage(beat.untilStage[0]) : null, note, dialogues, fights });
     if (!ok) break;
