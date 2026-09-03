@@ -2,7 +2,7 @@
  * Bootstrap. Owns the game-state machine transitions, the frame loop and the harness API.
  * ARCHITECTURE.md §6–7. Integrator-owned.
  */
-import { Frustum, Matrix4, Mesh, Object3D } from 'three';
+import { Frustum, Matrix4, Mesh, Object3D, Raycaster, Vector3 } from 'three';
 import { GameContext } from '@core/context';
 import type { GameState } from '@core/state';
 import { Name, Transform } from '@core/components';
@@ -140,6 +140,8 @@ function gameTimeForStart(): number {
 // ---------- harness: Act 1 playthrough driver (final gate) ----------
 interface PlaythroughBeat { name: string; poi?: string; talkTo?: string; dwellSeconds?: number; untilStage?: [string, string]; untilDone?: string; combatRounds?: number; hour?: number; maxSeconds?: number   /** recruit beats: done once the party has at least this many members */
   untilPartySize?: number;
+  /** driver scaffolding (recruiting): always take the first choice, whatever the run's pick mode */
+  pickFirst?: boolean;
 }
 // Mirrors src/quest/walkthrough.test.ts: arrive (presence gates), talk to the quest NPC where the stage needs it, fights auto-play.
 const ACT1_BEATS: PlaythroughBeat[] = [
@@ -150,9 +152,9 @@ const ACT1_BEATS: PlaythroughBeat[] = [
   { name: '05-ruetli-oath', poi: 'poi.ruetli', hour: 22, untilDone: 'quest.der-eid' },
   // companions (LORE §5 pool) are optional recruits in the game; the driver takes all three so the Act 1
   // fights are fought at the party size the encounters were balanced for
-  { name: '05b-recruit-jost', poi: 'poi.fluelen', talkTo: 'npc.jost-imhof', untilPartySize: 2 },
-  { name: '05c-recruit-mechthild', poi: 'poi.steinen', talkTo: 'npc.mechthild-schorno', untilPartySize: 3 },
-  { name: '05d-recruit-heini', poi: 'poi.stans', talkTo: 'npc.heini-odermatt', untilPartySize: 4 },
+  { name: '05b-recruit-jost', poi: 'poi.fluelen', talkTo: 'npc.jost-imhof', untilPartySize: 2 , pickFirst: true },
+  { name: '05c-recruit-mechthild', poi: 'poi.steinen', talkTo: 'npc.mechthild-schorno', untilPartySize: 3 , pickFirst: true },
+  { name: '05d-recruit-heini', poi: 'poi.stans', talkTo: 'npc.heini-odermatt', untilPartySize: 4 , pickFirst: true },
   { name: '06-altdorf-1307-hat', poi: 'poi.altdorf', untilStage: ['quest.der-hut', 'travel-tellsplatte'], maxSeconds: 360 },
   { name: '07-tellsplatte', poi: 'poi.tellsplatte', untilStage: ['quest.der-hut', 'travel-hohle-gasse'] },
   { name: '08-hohle-gasse-fight', poi: 'poi.hohle-gasse', combatRounds: 40, untilStage: ['quest.der-hut', 'burgenbruch'] },
@@ -186,6 +188,7 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
   const offStages = quest.on('quest-advanced', (q, st) => seenStages.add(`${q}:${st}`));
   // Auto-answer dialogues by wrapping the UI service (rendering still happens so screenshots show the panel).
   const trace: string[] = [];
+  let forceFirst = false;
   const tr = (m: string) => { trace.push(`${Math.round(performance.now() / 100) / 10}s ${m}`); if (trace.length > 40) trace.shift(); };
   ctx.state.onChange((from, to) => tr(`state ${from}→${to}`));
   quest.on('quest-advanced', (q, st) => tr(`advanced ${q}:${st}`));
@@ -200,7 +203,8 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
       if (opts.screenshot && dialogues <= 40) { tr('shot…'); await opts.screenshot(`dlg-${String(dialogues).padStart(2, '0')}`); tr('shot done'); }
       const enabled = node.choices.map((c, i) => (c.enabled ? i : -1)).filter((i) => i >= 0);
       if (enabled.length === 0) { tr('resolve 0 (no choices)'); return 0; }
-      const idx = pickMode === 'first' ? enabled[0] : pickMode === 'last' ? enabled[enabled.length - 1] : enabled[rng.int(0, enabled.length - 1)];
+      const mode = forceFirst ? 'first' : pickMode;
+      const idx = mode === 'first' ? enabled[0] : mode === 'last' ? enabled[enabled.length - 1] : enabled[rng.int(0, enabled.length - 1)];
       ui.dialogue.hide();
       tr(`resolve ${idx}`);
       return idx;
@@ -212,6 +216,7 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
   await newGame(undefined, { skipIntro: false });
   for (const beat of ACT1_BEATS) {
     const t0 = performance.now();
+    forceFirst = !!beat.pickFirst;
     const player = ex.getPlayer();
     if (beat.poi && player !== null) {
       const at = ex.poiPosition(beat.poi);
@@ -436,7 +441,24 @@ function stats() {
     content: ctx.content.counts(),
     viewport: [window.innerWidth, window.innerHeight],
     split: sceneSplit(),
+    ground: groundProbe(),
   };
+}
+
+/** Rendered ground under the player vs the height function: a mismatch here is why figures sink or float. */
+function groundProbe(): { x: number; z: number; heightAt: number; meshY: number | null; delta: number | null } | null {
+  const ex = ctx.services.tryGet('exploration');
+  const world = ctx.services.tryGet('world');
+  const pid = ex?.getPlayer() ?? null;
+  if (pid === null || !world) return null;
+  const t = ctx.world.get(pid, Transform);
+  if (!t) return null;
+  const ray = new Raycaster(new Vector3(t.x, t.y + 60, t.z), new Vector3(0, -1, 0), 0, 200);
+  const terrain = world.getSceneRoots().terrain;
+  const hits = ray.intersectObject(terrain, true).filter((h) => h.object.name !== 'terrain-far');
+  const meshY = hits.length ? hits[0].point.y : null;
+  const h = world.heightAt(t.x, t.z);
+  return { x: Math.round(t.x), z: Math.round(t.z), heightAt: Math.round(h * 100) / 100, meshY: meshY === null ? null : Math.round(meshY * 100) / 100, delta: meshY === null ? null : Math.round((meshY - h) * 100) / 100 };
 }
 
 /** Triangles per top-level scene group, frustum-culled like the renderer (a budget overrun's first question). */

@@ -856,7 +856,7 @@ class Character implements CharacterHandle {
     registerTicker(this);          // ticked from now on, whatever happens to the async build below
     ensureRig()
       .then((r) => { if (!this.disposed) this.build(look, mounted, r); })
-      .catch(() => { /* the rest pose set in build() still stands; never leave a T-posed character */ });
+      .catch((e) => { console.warn('[characters] rig unavailable, fallback pose kept:', e); });
   }
 
   private build(baseLook: Look, mounted: boolean, r: Rig | null): void {
