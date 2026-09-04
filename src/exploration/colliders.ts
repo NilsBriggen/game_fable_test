@@ -13,7 +13,8 @@ export interface Collider {
 }
 
 /** Footprint radius (metres) per model id; anything not listed is treated as walk-through (small props,
- *  boats, crosses, wells — decorative or already water-only). */
+ *  boats, fences — decorative or already water-only). The well, cross and hayrack are solid too, so the
+ *  crowd that gathers on the square stands around the well instead of inside it. */
 export const RADIUS: Record<string, number> = {
   'house.blockbau': 4.2,
   'house.stone': 4.6,
@@ -29,10 +30,13 @@ export const RADIUS: Record<string, number> = {
   mill: 3.5,
   'bridge.stone': 0, // walkable across, not a collider
   'bridge.wood': 0,
+  well: 2.0,
+  cross: 0.6,
+  hayrack: 1.8,
 };
 
 /** Footprint used by the layout generator to keep models from interpenetrating (includes small props). */
-export const SPACING: Record<string, number> = { ...RADIUS, well: 1.5, cross: 0.6, hayrack: 1.8, fence: 0.8, tent: 2, campfire: 1, 'rock.small': 0.8, 'rock.large': 1.5 };
+export const SPACING: Record<string, number> = { ...RADIUS, fence: 0.8, tent: 2, campfire: 1, 'rock.small': 0.8, 'rock.large': 1.5 };
 
 export function buildColliders(layout: PlacedModel[]): Collider[] {
   const out: Collider[] = [];

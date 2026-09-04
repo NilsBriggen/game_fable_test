@@ -382,7 +382,8 @@ class Character implements CharacterHandle {
     const inst = cloneSkeleton(model.template) as Object3D;
     const rigRoot = new RigRoot();
     rigRoot.shadowOnly = true;
-    const k = body.height / model.height;
+    // ±5 % stature per seed so a crowd sharing one body is not one silhouette twenty times
+    const k = (body.height / model.height) * (0.95 + ((this.seed >>> 5) % 7) * (0.1 / 6));
     rigRoot.scale.setScalar(k);
     rigRoot.position.y = -model.minY * k;
     rigRoot.add(inst);

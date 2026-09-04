@@ -96,8 +96,8 @@ function layoutVillage(b: Builder, rng: Rng, yaw: number, pop?: Record<string, n
   const houses = Math.max(6, Math.min(14, Math.round(3 + popTotal(pop) * 0.8)));
   b.add('well', 0, 0);
   const big = popTotal(pop) >= 9;
-  b.add(big ? 'church' : 'chapel', 0, -16, { yaw: yaw + Math.PI });
-  // ring 0 has five slots (the sixth, behind the church at (0,-16), stays open); the rest go to ring 1
+  b.add(big ? 'church' : 'chapel', 0, -21, { yaw: yaw + Math.PI }); // 21 m: the well's roof clears the church tower's base
+  // ring 0 has five slots (the sixth, behind the church at (0,-21), stays open); the rest go to ring 1
   const ring0 = Math.min(5, houses);
   for (let i = 0; i < houses; i++) {
     const ring = i < ring0 ? 0 : 1;

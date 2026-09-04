@@ -147,14 +147,18 @@ export class NpcSystem {
     const jx = stand.x, jz = stand.z;
     const offset: [number, number] = [jx - x, jz - z]; // the *actual* jitter used, post water-fallback
     const rng = new Rng(hashString(`${homePoi}:${archId}:${salt}:life`));
-    const market: [number, number] = [Math.cos(rng.next() * 6.283) * (4 + rng.next() * 6), Math.sin(rng.next() * 6.283) * (4 + rng.next() * 6)];
+    // midday on the square: a ring 5–16 m out from the well (the well itself is a collider), so a village of
+    // twenty does not pile up on one spot; evenings drift toward the inn side rather than back onto the well
+    const ma = rng.next() * 6.283, mr = 5 + rng.next() * 11;
+    const market: [number, number] = [Math.cos(ma) * mr, Math.sin(ma) * mr];
+    const tavern: [number, number] = [Math.cos(ma + 1.2) * (8 + rng.next() * 8), Math.sin(ma + 1.2) * (8 + rng.next() * 8)];
     const house: [number, number] = [offset[0] * 1.6, offset[1] * 1.6]; // out toward the ring of houses
     const genericDef: NpcDef = {
       ...arch, id: `${homePoi}.${archId}.${salt}`, home: homePoi, role: 'generic',
       schedule: [
         { hour: 6, poi: 'home', activity: 'work', offset },
         { hour: 11 + Math.floor(rng.next() * 3), poi: 'home', activity: 'market', offset: market },
-        { hour: 17 + Math.floor(rng.next() * 2), poi: 'home', activity: 'tavern', offset: [market[0] * 0.5, market[1] * 0.5] },
+        { hour: 17 + Math.floor(rng.next() * 2), poi: 'home', activity: 'tavern', offset: tavern },
         { hour: 21 + Math.floor(rng.next() * 2), poi: 'home', activity: 'sleep', offset: house },
       ],
     };

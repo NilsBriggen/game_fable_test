@@ -6,8 +6,8 @@ describe('buildColliders', () => {
   it('produces one collider per solid model, skipping walk-through props', () => {
     const layout: PlacedModel[] = [
       { modelId: 'house.blockbau', x: 10, z: 0 },
-      { modelId: 'cross', x: 0, z: 0 },
-      { modelId: 'well', x: 5, z: 5 },
+      { modelId: 'fence', x: 0, z: 0 },
+      { modelId: 'bridge.wood', x: 5, z: 5 },
       { modelId: 'castle.keep', x: -10, z: 0 },
     ];
     const colliders = buildColliders(layout);
