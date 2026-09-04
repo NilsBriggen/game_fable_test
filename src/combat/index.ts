@@ -51,7 +51,9 @@ export async function register(ctx: GameContext): Promise<void> {
       if (exploration) {
         const rig = exploration.getCameraRig();
         rig.setMode('combat');
-        rig.focus(cx, cy, cz, { distance: Math.max(24, span * 0.75), pitch: -0.72, yaw: view.grid.origin.yaw + 0.6, instant: true });
+        // pitch is the elevation ABOVE the focus (orbitPosition adds distance·sin(pitch) to y): -0.72 put the
+        // camera 20 m under the Morgarten slope looking up through the grid at the treetops
+        rig.focus(cx, cy, cz, { distance: Math.max(24, span * 0.75), pitch: 0.72, yaw: view.grid.origin.yaw + 0.6, instant: true });
       } else {
         const camera = ctx.gfx.camera;
         const dist = Math.max(24, span * 0.75);
