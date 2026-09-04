@@ -436,7 +436,9 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo *= mix(1.0, 0.68, wet);
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
-          gRough = clamp(mix(orm.y, 0.58, wet), 0.05, 1.0);   // wet earth is damp, not a mirror (0.42 made a dawn meadow glisten like a mudflat)
+          // dry ground is matte whatever the texture's roughness map says (the grass set's ~0.5 made a
+          // dawn meadow glisten like wet plastic under a grazing sun); wet earth is damp, not a mirror
+          gRough = clamp(mix(max(orm.y, 0.82), 0.58, wet), 0.05, 1.0);
           gRough = mix(gRough, gRough * 0.86, w8);            // a packed track has a slight sheen
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
