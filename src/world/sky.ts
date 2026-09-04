@@ -82,8 +82,10 @@ const SKY_KEYS: SkyKey[] = [
   { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x3d4f7c, exposure: 1.56 },
   // twilight ambient lifted (was 0x51608c / 0x7d90b4): a dusk vista of shadowed flanks read as mud at 19:00
   { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x6f7fa8, exposure: 1.5 },
-  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x9aabc8, exposure: 1.3 },
-  { el: 10,  zenith: 0x2f639f, horizon: 0xe3bd92, haze: 0xb3bccb, sunGlow: 0xf7cf9b, light: 0xffd9a3, ambient: 0x9db4cd, exposure: 0.97 },
+  // low-sun exposure lifted (1.3 / 0.97): a valley village in the mountains' shadow at 19:00 in August
+  // rendered as night while the real sky still lights it
+  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x9aabc8, exposure: 1.6 },
+  { el: 10,  zenith: 0x2f639f, horizon: 0xe3bd92, haze: 0xb3bccb, sunGlow: 0xf7cf9b, light: 0xffd9a3, ambient: 0x9db4cd, exposure: 1.08 },
   { el: 28,  zenith: 0x336cb0, horizon: 0xcbdcea, haze: 0xa9c1da, sunGlow: 0xf6e3c0, light: 0xfff2d8, ambient: 0xbcd6e8, exposure: 0.92 },
   { el: 65,  zenith: 0x2f6bb8, horizon: 0xd3e3ef, haze: 0xa4bfdb, sunGlow: 0xf2ead8, light: 0xfffaf0, ambient: 0xc6dcec, exposure: 0.88 },
 ];
@@ -439,7 +441,8 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
     hemi.color.copy(look.ambient);
     hemi.groundColor.setHex(night ? 0x141821 : 0x40382a).lerp(look.ambient, 0.25);
-    hemi.intensity = (night ? 0.6 + (moonUp ? moonP.phase * 0.30 : 0) : 0.55 + 1.9 * Math.pow(dayI, 0.5)) * w.ambientMul;
+    // 0.8 floor (was 0.55): the shadowed side of a valley at sunset is sky-lit, not black
+    hemi.intensity = (night ? 0.6 + (moonUp ? moonP.phase * 0.30 : 0) : 0.8 + 1.7 * Math.pow(dayI, 0.5)) * w.ambientMul;
 
     // --- clouds ----------------------------------------------------------------------------------
     // Cloud bodies take the colour of whatever is lighting them: white at noon, orange at dusk, blue at night.
