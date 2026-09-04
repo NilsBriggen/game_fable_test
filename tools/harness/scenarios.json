@@ -25,15 +25,15 @@
   },
   {
     "id": "free-altdorf",
-    "description": "Free camera: Altdorf and the Reuss valley toward Flüelen (no player needed)",
+    "description": "Free camera: Altdorf and the Reuss valley toward Flüelen from the valley floor south of the village (no player needed)",
     "state": "explore",
     "hour": 12,
     "weather": "clear",
     "camera": {
       "pos": [
-        420,
-        60,
-        2350
+        520,
+        45,
+        2420
       ],
       "lookAt": [
         574,
