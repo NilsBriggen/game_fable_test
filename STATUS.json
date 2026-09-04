@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-04T16:12:20Z",
+  "updatedAt": "2026-09-04T16:20:22Z",
   "wave": "visual-2 + final gate",
   "waves": {
     "1": {
@@ -230,7 +230,18 @@
         "durationSec": 2313,
         "report": "tools/harness/out/playthrough-last/report.md"
       },
-      "driver": "window.__harness.runAct1Playthrough (auto-dialogue, auto-combat, recruits the three companions, waits for streaming to settle)"
+      "driver": "window.__harness.runAct1Playthrough (auto-dialogue, auto-combat, recruits the three companions, waits for streaming to settle)",
+      "final": {
+        "completed": true,
+        "beats": "18/18",
+        "fights": 4,
+        "party": 4,
+        "errors": 0,
+        "warnings": 0,
+        "durationSec": 2466,
+        "report": "tools/harness/out/playthrough-final/report.md",
+        "tree": "combat fill light, lazy settlements, all round-2 world fixes"
+      }
     },
     "bugHunt": {
       "sheets": "tools/critic/bughunt/*.md",
@@ -248,8 +259,8 @@
       "capture": "tools/harness/out/mem2 altdorf-square-noon: 445 draw calls, 2.20 M tris, heap 129 MB after gc, 0 errors, ground delta 0 — PASS",
       "history": "8–11 M tris / 1.0 GB heap before settlement LOD, vegetation trim and build-on-approach settlements (777 MB was merged village geometry, census tools/harness/out/mem1)"
     },
-    "blindComparison": "pending",
-    "worldCriticRound2": "scored 6/10 (tools/critic/wave2-world.md, FAIL); integrator fix round landed: corridors carve/beds win (spikes 193→65, Altdorf sight line clear), Bürgenstock massif, Rütli footpath, far mesh over water, wobbled shores, vegetation re-season, Treib/Rigi/Isleten moves, shore pit floor; round 3 re-score pending on fresh captures",
+    "blindComparison": "not run (out of session time)",
+    "worldCriticRound2": "scored 6/10 (tools/critic/wave2-world.md, FAIL); integrator fix round landed: corridors carve/beds win (spikes 193→65, Altdorf sight line clear), Bürgenstock massif, Rütli footpath, far mesh over water, wobbled shores, vegetation re-season, Treib/Rigi/Isleten moves, shore pit floor; round 3 re-score pending on fresh captures; round-3 captures were stopped for the final playthrough (2 of 6 frames in tools/critic/world3: free-altdorf is a valley vista, no road on the Urnersee)",
     "visualRound": {
       "crowd": "well/cross/hayrack solid; market ring 5–16 m from the well; church 21 m from the well; ±5 % stature",
       "faces": "per-seed hair/beard dye on the Peasant Man (white/brown/black/red/ash) so a crowd is not one face",
