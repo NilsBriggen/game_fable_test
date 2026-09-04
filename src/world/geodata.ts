@@ -19,6 +19,8 @@ export interface Corridor {
   pts: SplinePoint[];
   length: number;
   surface: 'mud' | 'road' | 'grass';
+  /** per-road grade ceiling (tan) for steep authored footpaths; default in heightmodel */
+  maxGradeTan?: number;
 }
 
 export interface Peak {
@@ -182,7 +184,7 @@ export function buildWorldGeo(): WorldGeo {
   for (const r of ROADS) {
     const pts = buildSpline(r.via, 10, () => roadSegParams(r.id));
     if (pts.length < 2) continue;
-    corridors.push({ id: r.id, kind: 'road', pts, length: pts[pts.length - 1].s, surface: 'road' });
+    corridors.push({ id: r.id, kind: 'road', pts, length: pts[pts.length - 1].s, surface: 'road', maxGradeTan: r.grade ? Math.tan((r.grade * Math.PI) / 180) : undefined });
   }
 
   // Peaks: landmark-kind gazetteer places with real elevation. Radius must stay modest — several of
@@ -201,7 +203,8 @@ export function buildWorldGeo(): WorldGeo {
   const peaks: Peak[] = [];
   const seenPeak = new Set<string>();
   for (const p of Object.values(PLACES)) {
-    if (p.kind !== 'landmark' || p.h < 150) continue;
+    // a viewpoint with an authored footprint (the Bürgenstock) is a massif too, not just a camera spot
+    if (!(p.kind === 'landmark' || (p.kind === 'viewpoint' && peakRadius[p.id])) || p.h < 150) continue;
     if (seenPeak.has(`${p.x}|${p.z}`)) continue; // rigi & rigi-kulm share coords
     seenPeak.add(`${p.x}|${p.z}`);
     peaks.push({ id: p.id, x: p.x, z: p.z, h: p.h, radius: peakRadius[p.id] ?? 800, sharp: peakSharp[p.id] ?? 1.0 });
@@ -210,7 +213,7 @@ export function buildWorldGeo(): WorldGeo {
   const gm = PLACES['grosser-mythen'];
   if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 260, z: gm.z + 120, h: gm.h - 80, radius: 500, sharp: 1.3 });
 
-  const lakes: LakePoly[] = LAKES.map((l) => ({ id: l.id, name: l.name, levelGameH: gameHeightFromAsl(l.levelAsl), poly: l.poly }));
+  const lakes: LakePoly[] = LAKES.map((l) => ({ id: l.id, name: l.name, levelGameH: gameHeightFromAsl(l.levelAsl), poly: wobbleShore(l.poly) }));
 
   const padRadius: Record<string, number> = {
     village: 90, town: 120, port: 70, monastery: 100, castle: 25, church: 40, alp: 40, hut: 25,
@@ -326,7 +329,7 @@ export function shoreProfile(dist: number, levelH: number, D: number, steep: boo
   if (dist <= halfWidth) return levelH;
   // The smoothstep's steepest point is 1.5·rise/(D−halfWidth); cap it at tan 28° (0.53) so the
   // authored shore never exceeds the 6 m-per-10 m continuity bound on its own (Axen: 250/575 → 0.65).
-  const riseRate = Math.min(steep ? 250 : 120, 0.48 * (D - halfWidth) / 1.5);
+  const riseRate = Math.min(steep ? 250 : 120, 0.40 * (D - halfWidth) / 1.5);   // tan 22°: leaves room for detail noise under the 6 m/10 m shore test
   const t = clamp((dist - halfWidth) / Math.max(1, D - halfWidth), 0, 1);
   const shaped = t * t * (3 - 2 * t);
   return levelH + riseRate * shaped;
@@ -343,4 +346,33 @@ export function lakeShelf(x: number, z: number, lake: LakePoly): number | null {
 export function insideAnyLake(x: number, z: number, geo: WorldGeo): LakePoly | null {
   for (const l of geo.lakes) if (pointInPolygon(x, z, l.poly)) return l;
   return null;
+}
+
+/** The authored lake polygons have 300–800 m edges, and a shoreline that straight reads as geometry
+ *  (critic round 2, issue 8). Each edge is split in three with a small perpendicular offset, seeded from
+ *  the edge's own endpoints (canonically ordered, so the shared Urnersee/Gersau edge wobbles identically
+ *  in both polygons). Amplitude 3.5 % of the edge, so the shore still passes through every authored vertex. */
+export function wobbleShore(poly: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    out.push(a);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 150) continue;
+    const canon = a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+    const [p, q] = canon ? [a, b] : [b, a];
+    const nx = -(q[1] - p[1]) / len, nz = (q[0] - p[0]) / len;
+    const h0 = Math.sin(p[0] * 12.9898 + p[1] * 78.233 + q[0] * 3.7 + q[1] * 1.3) * 43758.5453;
+    const seedF = h0 - Math.floor(h0);
+    const mids: [number, number][] = [];
+    for (let k = 1; k <= 2; k++) {
+      const t = k / 3;
+      const amp = len * 0.035 * Math.sin(seedF * 6.2832 + k * 2.1);
+      mids.push([p[0] + (q[0] - p[0]) * t + nx * amp, p[1] + (q[1] - p[1]) * t + nz * amp]);
+    }
+    if (!canon) mids.reverse();
+    out.push(...mids);
+  }
+  return out;
 }

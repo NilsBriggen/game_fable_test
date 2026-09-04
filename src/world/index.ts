@@ -184,6 +184,7 @@ export async function register(ctx: GameContext): Promise<void> {
       season = s;
       invalidateMapCache(); // the parchment map bakes the snow line (bughunt world-runtime)
       sky.setSeason(s);
+      vegetation.reseason();   // tints and stubble follow uSnowDepth, which sky.setSeason just changed
     },
     streamAround(x: number, z: number, radiusM = 800) {
       return new Promise<void>((resolve) => {

@@ -74,7 +74,7 @@ const REGION_SEEDS: RegionSeed[] = [
   },
   {
     id: 'uri-urnersee', name: 'Urnersee & the Axen shore', owner: 'uri', note: 'LORE.md §3: Rütli, Seelisberg, Tellsplatte, the Axen shore.',
-    places: ['ruetli', 'seelisberg', 'treib', 'bauen', 'isleten', 'sisikon', 'tellsplatte', 'axen-fluh'],
+    places: ['ruetli', 'seelisberg', 'treib', 'bauen', 'isleten', 'sisikon', 'tellsplatte', 'axen-fluh', 'ruetli-steig'],
   },
   {
     id: 'uri-schaechental', name: 'Schächental', owner: 'uri', note: 'LORE.md §3: toward the Klausen.',

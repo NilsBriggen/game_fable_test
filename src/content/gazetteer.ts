@@ -16,10 +16,11 @@ export interface GazetteerPlace { id: string; name: string; x: number; z: number
 export const PLACES: Record<string, GazetteerPlace> = {
   'ruetli': { id: 'ruetli', name: 'Rütli', x: -186, z: -74, kind: 'meadow', owner: 'uri', asl: 500, h: 22 },
   'seelisberg': { id: 'seelisberg', name: 'Seelisberg', x: -405, z: -247, kind: 'viewpoint', owner: 'uri', asl: 800, h: 122 },
-  'treib': { id: 'treib', name: 'Treib', x: -51, z: -124, kind: 'port', owner: 'uri', asl: 434, h: 0 },
+  'treib': { id: 'treib', name: 'Treib', x: -165, z: -124, kind: 'port', owner: 'uri', asl: 434, h: 2 },   // was 100 m inside the lake at water level
+  'ruetli-steig': { id: 'ruetli-steig', name: 'Rütli path head', x: -225, z: -105, kind: 'landmark', owner: 'uri', asl: 520, h: 40 },   // where the Seelisberg footpath meets the meadow
   'kindli': { id: 'kindli', name: 'Kindlimord chapel', x: -700, z: -560, kind: 'church', owner: 'schwyz', asl: 440, h: 2 },
   'bauen': { id: 'bauen', name: 'Bauen', x: -507, z: 766, kind: 'village', owner: 'uri', asl: 440, h: 2 },
-  'isleten': { id: 'isleten', name: 'Isleten', x: -169, z: 1112, kind: 'hut', owner: 'uri', asl: 440, h: 2 },
+  'isleten': { id: 'isleten', name: 'Isleten', x: -196, z: 1112, kind: 'hut', owner: 'uri', asl: 440, h: 2 },
   'fluelen': { id: 'fluelen', name: 'Flüelen', x: 270, z: 1483, kind: 'port', owner: 'uri', asl: 440, h: 2 },
   'sisikon': { id: 'sisikon', name: 'Sisikon', x: 169, z: 395, kind: 'village', owner: 'uri', asl: 450, h: 5 },
   'tellsplatte': { id: 'tellsplatte', name: 'Tellsplatte', x: 203, z: 692, kind: 'landmark', owner: 'uri', asl: 440, h: 2 },
@@ -55,7 +56,7 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'gersau': { id: 'gersau', name: 'Gersau', x: -1436, z: -300, /* north shore under the Rigi; was 200 m inside the basin */ kind: 'village', owner: 'schwyz', asl: 440, h: 2 },
   'vitznau': { id: 'vitznau', name: 'Vitznau', x: -2128, z: -1112, kind: 'village', owner: 'luzern', asl: 440, h: 2 },
   'weggis': { id: 'weggis', name: 'Weggis', x: -3006, z: -1656, kind: 'village', owner: 'luzern', asl: 440, h: 2 },
-  'rigi': { id: 'rigi', name: 'Rigi alp', x: -2111, z: -2273, kind: 'alp', owner: 'schwyz', asl: 1600, h: 389 },
+  'rigi': { id: 'rigi', name: 'Rigi alp', x: -2461, z: -2073, kind: 'alp', owner: 'schwyz', asl: 1600, h: 389 },   // the pasture south-west of the summit, not the summit itself
   'arth': { id: 'arth', name: 'Arth', x: -1469, z: -2446, kind: 'village', owner: 'schwyz', asl: 420, h: -5 },
   'oberarth': { id: 'oberarth', name: 'Oberarth', x: -1290, z: -2790, kind: 'hut', owner: 'schwyz', asl: 430, h: -1 },
   'walchwil': { id: 'walchwil', name: 'Walchwil', x: -1150, z: -3900, kind: 'village', owner: 'habsburg', asl: 449, h: 5 },
@@ -137,7 +138,7 @@ export const RIVERS: { id: string; name: string; via: string[] }[] = [
 ];
 
 /** Roads / paths as chains of place ids. */
-export const ROADS: { id: string; name: string; via: string[] }[] = [
+export const ROADS: { id: string; name: string; via: string[]; grade?: number }[] = [
   { id: 'gotthard-road', name: 'Gotthard mule track', via: ["fluelen", "altdorf", "attinghausen", "erstfeld", "silenen", "amsteg", "goeschenen", "teufelsbruecke", "andermatt", "hospental", "gotthard"] },
   { id: 'axen-path', name: 'Axen shore path', via: ["fluelen", "tellsplatte", "sisikon", "axen-fluh", "axen-wand", "ingenbohl-shore", "brunnen-east", "brunnen"] },
   { id: 'schwyz-road', name: 'Brunnen–Schwyz–Steinen', via: ["brunnen", "ibach", "schwyz", "seewen", "steinen", "lauerz"] },
@@ -145,7 +146,8 @@ export const ROADS: { id: string; name: string; via: string[] }[] = [
   { id: 'arth-road', name: 'Schwyz–Arth–Zug', via: ["seewen", "goldau", "arth", "oberarth", "walchwil", "oberwil", "zug"] },
   { id: 'kuessnacht-road', name: 'Arth–Immensee–Küssnacht–Luzern', via: ["arth", "immensee", "hohle-gasse", "kuessnacht", "meggen", "luzern"] },
   { id: 'march-road', name: 'Schwyz–Rothenthurm–Einsiedeln', via: ["schwyz", "sattel", "rothenthurm", "einsiedeln"] },
-  { id: 'nidwalden-road', name: 'Stansstad–Stans–Buochs–Beckenried', via: ["stansstad", "stans", "ennetbuergen", "buochs", "beckenried", "emmetten", "seelisberg", "ruetli"] },
+  { id: 'nidwalden-road', name: 'Stansstad–Stans–Buochs–Beckenried', via: ["stansstad", "stans", "ennetbuergen", "buochs", "beckenried", "emmetten", "seelisberg"] },
+  { id: 'ruetli-path', name: 'Seelisberg–Rütli footpath', via: ["seelisberg", "ruetli-steig"], grade: 24 },   // a steep foot descent, not a mule track; ends above the meadow so the Rütli stays meadow
   { id: 'obwalden-road', name: 'Alpnachstad–Sarnen–Melchtal', via: ["alpnachstad", "alpnach", "kerns", "sarnen", "melchtal"] },
   { id: 'engelberg-road', name: 'Stans–Wolfenschiessen–Engelberg', via: ["stans", "wolfenschiessen", "engelberg"] },
   { id: 'luzern-road', name: 'Luzern–Horw–Hergiswil–Stansstad', via: ["luzern", "horw", "hergiswil", "stansstad"] },

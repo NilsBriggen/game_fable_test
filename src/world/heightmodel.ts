@@ -148,6 +148,9 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // river corridor (halfWidth up to 220m) "protecting" cells near its mouth from being pulled to lake
   // level was itself producing an 80m+ step right at the water's edge (the Reuss/Flüelen delta).
   const bestRoadDist = new Float32Array(n).fill(Infinity);
+  const inFloor = new Uint8Array(n); // cell lies on the flat corridor bed (within halfWidth)
+  const bestScore = new Float32Array(n).fill(Infinity); // blended height the winning corridor would give
+  const bestBedDist = new Float32Array(n).fill(Infinity); // nearest bed among competing beds
   // Authored a little under the 25° test/design ceiling (not right at it) so the small amount of
   // detail noise + relaxation applied afterward doesn't push a couple of samples back over the line.
   const MAX_GRADE_TAN = Math.tan((14 * Math.PI) / 180);
@@ -168,9 +171,12 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         // Lauerzersee, Seelisberg over the Urnersee) is a mountain road, not a shore road: leave it
         if (pt.h - lake.levelGameH > 60) continue;
         pt.h = Math.min(pt.h, lake.levelGameH + 2 + riseTan * Math.max(0, d));
+        // and never UNDER the water it runs beside: the Ägeri road interpolated 30 m below the Ägerisee
+        // 40 m from its shore, which the shore pass then had to climb as a wall
+        if (c.kind === 'road' && d > 0 && d < 100) pt.h = Math.max(pt.h, lake.levelGameH + 1.5);
       }
     }
-    const limitedH = limitGrade(c.pts, MAX_GRADE_TAN);
+    const limitedH = limitGrade(c.pts, c.maxGradeTan ?? MAX_GRADE_TAN);
     for (let pi = 1; pi < c.pts.length; pi++) {
       const a = c.pts[pi - 1], b = c.pts[pi];
       const ha = limitedH[pi - 1], hb = limitedH[pi];
@@ -190,11 +196,26 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
           const { dist: d, t } = segmentDistT(x, z, a.x, a.z, b.x, b.z);
           if (d >= influence) continue;
           const idx = row + gxx;
-          if (d < bestDist[idx]) {
-            bestDist[idx] = d;
-            const floorH = ha + (hb - ha) * t;
-            bestValleyH[idx] = valleyProfile(d, floorH, b);
-            bestWeight[idx] = 1 - smoothstep(halfWidth, influence, d);
+          if (d < bestDist[idx]) bestDist[idx] = d;   // true nearest distance: noise gating, relaxation guard, peak damping
+          // Which corridor shapes this cell: a bed (within halfWidth) always beats a flank, nearest bed
+          // wins among beds, and among flanks the corridor that carves LOWEST wins. Nearest-wins let the
+          // Gotthard mule track's 90 m flank profile beat the Reuss's 220 m flat floor wherever the two
+          // splines drift apart, standing 300 m hillsides beside a flat valley (critic round 2, P11/P12).
+          const floorH = ha + (hb - ha) * t;
+          const cand = valleyProfile(d, floorH, b);
+          const cw = 1 - smoothstep(halfWidth, influence, d);
+          const cIn = d <= halfWidth ? 1 : 0;
+          const base = heights[idx];
+          const score = cIn ? cand : base + (Math.min(cand, base) - base) * cw;
+          const better = bestScore[idx] === Infinity
+            || (cIn && !inFloor[idx])
+            || (cIn === inFloor[idx] && (cIn ? d < bestBedDist[idx] : score < bestScore[idx]));
+          if (better) {
+            bestScore[idx] = score;
+            bestValleyH[idx] = cand;
+            bestWeight[idx] = cw;
+            inFloor[idx] = cIn;
+            if (cIn) bestBedDist[idx] = d;
           }
           if (c.kind === 'road' && d < bestRoadDist[idx]) {
             bestRoadDist[idx] = d;
@@ -283,9 +304,14 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // a correctly-targeted heightAt(summit) with the river's much lower floor height. Scaling the
   // corridor weight down right at a summit (not anywhere else on its slopes) keeps rivers carving
   // real valleys everywhere else while never drowning an actual mountaintop.
+  // The profile CARVES: outside the flat bed it may only lower the field, never raise it. Raising to
+  // the profile wall turned every low base cell along a gorge or a plain into a ridge that fell back to
+  // the base beyond the corridor's influence — free-standing 100–350 m needles beside the Reuss and the
+  // Obwalden road (critic round 2, P12). The bed itself is still set exactly (a road can be embanked).
   for (let i = 0; i < n; i++) {
     const w = bestWeight[i] * (1 - peakProtect[i]);
-    heights[i] = heights[i] + (bestValleyH[i] - heights[i]) * w;
+    const target = inFloor[i] ? bestValleyH[i] : Math.min(bestValleyH[i], heights[i]);
+    heights[i] = heights[i] + (target - heights[i]) * w;
   }
 
   // 4. detail noise, amplitude scaled by local pre-noise slope; the "jag" ridged term is now small
@@ -316,7 +342,10 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // second mask ramps out over a fixed, more generous 220m regardless of the corridor's own influence,
   // so the authored road/river height near (not just exactly on) a corridor survives relaxation intact.
   const relaxProtect = new Float32Array(n);
-  for (let i = 0; i < n; i++) relaxProtect[i] = Math.max(bestWeight[i], 1 - smoothstep(0, 70, bestDist[i]), peakProtect[i]);
+  // The distance term protects the bed and its shoulder (25→60 m), not a 70 m band: with the whole band
+  // exempt from relaxation the raw ridge field stood as an unrelaxed 60° wall right beside every road
+  // that had no river floor competing (critic round 2, Obwalden/Nidwalden road flanks).
+  for (let i = 0; i < n; i++) relaxProtect[i] = Math.max(bestWeight[i] * (inFloor[i] ? 1 : 0.6), 1 - smoothstep(25, 60, bestDist[i]), peakProtect[i]);
 
   // 5. slope-limited relaxation (thermal-erosion-like diffusion), so cliffs/valley walls read as
   // terrain rather than raw noise. Run generously (12 passes) before the shore pass so the walls the
@@ -417,6 +446,9 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
     const roadProtect = roadHeightMatches ? 1 - smoothstep(14, 22, bestRoadDist[idx]) : 0;
     const w = Math.max(shoreW[idx], peakProtect[idx], roadProtect);
     heights[idx] = shoreTarget[idx] + (heights[idx] - shoreTarget[idx]) * w;
+    // nothing outside a lake sits under its water: a road's protected shoulder kept a 30 m pit of base
+    // field beside the Ägerisee (the target is the waterline + 0.3 exactly when the cell was below it)
+    if (heights[idx] < shoreTarget[idx]) heights[idx] = shoreTarget[idx];
   }
 
   // 5b. short relaxation top-up so the new shore transition blends into its neighbours too (still

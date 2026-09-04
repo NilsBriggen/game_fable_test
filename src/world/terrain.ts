@@ -5,7 +5,8 @@
  */
 import { BufferAttribute, BufferGeometry, Group, Mesh, Vector3 } from 'three';
 import { MAP_BOUNDS } from '@content/gazetteer';
-import { BLEND_GROUP, DEFAULT_GRID_H, DEFAULT_GRID_W, surfaceNameOf, type SurfaceName } from './heightmodel';
+import { BLEND_GROUP, DEFAULT_GRID_H, DEFAULT_GRID_W, SURFACE_IDS, surfaceNameOf, type SurfaceName } from './heightmodel';
+const WATER_ID = SURFACE_IDS.indexOf('water');
 import { CHUNK_SIZE, LOD_SPACING } from './chunkmesh';
 import { loadCachedGrid, saveCachedGrid } from './idbcache';
 import { getTerrainMaterial } from './terrainMaterial';
@@ -236,14 +237,24 @@ export class TerrainManager {
         const ix = gx(c), iz = gz(r);
         const i = r * cols + c;
         const x = MAP_BOUNDS.minX + ix * this.cpuScaleX, z = MAP_BOUNDS.minZ + iz * this.cpuScaleZ;
-        positions[i * 3] = x; positions[i * 3 + 1] = H[iz * w + ix] - 1.5; positions[i * 3 + 2] = z;
+        // block minimum and water-wins surface: nearest-sampling every 8th texel let a road bed strip
+        // stand as a causeway across the Urnersee (critic round 2, issue 4)
+        let hMin = H[iz * w + ix], water = false;
+        for (let bz = Math.max(0, iz - (step >> 1)); bz <= Math.min(h - 1, iz + (step >> 1)); bz += 2) {
+          for (let bx = Math.max(0, ix - (step >> 1)); bx <= Math.min(w - 1, ix + (step >> 1)); bx += 2) {
+            const j = bz * w + bx;
+            if (H[j] < hMin) hMin = H[j];
+            if (S[j] === WATER_ID) water = true;
+          }
+        }
+        positions[i * 3] = x; positions[i * 3 + 1] = hMin - 1.5; positions[i * 3 + 2] = z;
         const xl = Math.max(0, ix - step), xr = Math.min(w - 1, ix + step), zn = Math.max(0, iz - step), zs = Math.min(h - 1, iz + step);
         const dhdx = (H[iz * w + xr] - H[iz * w + xl]) / ((xr - xl) * this.cpuScaleX);
         const dhdz = (H[zs * w + ix] - H[zn * w + ix]) / ((zs - zn) * this.cpuScaleZ);
         const nl = Math.hypot(dhdx, 1, dhdz);
         normals[i * 3] = -dhdx / nl; normals[i * 3 + 1] = 1 / nl; normals[i * 3 + 2] = -dhdz / nl;
         uvs[i * 2] = x / 40; uvs[i * 2 + 1] = z / 40;
-        surfaceId[i] = BLEND_GROUP[S[iz * w + ix]] ?? 0;
+        surfaceId[i] = BLEND_GROUP[water ? WATER_ID : S[iz * w + ix]] ?? 0;
       }
     }
     const indices = new Uint32Array((cols - 1) * (rows - 1) * 6);

@@ -292,6 +292,14 @@ export class VegetationManager {
     }
   }
 
+  /** Season changed after populate (harness scenario, save load, a long night): drop every chunk's
+   *  instances so the next update re-tints and re-thins them for the new snow depth. */
+  reseason(): void {
+    for (const key of [...this.chunkAlloc.keys()]) this.freeChunk(key);
+    for (const key of [...this.chunkGrass.keys()]) this.freeGrass(key);
+    this.chunkTier.clear();
+  }
+
   private freeChunk(key: string): void {
     this.release(this.chunkAlloc.get(key));
     this.chunkAlloc.delete(key);
