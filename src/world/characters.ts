@@ -253,7 +253,9 @@ function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number], 
         float skin = step(c.g, c.r) * step(c.b, c.g) * smoothstep(0.03, 0.1, warm) * (1.0 - smoothstep(0.55, 0.75, warm)) * smoothstep(0.16, 0.3, c.r);
         float grey = 1.0 - smoothstep(0.04, 0.1, sat);
         // grey above the neck line is hair or beard: it takes the hair dye instead of the cloth dye
-        float hairMask = grey * step(uNeckY, vBindY) * (1.0 - skin);
+        // the beard texels are warm off-white, not neutral grey: above the neck the grey test is wider
+        float hairGrey = 1.0 - smoothstep(0.12, 0.30, sat);
+        float hairMask = hairGrey * step(uNeckY, vBindY) * (1.0 - skin);
         skin = max(skin, grey);
         diffuseColor.rgb = mix(c * uDye, c, skin);
         diffuseColor.rgb = mix(diffuseColor.rgb, c * uHair, hairMask);
