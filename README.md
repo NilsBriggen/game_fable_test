@@ -64,3 +64,13 @@ Invented names, places and plots (as opposed to attested history or founding leg
 
 See `STATUS.json` and `tools/critic/*.md`. Scores are critic-assigned against Skyrim (exploration), Baldur's Gate 3
 (combat) and Kingdom Come: Deliverance (tone), on harness evidence, pass bar 8/10.
+
+At the last check: `npx tsc --noEmit`, `node tools/check-imports.mjs` and the full `npx vitest run` (35 files,
+498 tests) are green and `npx vite build` produces the bundle. The Act 1 playthrough (Rütlischwur → Morgarten)
+completes end to end through `tools/harness/playthrough.mjs` with zero console errors. Draw calls and triangles
+sit inside the harness budgets on every capture; the JS heap was ~875 MB of village geometry until settlements
+became build-on-approach (see `STATUS.json` → `finalGate.budgets` for the verified number).
+
+Known gaps, in the order a player would notice them: men share one downloaded body (dyes, hair and stature vary
+it), the child, monk and mounted knight are still procedural, Habsburg livery is a red tint rather than
+red-white-red, and the world critic's last score was 6/10 with its fix list applied but not re-scored.
