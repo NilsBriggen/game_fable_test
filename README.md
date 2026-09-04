@@ -41,12 +41,22 @@ upper bound, draw calls / triangles / errors are the hard numbers.
 
 ## Assets and provenance
 
-Code and content are original. External art assets are CC0 or CC-BY and every file is listed with source URL,
-author, licence and size in:
+Code and content are original. Every external art file is listed with its source URL, author, licence as found
+and committed size (the owner's rule: any source is fine, but everything is listed):
 
-- `public/assets/CREDITS-models.md` — buildings, props, characters, items
-- `public/assets/CREDITS-world.md` — terrain textures, vegetation, sky
-- `tools/assets/manifest.json`, `tools/assets/world-manifest.json` — the machine-readable download manifests used by `tools/assets/*.mjs` to reproduce `public/assets`
+- `public/assets/CREDITS-models.md` — buildings and props (OpenGameArt Medieval Village MegaKit, KayKit)
+- `public/assets/CREDITS-world.md` — terrain textures, vegetation, sky (Poly Haven)
+- `public/assets/CREDITS-characters.md` — Mixamo character bodies and animation clips (Hugging Face mirrors
+  `GbotHQ/mixamo-characters`, `Leeoo/mixamo-rigs-clips`; Adobe Mixamo terms) and the Poly Haven maps of the
+  procedural fallback body
+- `tools/assets/*-manifest.json` — the machine-readable manifests; `node tools/assets/fetch.mjs`,
+  `fetch-world.mjs` and `fetch-characters.mjs` reproduce `public/assets` and rewrite the credits files
+
+Asset tooling (no Blender, no native binaries — the bundled headless Chromium does the work):
+
+- `tools/assets/fbx2glb.mjs` — FBX (embedded textures) → GLB, textures downscaled, cm → m
+- `tools/assets/glbsheet.mjs` — renders a GLB, optionally driven by a Mixamo clip, to a PNG evidence sheet
+- `tools/harness/shrink.mjs`, `tools/harness/montage.mjs` — delivery JPEGs and side-by-side sheets from harness PNGs
 
 Invented names, places and plots (as opposed to attested history or founding legend) are registered in `LORE.md` §10.
 
