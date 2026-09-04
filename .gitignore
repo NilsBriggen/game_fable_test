@@ -4,3 +4,4 @@ tools/harness/out/
 .vite/
 *.log
 tools/harness/.lock/
+tools/harness/.lock2/

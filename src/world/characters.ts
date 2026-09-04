@@ -32,7 +32,7 @@ import { loadRigAnims, type RigAnims } from './assets';
 import { characterMaterial, loadCharacterModel, modelClip, type CharacterLayer, type CharacterModel } from './characterAssets';
 import { registerCsmMaterial } from './shadowCsm';
 import { MOUNT_Y, TARGET, buildLookGeometry, buildHeldKit, type Bind, type LookGeometry } from './characters/body';
-import { LOOKS, LOOK_VARIANTS, bodyFor, isUniform, lookFor, varyLook, type Body, type Look, type WeaponKind } from './characters/looks';
+import { HAIR_GREY, LOOKS, LOOK_VARIANTS, bodyFor, isUniform, lookFor, varyLook, type Body, type Look, type WeaponKind } from './characters/looks';
 
 export type { LookGeometry } from './characters/body';
 export type { WeaponKind } from './characters/looks';
@@ -225,12 +225,25 @@ export function mixamoClipFor(anim: CharacterAnim, weapon: WeaponKind, seed: num
  *  colour (a plain colour multiply would recolour faces and hands too: Mixamo bodies are one material).
  *  Skin is detected per texel as warm mid-tones (r > g > b, moderate saturation). Material.clone() does not
  *  carry the CSM hook, so the clone is registered again. */
-function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number]): MeshStandardMaterial {
+/** Hair/beard dyes for bodies whose hair is painted grey-white (the Peasant Man's beard): applied to the
+ *  low-saturation texels above the neck line, so the same body reads as a white-, brown-, black- or
+ *  red-bearded man by seed. Index 0 keeps the texture (elders). */
+const HAIR_DYES: [number, number, number][] = [
+  [1, 1, 1], [0.5, 0.36, 0.22], [0.24, 0.2, 0.17], [0.72, 0.42, 0.22], [0.62, 0.5, 0.36], [0.4, 0.3, 0.2],
+];
+
+function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number], hair?: { dye: [number, number, number]; neckY: number }): MeshStandardMaterial {
   const c = mat.clone();
   c.onBeforeCompile = (shader) => {
     shader.uniforms.uDye = { value: new Vector3(tint[0], tint[1], tint[2]) };
+    shader.uniforms.uHair = { value: hair ? new Vector3(hair.dye[0], hair.dye[1], hair.dye[2]) : new Vector3(1, 1, 1) };
+    shader.uniforms.uNeckY = { value: hair ? hair.neckY : 1e9 };
+    // bind-pose height of the texel (geometry units, before skinning) — tells hair from a linen shirt
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vBindY;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBindY = position.y;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('uniform vec3 diffuse;', 'uniform vec3 diffuse;\nuniform vec3 uDye;')
+      .replace('uniform vec3 diffuse;', 'uniform vec3 diffuse;\nuniform vec3 uDye;\nuniform vec3 uHair;\nuniform float uNeckY;\nvarying float vBindY;')
       .replace('#include <map_fragment>', `#include <map_fragment>
       {
         vec3 c = diffuseColor.rgb;
@@ -239,8 +252,11 @@ function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number]):
         // skin: warm mid-tones (ruddy cheeks included); grey: hair, beards, iron — neither takes the dye
         float skin = step(c.g, c.r) * step(c.b, c.g) * smoothstep(0.03, 0.1, warm) * (1.0 - smoothstep(0.55, 0.75, warm)) * smoothstep(0.16, 0.3, c.r);
         float grey = 1.0 - smoothstep(0.04, 0.1, sat);
+        // grey above the neck line is hair or beard: it takes the hair dye instead of the cloth dye
+        float hairMask = grey * step(uNeckY, vBindY) * (1.0 - skin);
         skin = max(skin, grey);
         diffuseColor.rgb = mix(c * uDye, c, skin);
+        diffuseColor.rgb = mix(diffuseColor.rgb, c * uHair, hairMask);
       }`);
   };
   c.dispose = () => {};   // shared textures; exploration disposes NPC materials on freeze
@@ -394,8 +410,16 @@ class Character implements CharacterHandle {
       if (!m.isMesh) return;
       m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
       if (tint) {
+        let hair: { dye: [number, number, number]; neckY: number } | undefined;
+        if (body.hair) {
+          // neck line at 84 % of the bind-pose height (T-pose hands sit at ~80 %), in the mesh's own units
+          const g = m.geometry; if (!g.boundingBox) g.computeBoundingBox();
+          const bb = g.boundingBox!;
+          const grey = look.beard === 'grey' || look.hair === HAIR_GREY;
+          hair = { dye: grey ? HAIR_DYES[0] : HAIR_DYES[1 + ((this.seed >>> 7) % (HAIR_DYES.length - 1))], neckY: bb.min.y + (bb.max.y - bb.min.y) * 0.84 };
+        }
         const mats = Array.isArray(m.material) ? m.material : [m.material];
-        const cloned = mats.map((mat) => tintedClone(mat as MeshStandardMaterial, tint));
+        const cloned = mats.map((mat) => tintedClone(mat as MeshStandardMaterial, tint, hair));
         m.material = Array.isArray(m.material) ? cloned : cloned[0];
       }
       this.meshes.push(m);

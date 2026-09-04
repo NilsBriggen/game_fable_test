@@ -162,6 +162,8 @@ export interface Body {
   height: number;
   /** multiplies every material colour of the instance (cloth dye variety per seed); index by variant */
   tints?: [number, number, number][];
+  /** the body's hair/beard is painted grey-white: dye it per seed (characters.ts HAIR_DYES) */
+  hair?: boolean;
 }
 
 /** Cloth dyes per seed (skin is exempted in the shader): undyed, walnut brown, woad blue, madder red, grey-blue,
@@ -177,13 +179,15 @@ const HABSBURG_TINTS: [number, number, number][] = [[1.35, 0.82, 0.78]];   // th
 // Timmy (31 k) were converted and judged too heavy for a crowd (and modern-dressed); they are not shipped. The
 // variety pass found no further male civilian body ≤ 8 k (Steve 55 k, Big Vegas 7 k is an Elvis, Prisoner a zombie),
 // so men differ by dye and headgear only; Erika Archer (20 k) is the second woman.
-const PEASANT: Body = { id: 'peasant-man', height: 1.73, tints: MEN_TINTS };
+const PEASANT: Body = { id: 'peasant-man', height: 1.73, tints: MEN_TINTS, hair: true };
 const GIRL: Body = { id: 'peasant-girl', height: 1.62, tints: MEN_TINTS };
 /** 20.5 k tris — heavy, but women are a fifth of a crowd; the dark leathers take the dye like cloth */
 const ERIKA: Body = { id: 'erika-archer', height: 1.66, tints: MEN_TINTS };
 const GUARD1: Body = { id: 'castle-guard-01', height: 1.78 };
 const GUARD2: Body = { id: 'castle-guard-02', height: 1.78, tints: HABSBURG_TINTS };
 const KNIGHT: Body = { id: 'knight-d-pelegrini', height: 1.82 };
+/** 14.7 k tris, great helm and dark plate: the second knight body (variety pass found no other period body) */
+const PALADIN: Body = { id: 'paladin-j-nordstrom', height: 1.84 };
 const VANGUARD: Body = { id: 'vanguard-t-choonyung', height: 1.8 };
 
 /** Which downloaded bodies dress each archetype (the seed picks one); archetypes missing here — the child,
@@ -206,10 +210,10 @@ export const BODIES: Record<string, Body[]> = {
   'bailiff-guard': [GUARD1],
   'habsburg-footman': [GUARD2],
   'habsburg-crossbowman': [GUARD2],
-  'habsburg-sergeant': [KNIGHT],
+  'habsburg-sergeant': [KNIGHT, PALADIN],
   'habsburg-squire': [GUARD2],
-  'habsburg-knight': [KNIGHT],
-  raubritter: [VANGUARD],
+  'habsburg-knight': [KNIGHT, PALADIN],
+  raubritter: [VANGUARD, PALADIN],
   player: [PEASANT],
 };
 
