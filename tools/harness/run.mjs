@@ -116,7 +116,7 @@ for (const sc of scenarios) {
     entry.skipped = res.r.skipped ?? null;
     const fm = res.st.frameMs;
     Object.assign(entry, {
-      drawCalls: res.st.drawCalls, triangles: res.st.triangles, split: res.st.split ?? null, ground: res.st.ground ?? null, geometries: res.st.geometries, textures: res.st.textures, programs: res.st.programs,
+      drawCalls: res.st.drawCalls, triangles: res.st.triangles, split: res.st.split ?? null, ground: res.st.ground ?? null, mem: res.st.mem ?? null, geometries: res.st.geometries, textures: res.st.textures, programs: res.st.programs,
       heapMB: res.st.heapMB, entities: res.st.entities, chunksLoaded: res.st.chunksLoaded, instances: res.st.instances, state: res.st.state,
       frame: { p50: pct(fm, 0.5), p95: pct(fm, 0.95), max: fm.length ? Math.max(...fm) : null, samples: fm.length }, hitches: res.st.hitches, flyoverHitches: res.st.flyoverHitches,
       content: res.st.content,

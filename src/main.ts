@@ -445,7 +445,53 @@ function stats() {
     viewport: [window.innerWidth, window.innerHeight],
     split: sceneSplit(),
     ground: groundProbe(),
+    mem: memSplit(),
   };
+}
+
+/** CPU-side bytes still referenced from the scene graph (BufferAttribute arrays per scene root, data
+ *  textures, instance matrices): attributes the retained JS heap the harness budgets to what holds it. */
+function memSplit(): Record<string, number> {
+  const out: Record<string, number> = {};
+  const seenGeo = new Set<string>(), seenTex = new Set<string>();
+  let texBytes = 0, texCount = 0, imgCount = 0;
+  const texOf = (mat: unknown): void => {
+    if (!mat || typeof mat !== 'object') return;
+    for (const v of Object.values(mat as Record<string, unknown>)) {
+      const t = v as { isTexture?: boolean; uuid: string; image?: { data?: ArrayBufferView; width?: number } };
+      if (!t || !t.isTexture || seenTex.has(t.uuid)) continue;
+      seenTex.add(t.uuid); texCount++;
+      const d = t.image?.data;
+      if (d && (d as ArrayBufferView).byteLength) texBytes += (d as ArrayBufferView).byteLength;
+      else if (t.image) imgCount++;
+    }
+  };
+  const bytesOf = (o: Object3D): number => {
+    let n = 0;
+    const m = o as Mesh & { isMesh?: boolean; isInstancedMesh?: boolean; instanceMatrix?: { array: ArrayBufferView } };
+    if (m.isMesh && m.geometry) {
+      const g = m.geometry;
+      if (!seenGeo.has(g.uuid)) {
+        seenGeo.add(g.uuid);
+        for (const a of Object.values(g.attributes)) n += (a as { array?: ArrayBufferView }).array?.byteLength ?? 0;
+        n += g.index?.array?.byteLength ?? 0;
+      }
+      if (m.instanceMatrix) n += m.instanceMatrix.array?.byteLength ?? 0;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mat of mats) texOf(mat);
+    }
+    for (const c of o.children) n += bytesOf(c);
+    return n;
+  };
+  for (const child of ctx.gfx.scene.children) {
+    const name = child.name || child.type;
+    out[`geo:${name}`] = (out[`geo:${name}`] ?? 0) + bytesOf(child);
+  }
+  out['geoCount'] = seenGeo.size;
+  out['texDataBytes'] = texBytes; out['texCount'] = texCount; out['texImages'] = imgCount;
+  const mem = (performance as { memory?: { totalJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
+  if (mem) { out['totalJSHeapMB'] = Math.round(mem.totalJSHeapSize / 1048576); out['heapLimitMB'] = Math.round(mem.jsHeapSizeLimit / 1048576); }
+  return out;
 }
 
 /** Rendered ground under the player vs the height function: a mismatch here is why figures sink or float. */
