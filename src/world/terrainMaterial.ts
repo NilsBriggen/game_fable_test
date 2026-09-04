@@ -163,7 +163,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
     uRoadRange: { value: ROAD_RANGE },
     uSnowLine: { value: 900 },
     uSnowDepth: { value: 0 },      // weather: extra whitening at any altitude (0..1)
-    uSeasonTint: { value: new Color(0x9fb862) },
+    uSeasonTint: { value: new Color(0xa2b66a) },
     uAltitudeTint: { value: new Color(0xa8bc78) }, // pasture drifts to this alpine sage above the villages
     uWetness: { value: 0 },        // rain darkens + glosses the ground
     uDirectScale: { value: 1 },   // see the CSM note on registerCsmMaterial below
@@ -375,6 +375,10 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // alpine meadow layer went past white in the green channel and the whole middle distance
           // hazed to chalk
           albedo = mix(albedo, albedo * tint * 1.5, greenW * 0.88);
+          // Pasture is not one green: where the macro field is high the sward is grazed short and
+          // hay-coloured, so a hillside reads as patches of pasture rather than a painted sheet.
+          float dryPatch = greenW * smoothstep(0.45, 0.85, macro.b) * (1.0 - w2);
+          albedo *= mix(vec3(1.0), vec3(1.10, 1.02, 0.80), dryPatch * 0.75);
 
           // A spruce stand seen from across the Urnersee has to read as forest between the trunks,
           // not as the bare litter texture. Desaturate the litter first and only then tint it toward

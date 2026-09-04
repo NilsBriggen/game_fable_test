@@ -496,7 +496,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
       case 'winter': return new Color(0x8b8a70);
       case 'spring': return new Color(0x9fc466);
       case 'autumn': return new Color(0xc09048);
-      default: return new Color(0x9fb862);
+      default: return new Color(0xa2b66a);   // high summer: a shade drier than spring's green
     }
   }
 
