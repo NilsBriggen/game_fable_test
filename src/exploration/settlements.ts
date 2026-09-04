@@ -9,7 +9,7 @@
  * …: a few dozen, not thousands) no matter how many houses, walls or wells exist. Also builds the
  * collider list `player.ts` collides against.
  */
-import { BufferGeometry, Group, Material, Mesh, Object3D } from 'three';
+import { BufferAttribute, BufferGeometry, Group, Material, Mesh, Object3D } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { ContentRegistry } from '@core/content';
 import type { WorldService } from '@core/services';
@@ -92,8 +92,23 @@ function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, cl
     mesh.userData.settlement = { x: cx, z: cz }; // distance culling in ExplorationImpl.update
     mesh.receiveShadow = true;
     merged.computeBoundingSphere();
+    merged.computeBoundingBox();
+    // Static geometry lives on the GPU only: the merged villages held ~850 MB of vertex arrays in the JS
+    // heap (harness memory census, wave2e) against a 512 MB budget. Arrays are dropped once uploaded;
+    // nothing raycasts or re-uploads these meshes (colliders are the sphere list, not the mesh).
+    releaseOnUpload(merged);
+    mesh.raycast = () => {};
     propsRoot.add(mesh);
   }
+}
+
+function releaseOnUpload(geometry: BufferGeometry): void {
+  const drop = function (this: { array: ArrayLike<number> }) {
+    const ctor = (this.array as unknown as { constructor: new (n: number) => ArrayLike<number> }).constructor;
+    this.array = new ctor(0);
+  };
+  for (const attr of Object.values(geometry.attributes)) (attr as BufferAttribute).onUpload(drop);
+  if (geometry.index) geometry.index.onUpload(drop);
 }
 
 export function buildSettlements(content: ContentRegistry, world: WorldService, propsRoot: Group, showGesslerHat: boolean): BuiltSettlements {
