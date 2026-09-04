@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-04T04:59:45Z",
+  "updatedAt": "2026-09-04T06:01:31Z",
   "wave": "visual-2 + final gate",
   "waves": {
     "1": {
@@ -258,6 +258,7 @@
       "terrain": "drier high-summer pasture with hay-coloured grazed patches; shore wetness 9 m → 4 m, wet roughness floor 0.58",
       "verification": "tools/harness/out/wave2d (altdorf-square-noon, combat-morgarten-setup) in flight",
       "combat": "combat camera pitch sign fixed (orbited 20 m under the Morgarten slope); wave2g verifies"
-    }
+    },
+    "stoppedAt": "session ended at the owner's request before verification captures finished: wave2f (five-scenario visual set), wave2g (heap after settlement release + combat camera) and tools/critic/world3 (round-3 capture set) were still rendering; the world critic's round 3 re-score has not been run. Everything listed above is committed on the branch; re-run `node tools/harness/run.mjs --scenario altdorf-square-noon,combat-morgarten-setup` to confirm heap ≤512 MB and the combat camera."
   }
 }
