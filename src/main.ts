@@ -501,14 +501,14 @@ function groundProbe(): Record<string, number | null> | null {
   for (const c of cand.slice(0, 6)) {
     const tr = ctx.world.get(c.id, Transform)!; const obj = ctx.world.get(c.id, MeshRef)!.object as Object3D;
     obj.updateMatrixWorld(true);
-    let mn: number | null = null;
+    const low = { y: null as number | null };
     const tmp = new Vector3(), acc = new Vector3(), bm = new Matrix4();
     obj.traverse((o) => {
       const m = o as SkinnedMesh; if (!m.isSkinnedMesh) return;
       const g = m.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight; const sk = m.skeleton; sk.update();
-      for (let i = 0; i < pos.count; i += 9) { acc.set(0, 0, 0); for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w === 0) continue; const bi = si.getComponent(i, k); bm.multiplyMatrices(sk.bones[bi].matrixWorld, sk.boneInverses[bi]); tmp.fromBufferAttribute(pos, i).applyMatrix4(m.bindMatrix).applyMatrix4(bm); acc.addScaledVector(tmp, w); } if (mn === null || acc.y < mn) mn = acc.y; }
+      for (let i = 0; i < pos.count; i += 9) { acc.set(0, 0, 0); for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w === 0) continue; const bi = si.getComponent(i, k); bm.multiplyMatrices(sk.bones[bi].matrixWorld, sk.boneInverses[bi]); tmp.fromBufferAttribute(pos, i).applyMatrix4(m.bindMatrix).applyMatrix4(bm); acc.addScaledVector(tmp, w); } if (low.y === null || acc.y < low.y) low.y = acc.y; }
     });
-    npcs.push(`${ctx.world.get(c.id, Name)?.id ?? c.id}@${c.d.toFixed(0)}m ty=${tr.y.toFixed(2)} ground=${world.heightAt(tr.x, tr.z).toFixed(2)} objY=${obj.getWorldPosition(new Vector3()).y.toFixed(2)} skinMin=${mn === null ? '-' : mn.toFixed(2)} vis=${obj.visible} scale=${obj.scale.y.toFixed(2)}`);
+    npcs.push(`${ctx.world.get(c.id, Name)?.id ?? c.id}@${c.d.toFixed(0)}m ty=${tr.y.toFixed(2)} ground=${world.heightAt(tr.x, tr.z).toFixed(2)} objY=${obj.getWorldPosition(new Vector3()).y.toFixed(2)} skinMin=${low.y === null ? '-' : low.y.toFixed(2)} vis=${obj.visible} scale=${obj.scale.y.toFixed(2)}`);
   }
   return { npcs: npcs.join(' | ') as unknown as number, x: Math.round(t.x), z: Math.round(t.z), transformY: Math.round(t.y * 100) / 100, heightAt: Math.round(h * 100) / 100, meshY: meshY === null ? null : Math.round(meshY * 100) / 100, delta: meshY === null ? null : Math.round((meshY - h) * 100) / 100, figureY: figureY === null ? null : Math.round(figureY * 100) / 100, figureMinY: figureMinY === null ? null : Math.round(figureMinY * 100) / 100, hipsY: hipsY === null ? null : Math.round(hipsY * 100) / 100, skinnedMinY: skinnedMinY === null ? null : Math.round(skinnedMinY * 100) / 100, others: others.join(' | ') as unknown as number };
 }
