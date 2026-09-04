@@ -81,9 +81,9 @@ export class CameraRigImpl implements CameraRig {
 
   /** Pull the camera in along its own line back toward the target until it's not embedded in terrain
    *  (task spec: "collision-adjusted against terrain via heightAt"). Cheap ray-march, ≤ 12 samples. */
-  private colliders: { x: number; z: number; radius: number }[] = [];
+  private colliders: { x: number; z: number; radius: number; height?: number }[] = [];
   /** settlement building footprints the boom must not pass through (bughunt exploration #3) */
-  setColliders(c: { x: number; z: number; radius: number }[]): void { this.colliders = c; }
+  setColliders(c: { x: number; z: number; radius: number; height?: number }[]): void { this.colliders = c; }
   private readonly tmpDir = new Vector3();
   private readonly tmpOut = new Vector3();
   private collisionAdjust(target: Vector3, desired: Vector3): Vector3 {
@@ -103,6 +103,7 @@ export class CameraRigImpl implements CameraRig {
         // inside a building footprint (buildings are ~4–9 m tall): stop the boom before the wall
         for (const c of this.colliders) {
           const dx = px - c.x, dz = pz - c.z;
+          if (py >= ground + (c.height ?? 9)) continue;   // a well or a cross: the boom passes over it
           if (dx * dx + dz * dz < (c.radius + 0.4) * (c.radius + 0.4)) { blocked = true; break; }
         }
       }

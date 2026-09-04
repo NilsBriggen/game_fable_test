@@ -10,6 +10,8 @@ export interface Collider {
   x: number;
   z: number;
   radius: number;
+  /** metres above ground the obstacle reaches (camera boom passes over anything lower); buildings ~9 */
+  height?: number;
 }
 
 /** Footprint radius (metres) per model id; anything not listed is treated as walk-through (small props,
@@ -30,10 +32,13 @@ export const RADIUS: Record<string, number> = {
   mill: 3.5,
   'bridge.stone': 0, // walkable across, not a collider
   'bridge.wood': 0,
-  well: 2.0,
+  well: 2.4,
   cross: 0.6,
   hayrack: 1.8,
 };
+
+/** Low props the camera looks over (buildings default to 9 m). */
+export const HEIGHT: Record<string, number> = { well: 2.6, cross: 2.6, hayrack: 3.2 };
 
 /** Footprint used by the layout generator to keep models from interpenetrating (includes small props). */
 export const SPACING: Record<string, number> = { ...RADIUS, fence: 0.8, tent: 2, campfire: 1, 'rock.small': 0.8, 'rock.large': 1.5 };
@@ -43,7 +48,7 @@ export function buildColliders(layout: PlacedModel[]): Collider[] {
   for (const m of layout) {
     const r = RADIUS[m.modelId];
     if (!r) continue;
-    out.push({ x: m.x, z: m.z, radius: r });
+    out.push({ x: m.x, z: m.z, radius: r, height: HEIGHT[m.modelId] });
   }
   return out;
 }

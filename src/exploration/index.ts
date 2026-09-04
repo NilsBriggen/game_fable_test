@@ -21,7 +21,7 @@ import { PoiSystem } from './poi';
 import { InteractSystem, spawnContainers, spawnBoatTravel, spawnTradeAndRest } from './interact';
 import { updateHud } from './hud';
 import { buildSettlements, type BuiltSettlements } from './settlements';
-import type { Collider } from './colliders';
+import { resolveCollisions, type Collider } from './colliders';
 
 class ExplorationServiceImpl implements ExplorationService {
   private readonly bus = new EventBus<ExplorationEvents>();
@@ -160,7 +160,11 @@ class ExplorationServiceImpl implements ExplorationService {
   teleport(entity: EntityId, x: number, z: number, yaw?: number): void {
     const t = this.ctx.world.get(entity, Transform);
     if (!t) return;
-    t.x = x; t.z = z; t.y = this.world.heightAt(x, z);
+    // a POI centre is usually its well: land just south of any solid prop instead of inside it
+    const p = { x, z };
+    for (const c of this.colliders) if (Math.hypot(p.x - c.x, p.z - c.z) < 0.5) { p.z = c.z + 0.5; break; }
+    resolveCollisions(p, this.colliders, 0.6);
+    t.x = p.x; t.z = p.z; t.y = this.world.heightAt(p.x, p.z);
     if (yaw !== undefined) { t.yaw = yaw; this.cameraRig.setYaw(yaw); }
     if (entity === this.getPlayer()) this.poiSystem.seedTriggerContainment({ x, z });
   }
