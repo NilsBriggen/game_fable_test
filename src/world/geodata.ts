@@ -195,11 +195,11 @@ export function buildWorldGeo(): WorldGeo {
   // in peakShape() do the rest of the "reads as a mountain, not a cliff" work.
   const peakRadius: Record<string, number> = {
     pilatus: 1500, 'rigi-kulm': 1550, rigi: 1550, buergenstock: 700, stanserhorn: 900,
-    fronalpstock: 620, urirotstock: 1250, 'grosser-mythen': 480, rossberg: 950, bristen: 1300,
+    fronalpstock: 620, urirotstock: 1250, 'grosser-mythen': 700, rossberg: 950, bristen: 1300,
   };
   // sharp > 1 only for the genuinely spire-like summits (the Mythen); everything else stays close to
   // 1 (the smoothstep base shape in peakShape() already gives a natural broad-massif silhouette).
-  const peakSharp: Record<string, number> = { 'grosser-mythen': 1.4 };
+  const peakSharp: Record<string, number> = { 'grosser-mythen': 1.15 };   // 1.4 at radius 480 read as a needle from Altdorf
   const peaks: Peak[] = [];
   const seenPeak = new Set<string>();
   for (const p of Object.values(PLACES)) {
@@ -211,7 +211,7 @@ export function buildWorldGeo(): WorldGeo {
   }
   // Kleiner Mythen: a smaller unnamed twin beside the Grosser Mythen (visual silhouette only, no gazetteer entry needed).
   const gm = PLACES['grosser-mythen'];
-  if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 260, z: gm.z + 120, h: gm.h - 80, radius: 500, sharp: 1.3 });
+  if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 260, z: gm.z + 120, h: gm.h - 80, radius: 600, sharp: 1.15 });
 
   const lakes: LakePoly[] = LAKES.map((l) => ({ id: l.id, name: l.name, levelGameH: gameHeightFromAsl(l.levelAsl), poly: wobbleShore(l.poly) }));
 

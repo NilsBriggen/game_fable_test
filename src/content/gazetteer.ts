@@ -45,7 +45,7 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'spiringen': { id: 'spiringen', name: 'Spiringen', x: 1858, z: 2348, kind: 'village', owner: 'uri', asl: 920, h: 162 },
   'unterschaechen': { id: 'unterschaechen', name: 'Unterschächen', x: 2533, z: 2595, kind: 'village', owner: 'uri', asl: 1000, h: 189 },
   'klausenpass': { id: 'klausenpass', name: 'Klausenpass', x: 4053, z: 2348, kind: 'pass', owner: 'uri', asl: 1950, h: 505 },
-  'brunnen': { id: 'brunnen', name: 'Brunnen', x: -68, z: -741, kind: 'port', owner: 'schwyz', asl: 435, h: 0 },
+  'brunnen': { id: 'brunnen', name: 'Brunnen', x: -68, z: -741, kind: 'port', owner: 'schwyz', asl: 435, h: 2 },
   'schwyz': { id: 'schwyz', name: 'Schwyz', x: 743, z: -1384, kind: 'village', owner: 'schwyz', asl: 520, h: 29 },
   'ibach': { id: 'ibach', name: 'Ibach', x: 591, z: -1137, kind: 'meadow', owner: 'schwyz', asl: 470, h: 12 },
   'steinen': { id: 'steinen', name: 'Steinen', x: 34, z: -2076, kind: 'village', owner: 'schwyz', asl: 470, h: 12 },
