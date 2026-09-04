@@ -98,8 +98,8 @@ flat green tint (10/10 territory, not scored).
    (`src/content/gazetteer.ts:141`) and `limitGrade` at 14° (`src/world/heightmodel.ts:153`) cannot drop
    122→22 m over 279 m. Fix: end the road at Seelisberg, or exempt authored terminal waypoints from `limitGrade`.
 4. **The far mesh paints road/settlement quads across open water** — P10 (13 `road` + 1 `settlement` cells in
-   the Urnersee, 11 up to +3.5 m above the plane); dashed tan causeway in `lake-overview-seelisberg.png` and
-   `ruetli-dawn.png`. `src/world/terrain.ts:213 buildFarMesh` nearest-samples every 8th texel (62 m). Fix: min
+   the Urnersee, 11 up to +3.5 m above the plane); dashed tan causeway in `lake-overview-seelisberg.png` and — still,
+   *after* the `1f9b38d` far-mesh sink — in `ruetli-dawn.png`, so that commit did not close it. `src/world/terrain.ts:213 buildFarMesh` nearest-samples every 8th texel (62 m). Fix: min
    height + majority surface per block; force vertices inside a lake polygon to water level.
 5. **Vegetation ignores the season after populate** — `morgarten-winter.png`: snow ground, summer-green far
    forest. `snowiness()` (`src/world/vegetation.ts:312`) is read only in the populate paths (`:381`, `:425`)
