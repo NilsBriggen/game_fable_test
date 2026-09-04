@@ -475,6 +475,7 @@ function memSplit(): Record<string, number> {
       else if (t.image) imgCount++;
     }
   };
+  const top: { name: string; bytes: number }[] = [];
   const bytesOf = (o: Object3D): number => {
     let n = 0;
     const m = o as Mesh & { isMesh?: boolean; isInstancedMesh?: boolean; instanceMatrix?: { array: ArrayBufferView } };
@@ -482,8 +483,11 @@ function memSplit(): Record<string, number> {
       const g = m.geometry;
       if (!seenGeo.has(g.uuid)) {
         seenGeo.add(g.uuid);
-        for (const a of Object.values(g.attributes)) n += (a as { array?: ArrayBufferView }).array?.byteLength ?? 0;
-        n += g.index?.array?.byteLength ?? 0;
+        let b = 0;
+        for (const a of Object.values(g.attributes)) b += (a as { array?: ArrayBufferView }).array?.byteLength ?? 0;
+        b += g.index?.array?.byteLength ?? 0;
+        n += b;
+        top.push({ name: `${o.name || o.type}${m.isInstancedMesh ? '[inst]' : ''}`, bytes: b });
       }
       if (m.instanceMatrix) n += m.instanceMatrix.array?.byteLength ?? 0;
       const mats = Array.isArray(m.material) ? m.material : [m.material];
@@ -492,23 +496,10 @@ function memSplit(): Record<string, number> {
     for (const c of o.children) n += bytesOf(c);
     return n;
   };
-  const top: { name: string; bytes: number }[] = [];
-  const bytesNamed = (o: Object3D): number => {
-    const m = o as Mesh & { isMesh?: boolean };
-    let n = 0;
-    if (m.isMesh && m.geometry && !seenGeo.has(m.geometry.uuid)) {
-      const g = m.geometry; let b = 0;
-      for (const a of Object.values(g.attributes)) b += (a as { array?: ArrayBufferView }).array?.byteLength ?? 0;
-      b += g.index?.array?.byteLength ?? 0;
-      top.push({ name: `${o.name || o.type}${(m as unknown as { isInstancedMesh?: boolean }).isInstancedMesh ? '[inst]' : ''}`, bytes: b });
-    }
-    n += bytesOf(o);
-    return n;
-  };
   for (const child of ctx.gfx.scene.children) {
     const name = child.name || child.type;
-    for (const g of child.children) if (g.children.length > 50 || g.name) { const k = `geo:${name}/${g.name || g.type}`; out[k] = (out[k] ?? 0) + bytesNamed(g); }
-    out[`geo:${name}`] = (out[`geo:${name}`] ?? 0) + bytesNamed(child);
+    for (const g of child.children) if (g.children.length > 50 || g.name) { const k = `geo:${name}/${g.name || g.type}`; out[k] = (out[k] ?? 0) + bytesOf(g); }
+    out[`geo:${name}`] = (out[`geo:${name}`] ?? 0) + bytesOf(child);
   }
   top.sort((a, b) => b.bytes - a.bytes);
   top.slice(0, 12).forEach((t, i) => { out[`top${i}:${t.name}`] = t.bytes; });
