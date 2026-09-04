@@ -334,7 +334,7 @@ const invented_: PoiDef[] = [
     note: 'Bannalp is a real Nidwalden alp name (LORE.md §4 names it as a candidate); this specific hut and its exact position are the builder\'s invention.',
     description: 'A high grazing alp above Wolfenschiessen, its two herders\' hut roofed in split shingle.',
   }),
-  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', -28, -148, {
+  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', 138, -202, { // offsets from Sisikon: (307,193), a flat bench on the rerouted shore path
     kind: 'cross', historical: 'invented',
     note: 'A wayside cross on a lake-shore footpath — LORE.md §4\'s explicitly invented minor-POI category; no specific attested cross is claimed.',
     description: 'A weathered wooden wayside cross where the shore path narrows above the water.',

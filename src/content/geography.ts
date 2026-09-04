@@ -74,7 +74,7 @@ const REGION_SEEDS: RegionSeed[] = [
   },
   {
     id: 'uri-urnersee', name: 'Urnersee & the Axen shore', owner: 'uri', note: 'LORE.md §3: Rütli, Seelisberg, Tellsplatte, the Axen shore.',
-    places: ['ruetli', 'seelisberg', 'treib', 'bauen', 'isleten', 'sisikon', 'tellsplatte'],
+    places: ['ruetli', 'seelisberg', 'treib', 'bauen', 'isleten', 'sisikon', 'tellsplatte', 'axen-fluh'],
   },
   {
     id: 'uri-schaechental', name: 'Schächental', owner: 'uri', note: 'LORE.md §3: toward the Klausen.',
@@ -86,7 +86,7 @@ const REGION_SEEDS: RegionSeed[] = [
   },
   {
     id: 'schwyz-talkessel', name: 'Schwyz basin', owner: 'schwyz', note: 'LORE.md §3: Schwyz under the two Mythen, Steinen, Brunnen, Lauerz.',
-    places: ['schwyz', 'steinen', 'brunnen', 'ibach', 'seewen', 'lauerz', 'gersau', 'kindli'],
+    places: ['schwyz', 'steinen', 'brunnen', 'ibach', 'seewen', 'lauerz', 'gersau', 'kindli', 'axen-wand', 'ingenbohl-shore', 'brunnen-east'],
   },
   {
     id: 'schwyz-muotathal', name: 'Muotatal', owner: 'schwyz', pad: 900, note: 'LORE.md §3: Muotathal village, alps, the Pragel.',

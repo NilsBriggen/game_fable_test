@@ -23,6 +23,12 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'fluelen': { id: 'fluelen', name: 'Flüelen', x: 270, z: 1483, kind: 'port', owner: 'uri', asl: 440, h: 2 },
   'sisikon': { id: 'sisikon', name: 'Sisikon', x: 169, z: 395, kind: 'village', owner: 'uri', asl: 450, h: 5 },
   'tellsplatte': { id: 'tellsplatte', name: 'Tellsplatte', x: 203, z: 692, kind: 'landmark', owner: 'uri', asl: 440, h: 2 },
+  // Axen-shore waypoints (LORE §10): keep the Sisikon–Brunnen path on the eastern shore instead of a chord
+  // across the open Urnersee; ~60 m inland of the probed waterline (tools/critic/probes/world/urnersee-shore)
+  'axen-fluh': { id: 'axen-fluh', name: 'Foot of the Axenfluh', x: 330, z: 160, kind: 'landmark', owner: 'uri', asl: 440, h: 4 },
+  'axen-wand': { id: 'axen-wand', name: 'Under the Axen wall', x: 270, z: -220, kind: 'landmark', owner: 'schwyz', asl: 440, h: 5 },
+  'ingenbohl-shore': { id: 'ingenbohl-shore', name: 'Ingenbohl shore', x: 190, z: -560, kind: 'landmark', owner: 'schwyz', asl: 438, h: 3 },
+  'brunnen-east': { id: 'brunnen-east', name: 'East quay, Brunnen', x: 60, z: -700, kind: 'landmark', owner: 'schwyz', asl: 436, h: 2 },
   'altdorf': { id: 'altdorf', name: 'Altdorf', x: 574, z: 2051, kind: 'village', owner: 'uri', asl: 460, h: 9 },
   'buerglen': { id: 'buerglen', name: 'Bürglen', x: 929, z: 2175, kind: 'village', owner: 'uri', asl: 550, h: 39 },
   'attinghausen': { id: 'attinghausen', name: 'Attinghausen', x: 304, z: 2397, kind: 'castle', owner: 'uri', asl: 480, h: 15 },
@@ -133,7 +139,7 @@ export const RIVERS: { id: string; name: string; via: string[] }[] = [
 /** Roads / paths as chains of place ids. */
 export const ROADS: { id: string; name: string; via: string[] }[] = [
   { id: 'gotthard-road', name: 'Gotthard mule track', via: ["fluelen", "altdorf", "attinghausen", "erstfeld", "silenen", "amsteg", "goeschenen", "teufelsbruecke", "andermatt", "hospental", "gotthard"] },
-  { id: 'axen-path', name: 'Axen shore path', via: ["fluelen", "tellsplatte", "sisikon", "brunnen"] },
+  { id: 'axen-path', name: 'Axen shore path', via: ["fluelen", "tellsplatte", "sisikon", "axen-fluh", "axen-wand", "ingenbohl-shore", "brunnen-east", "brunnen"] },
   { id: 'schwyz-road', name: 'Brunnen–Schwyz–Steinen', via: ["brunnen", "ibach", "schwyz", "seewen", "steinen", "lauerz"] },
   { id: 'sattel-road', name: 'Steinen–Sattel–Ägeri (Morgarten road)', via: ["steinen", "steinerberg", "sattel", "sattel-letzi", "morgarten", "oberaegeri", "unteraegeri", "zug"] },
   { id: 'arth-road', name: 'Schwyz–Arth–Zug', via: ["seewen", "goldau", "arth", "oberarth", "walchwil", "oberwil", "zug"] },

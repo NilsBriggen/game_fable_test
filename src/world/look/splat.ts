@@ -35,7 +35,7 @@ import { buildWorldGeo } from '../geodata';
 import { releaseAfterUpload } from '../textures';
 
 /** Metres of height above the lake surface over which the shore stays visibly wet. */
-export const SHORE_WET_M = 9;
+export const SHORE_WET_M = 4;
 /** Metres from a road centreline that B.b still resolves. Beyond this the channel reads 0. */
 export const ROAD_RANGE = 40;
 
