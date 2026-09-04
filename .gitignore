@@ -5,3 +5,4 @@ tools/harness/out/
 *.log
 tools/harness/.lock/
 tools/harness/.lock2/
+tools/critic/world2/
