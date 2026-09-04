@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-04T06:01:31Z",
+  "updatedAt": "2026-09-04T15:41:15Z",
   "wave": "visual-2 + final gate",
   "waves": {
     "1": {
@@ -246,7 +246,7 @@
     "budgets": {
       "status": "draw calls and triangles within budget on every verification capture; heap over budget, census added",
       "captures": "tools/harness/out/wave2c (altdorf-square-noon 444 calls / 2.20 M tris / 0 errors; schwyz-village-dusk 335 / 2.82 M / 0)",
-      "heap": "937–952 MB after gc was ~850 MB of merged settlement vertex arrays (harness `mem` census, wave2e); those are released on upload since 2d5… — verification capture wave2g queued",
+      "heap": "875 MB after gc at Altdorf = 777 MB of merged village geometry (census tools/harness/out/mem1: Luzern 22.8 MB, Zug 21.7 MB, ~60 villages); settlements are now built within 1.5 km and dropped past 2.2 km — verification capture tools/harness/out/mem2 pending",
       "before": "8–11 M tris (3 M budget), heap 1.0 GB"
     },
     "blindComparison": "pending",
@@ -259,6 +259,12 @@
       "verification": "tools/harness/out/wave2d (altdorf-square-noon, combat-morgarten-setup) in flight",
       "combat": "combat camera pitch sign fixed (orbited 20 m under the Morgarten slope); wave2g verifies"
     },
-    "stoppedAt": "session ended at the owner's request before verification captures finished: wave2f (five-scenario visual set), wave2g (heap after settlement release + combat camera) and tools/critic/world3 (round-3 capture set) were still rendering; the world critic's round 3 re-score has not been run. Everything listed above is committed on the branch; re-run `node tools/harness/run.mjs --scenario altdorf-square-noon,combat-morgarten-setup` to confirm heap ≤512 MB and the combat camera."
+    "finalChecks": {
+      "tsc": "clean",
+      "checkImports": "ok",
+      "vitest": "35 files / 498 tests green",
+      "viteBuild": "ok (index 755 kB, three 557 kB)",
+      "captured": "2026-09-04T15:41:15Z"
+    }
   }
 }
