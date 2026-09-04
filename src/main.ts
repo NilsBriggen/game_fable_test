@@ -512,6 +512,7 @@ function groundProbe(): Record<string, number | null> | null {
   const t = ctx.world.get(pid, Transform);
   if (!t) return null;
   const ray = new Raycaster(new Vector3(t.x, t.y + 60, t.z), new Vector3(0, -1, 0), 0, 200);
+  ray.camera = ctx.gfx.camera;   // sprites (vegetation impostors) refuse to raycast without one
   const terrain = world.getSceneRoots().terrain;
   const hits = ray.intersectObject(terrain, true).filter((h) => h.object.name !== 'terrain-far');
   const meshY = hits.length ? hits[0].point.y : null;
