@@ -441,8 +441,13 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
     hemi.color.copy(look.ambient);
     hemi.groundColor.setHex(night ? 0x141821 : 0x40382a).lerp(look.ambient, 0.25);
-    // 0.8 floor (was 0.55): the shadowed side of a valley at sunset is sky-lit, not black
-    hemi.intensity = (night ? 0.6 + (moonUp ? moonP.phase * 0.30 : 0) : 0.8 + 1.7 * Math.pow(dayI, 0.5)) * w.ambientMul;
+    // Sky light. Physical units: the sun lands ~6 on a meadow at noon, so a hemisphere of ~2.3 puts a
+    // shadowed valley at a third of the sunlit tone instead of the 7 % that rendered the Luzern basin
+    // black under Pilatus at 19:00 (was 0.55 + 1.9·√dayI). Ramps down over the last two degrees before
+    // the night branch so the -1° switch is not a step.
+    const twilight = Math.max(0, Math.min(1, (elDeg + 1) / 3));
+    const dayHemi = 0.6 + (2.2 + 1.2 * Math.pow(dayI, 0.5) - 0.6) * twilight * (3 - 2 * twilight) * twilight;
+    hemi.intensity = (night ? 0.6 + (moonUp ? moonP.phase * 0.30 : 0) : dayHemi) * w.ambientMul;
 
     // --- clouds ----------------------------------------------------------------------------------
     // Cloud bodies take the colour of whatever is lighting them: white at noon, orange at dusk, blue at night.
