@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-04T15:41:15Z",
+  "updatedAt": "2026-09-04T16:12:20Z",
   "wave": "visual-2 + final gate",
   "waves": {
     "1": {
@@ -244,10 +244,9 @@
       "fixed": 2
     },
     "budgets": {
-      "status": "draw calls and triangles within budget on every verification capture; heap over budget, census added",
-      "captures": "tools/harness/out/wave2c (altdorf-square-noon 444 calls / 2.20 M tris / 0 errors; schwyz-village-dusk 335 / 2.82 M / 0)",
-      "heap": "875 MB after gc at Altdorf = 777 MB of merged village geometry (census tools/harness/out/mem1: Luzern 22.8 MB, Zug 21.7 MB, ~60 villages); settlements are now built within 1.5 km and dropped past 2.2 km — verification capture tools/harness/out/mem2 pending",
-      "before": "8–11 M tris (3 M budget), heap 1.0 GB"
+      "status": "met on the verification capture",
+      "capture": "tools/harness/out/mem2 altdorf-square-noon: 445 draw calls, 2.20 M tris, heap 129 MB after gc, 0 errors, ground delta 0 — PASS",
+      "history": "8–11 M tris / 1.0 GB heap before settlement LOD, vegetation trim and build-on-approach settlements (777 MB was merged village geometry, census tools/harness/out/mem1)"
     },
     "blindComparison": "pending",
     "worldCriticRound2": "scored 6/10 (tools/critic/wave2-world.md, FAIL); integrator fix round landed: corridors carve/beds win (spikes 193→65, Altdorf sight line clear), Bürgenstock massif, Rütli footpath, far mesh over water, wobbled shores, vegetation re-season, Treib/Rigi/Isleten moves, shore pit floor; round 3 re-score pending on fresh captures",
