@@ -45,6 +45,8 @@ export interface WorldService {
   setWeather(w: Weather): void;
   getWeather(): Weather;
   setSeason(season: 'winter' | 'spring' | 'summer' | 'autumn'): void;
+  /** fill light for turn-based combat (night/rain fights stay legible); combat toggles it */
+  setCombatFill(on: boolean): void;
   streamAround(x: number, z: number, radiusM?: number): Promise<void>;
   /** true when no chunk builds are pending for the current camera position */
   isSettled(): boolean;

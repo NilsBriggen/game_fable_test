@@ -74,8 +74,13 @@ export async function register(ctx: GameContext): Promise<void> {
 
   const serviceBase: CombatService = {
     start: async (encounterId, opts) => {
-      const result = await engine.start(encounterId, opts);
-      return result;
+      ctx.services.tryGet('world')?.setCombatFill(true);
+      try {
+        const result = await engine.start(encounterId, opts);
+        return result;
+      } finally {
+        ctx.services.tryGet('world')?.setCombatFill(false);
+      }
     },
     isActive: () => engine.isActive(),
     getState: () => engine.getState(),

@@ -180,6 +180,7 @@ export async function register(ctx: GameContext): Promise<void> {
       sky.setWeather(w);
     },
     getWeather: () => weather,
+    setCombatFill(on) { sky.setCombatFill(on); },
     setSeason(s) {
       season = s;
       invalidateMapCache(); // the parchment map bakes the snow line (bughunt world-runtime)

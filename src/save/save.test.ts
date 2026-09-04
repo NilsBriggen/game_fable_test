@@ -157,7 +157,7 @@ function fakeWorldService(): { world: WorldService; streamAroundCalls: [number, 
   const setSeasonCalls: string[] = [];
   const world: WorldService = {
     heightAt: () => 0, normalAt: () => ({} as ReturnType<WorldService['normalAt']>), surfaceAt: () => 'grass', isWater: () => false, slopeAt: () => 0,
-    raycast: () => null, regionAt: () => null, setTimeOfDay() {}, getTimeOfDay: () => 0,
+    raycast: () => null, regionAt: () => null, setTimeOfDay() {}, getTimeOfDay: () => 0, setCombatFill() {},
     setWeather(w) { setWeatherCalls.push(w); }, getWeather: () => 'clear', setSeason(s) { setSeasonCalls.push(s); },
     streamAround: async (x, z, r) => { streamAroundCalls.push([x, z, r]); },
     isSettled: () => true, placeInstances: () => ({} as ReturnType<WorldService['placeInstances']>), spawnModel: () => ({} as ReturnType<WorldService['spawnModel']>),

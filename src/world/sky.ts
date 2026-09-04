@@ -246,6 +246,8 @@ export interface SkyHandle {
   setTimeOfDay(hour: number, month: number, day: number): void;
   setWeather(w: Weather): void;
   setSeason(s: Season): void;
+  /** turn-based combat at night or in rain gets a fill so the field stays legible (BG3 lights its fights) */
+  setCombatFill(on: boolean): void;
   update(dt: number, renderer: WebGLRenderer): void;
   dispose(): void;
 }
@@ -380,6 +382,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     light: new Color(), ambient: new Color(), exposure: 0.9,
   };
   const grey = new Color(0x8f9aa4);
+  let combatFill = false;
   const nightLight = new Color(0x8fa6d8);
   const nightGlitter = new Color(0x9fb4de);
   const nightCloud = new Color(0x2b3550);
@@ -448,6 +451,11 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     const twilight = Math.max(0, Math.min(1, (elDeg + 1) / 3));
     const dayHemi = 0.6 + (2.2 + 1.2 * Math.pow(dayI, 0.5) - 0.6) * twilight * (3 - 2 * twilight) * twilight;
     hemi.intensity = (night ? 0.6 + (moonUp ? moonP.phase * 0.30 : 0) : dayHemi) * w.ambientMul;
+    if (combatFill) {
+      // a tactical fight is read from above: lift the floor of both lights rather than the sky itself
+      hemi.intensity = Math.max(hemi.intensity, 2.0);
+      for (const l of csm.lights) l.intensity = Math.max(l.intensity, 1.2);
+    }
 
     // --- clouds ----------------------------------------------------------------------------------
     // Cloud bodies take the colour of whatever is lighting them: white at noon, orange at dusk, blue at night.
@@ -530,6 +538,10 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     setSeason(s: Season) {
       season = s;
       applySeason();
+      applySun();
+    },
+    setCombatFill(on: boolean) {
+      combatFill = on;
       applySun();
     },
     update(dt: number, glRenderer: WebGLRenderer) {
