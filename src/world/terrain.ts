@@ -269,11 +269,41 @@ export class TerrainManager {
     mesh.name = 'terrain-far';
     this.group.add(mesh);
     this.farMesh = mesh;
+    this.farBaseY = Float32Array.from(positions.filter((_, i) => i % 3 === 1));
     return mesh;
+  }
+
+  /** the backdrop's authored heights (its position attribute is lowered near the camera, see `cutFarNearCamera`) */
+  private farBaseY: Float32Array | null = null;
+  private farCutAt = { x: NaN, z: NaN };
+
+  /**
+   * Inside the streamed ring the backdrop must never show through: its 62 m triangles interpolate ABOVE the
+   * fine surface in every concavity (a valley floor, a flattened village pad), which cut the villagers off
+   * at the waist even though the 1.5 m offset held on open slopes. Vertices within the ring are sunk 60 m
+   * (a smooth band up to the ring's edge, where streamed chunks end anyway); recomputed only when the
+   * camera has moved 150 m, ~70 k vertices per pass.
+   */
+  private cutFarNearCamera(camX: number, camZ: number): void {
+    const mesh = this.farMesh, base = this.farBaseY;
+    if (!mesh || !base) return;
+    if (Math.hypot(camX - this.farCutAt.x, camZ - this.farCutAt.z) < 150) return;
+    this.farCutAt = { x: camX, z: camZ };
+    const pos = mesh.geometry.attributes.position as BufferAttribute;
+    const arr = pos.array as Float32Array;
+    const inner = VIEW_RADIUS - 500, outer = VIEW_RADIUS - 100;
+    for (let i = 0, n = base.length; i < n; i++) {
+      const dx = arr[i * 3] - camX, dz = arr[i * 3 + 2] - camZ;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      const t = d <= inner ? 1 : d >= outer ? 0 : 1 - (d - inner) / (outer - inner);
+      arr[i * 3 + 1] = base[i] - 60 * t;
+    }
+    pos.needsUpdate = true;
   }
 
   /** Called every frame by the world system with the current camera position. */
   update(camPos: { x: number; z: number }, frameTime: number): void {
+    this.cutFarNearCamera(camPos.x, camPos.z);
     this.applyRegion(camPos.x, camPos.z, VIEW_RADIUS, frameTime);
     if (this.focus) this.applyRegion(this.focus.x, this.focus.z, 900, frameTime);
 
