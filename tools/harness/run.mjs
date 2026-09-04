@@ -75,7 +75,7 @@ let server = null;
 
 const browserArgs = flag('--gpu')
   ? ['--ignore-gpu-blocklist', '--enable-gpu-rasterization']
-  : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--enable-webgl'];
+  : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--enable-webgl', '--js-flags=--expose-gc'];
 const executablePath = process.env.HARNESS_CHROMIUM || (await import('node:fs')).existsSync('/opt/pw-browsers/chromium') ? (process.env.HARNESS_CHROMIUM || '/opt/pw-browsers/chromium') : undefined;
 const browser = await chromium.launch({ headless: true, args: browserArgs, ...(executablePath ? { executablePath } : {}) });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });

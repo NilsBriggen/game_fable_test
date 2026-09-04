@@ -32,6 +32,7 @@ import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, Unsign
 import { MAP_BOUNDS } from '@content/gazetteer';
 import { lakeLevelAt } from '../lakes';
 import { buildWorldGeo } from '../geodata';
+import { releaseAfterUpload } from '../textures';
 
 /** Metres of height above the lake surface over which the shore stays visibly wet. */
 export const SHORE_WET_M = 9;
@@ -65,6 +66,7 @@ function mkTexture(data: Uint8Array<ArrayBuffer>, w: number, h: number): DataTex
   t.minFilter = LinearMipmapLinearFilter;
   t.generateMipmaps = true;
   t.needsUpdate = true;
+  t.onUpdate = () => releaseAfterUpload(t);   // 17.8 MB per mask; the GPU copy is the only one needed
   return t;
 }
 

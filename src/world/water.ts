@@ -11,7 +11,7 @@ import {
 } from 'three';
 import { polygonSdf } from '@core/math';
 import { buildWorldGeo, type LakePoly } from './geodata';
-import { waterNormalTexture } from './textures';
+import { releaseAfterUpload, waterNormalTexture } from './textures';
 import { registerCsmMaterial } from './shadowCsm';
 import { applyAerialFog, ATMOSPHERE, FOG_UNIFORMS } from './terrainMaterial';
 
@@ -110,6 +110,7 @@ function bakeShoreAtlas(lakes: LakePoly[]): { tex: DataTexture; tiles: Map<strin
   tex.minFilter = LinearFilter; // no mips: tiles must never bleed into each other
   tex.generateMipmaps = false;
   tex.needsUpdate = true;
+  tex.onUpdate = () => releaseAfterUpload(tex);
   return { tex, tiles };
 }
 

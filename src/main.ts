@@ -422,6 +422,9 @@ async function screenshotReady(): Promise<void> {
 
 function stats() {
   const s = ctx.gfx.stats();
+  // usedJSHeapSize counts uncollected garbage; with --js-flags=--expose-gc (harness) collect first so the
+  // number is the retained set
+  (window as unknown as { gc?: () => void }).gc?.();
   const mem = (performance as any).memory;
   const world = ctx.services.tryGet('world');
   const ws = world?.stats();

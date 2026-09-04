@@ -78,13 +78,25 @@ async function decodeLayerStack(url: string): Promise<Uint8Array> {
   ctx.drawImage(bmp, 0, 0, LAYER_PX, LAYER_PX * TERRAIN_LAYER_COUNT);
   bmp.close();
   const img = ctx.getImageData(0, 0, LAYER_PX, LAYER_PX * TERRAIN_LAYER_COUNT);
-  return new Uint8Array(img.data.buffer.slice(0) as ArrayBuffer);
+  ctx.canvas.width = ctx.canvas.height = 0;   // release the 9 MB canvas backing store now, not at GC
+  return new Uint8Array(img.data.buffer as ArrayBuffer);   // a view, not a copy
 }
 
-/** Overwrite the placeholder's pixels in place — same dimensions, so the upload is a plain respecify. */
+/** Hand the decoded pixels to the placeholder texture — same dimensions, so the upload is a plain respecify. */
 function fillArray(tex: DataArrayTexture, data: Uint8Array): void {
-  (tex.image.data as Uint8Array).set(data);
+  (tex.image as { data: Uint8Array | null }).data = data;
   tex.needsUpdate = true;
+}
+
+/**
+ * three keeps `image.data` referenced for the life of a texture, so every DataArrayTexture /
+ * DataTexture in the world held a CPU copy of its pixels forever — 28 MB for the three terrain
+ * arrays alone. The GPU has its own copy after the first upload; drop ours in the upload callback.
+ * (A later `needsUpdate` would need the data back; nothing in the world module sets one.)
+ */
+export function releaseAfterUpload(tex: { image: unknown }): void {
+  const img = tex.image as { data?: unknown } | null;
+  if (img && 'data' in img) img.data = null;
 }
 
 export function getTerrainArrays(): TerrainArrays {
@@ -96,6 +108,7 @@ export function getTerrainArrays(): TerrainArrays {
     t.minFilter = LinearMipmapLinearFilter;
     t.generateMipmaps = true;
     t.anisotropy = 8;    // grazing-angle slopes are the whole game; 16 streaked along the view ray
+    t.onUpdate = () => releaseAfterUpload(t);
     return t;
   };
   const albedo = mk(126, 134, 104);
@@ -147,6 +160,7 @@ export function macroVariationTexture(size = 256): DataTexture {
   t.generateMipmaps = true;
   t.colorSpace = NoColorSpace;
   t.needsUpdate = true;
+  t.onUpdate = () => releaseAfterUpload(t);
   macroTex = t;
   return t;
 }
