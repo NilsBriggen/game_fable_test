@@ -20,7 +20,7 @@ import { NpcSystem } from './npc';
 import { PoiSystem } from './poi';
 import { InteractSystem, spawnContainers, spawnBoatTravel, spawnTradeAndRest } from './interact';
 import { updateHud } from './hud';
-import { buildSettlements, type BuiltSettlements } from './settlements';
+import { BUILD_DROP_M, BUILD_M, buildSettlementMeshes, buildSettlements, dropSettlementMeshes, type BuiltSettlements, type SettlementPlan } from './settlements';
 import { resolveCollisions, type Collider } from './colliders';
 
 class ExplorationServiceImpl implements ExplorationService {
@@ -94,13 +94,17 @@ class ExplorationServiceImpl implements ExplorationService {
   private rebuildSettlements(): void {
     for (const child of [...this.settlementsGroup.children]) disposeObject3D(child);
     this.settlementsGroup.clear();
-    const built: BuiltSettlements = buildSettlements(this.ctx.content, this.world, this.settlementsGroup, this.lastChapter === 'ch1-1307');
+    const pid = this.getPlayer();
+    const pt = pid !== null ? this.ctx.world.get(pid, Transform) : undefined;
+    const built: BuiltSettlements = buildSettlements(this.ctx.content, this.world, this.settlementsGroup, this.lastChapter === 'ch1-1307', pt ? { x: pt.x, z: pt.z } : undefined);
+    this.settlementPlans = built.plans;
     this.colliders = built.colliders;
     this.settlementsChapter = this.lastChapter;
     this.npcSystem.setColliders(built.colliders);
     this.cameraRig.setColliders(built.colliders);
   }
   private settlementsChapter: string | null = null;
+  private settlementPlans: SettlementPlan[] = [];
 
   private teardownTransientMeshes(): void {
     if (this.playerMesh) { disposeObject3D(this.playerMesh); this.playerMesh = null; }
@@ -116,7 +120,7 @@ class ExplorationServiceImpl implements ExplorationService {
     this.populatedChapter = null;
     // a load into another chapter must rebuild the settlement geometry/colliders too (Gessler's hat pole,
     // burnt castles), not only when nothing was built yet (bughunt exploration)
-    if (this.settlementsGroup.children.length === 0 || this.settlementsChapter !== this.lastChapter) this.rebuildSettlements();
+    if (this.settlementPlans.length === 0 || this.settlementsChapter !== this.lastChapter) this.rebuildSettlements();
   }
 
   // ---------------- player ----------------
@@ -255,12 +259,13 @@ class ExplorationServiceImpl implements ExplorationService {
       // settlement LOD: every village inside the 3 km streaming ring used to render at full detail (3.2 M
       // tris in one Altdorf frame); beyond 1.2 km a village is a few pixels — hide it, and only nearby
       // ones cast shadows (each cascade re-renders its casters)
-      for (const m of this.settlementsGroup.children) {
-        const c = (m.userData as { settlement?: { x: number; z: number } }).settlement;
-        if (!c) continue;
-        const d2 = (c.x - t.x) * (c.x - t.x) + (c.z - t.z) * (c.z - t.z);
-        m.visible = d2 < 1200 * 1200;
-        m.castShadow = d2 < 400 * 400;
+      // …and a village's geometry only exists while the player is within BUILD_M (built on approach,
+      // dropped past BUILD_DROP_M), so the JS heap holds the few nearby villages, not all sixty.
+      for (const p of this.settlementPlans) {
+        const d2 = (p.x - t.x) * (p.x - t.x) + (p.z - t.z) * (p.z - t.z);
+        if (!p.meshes.length && d2 < BUILD_M * BUILD_M) buildSettlementMeshes(p, this.world, this.settlementsGroup);
+        else if (p.meshes.length && d2 > BUILD_DROP_M * BUILD_DROP_M) dropSettlementMeshes(p, this.settlementsGroup);
+        for (const m of p.meshes) { m.visible = d2 < 1200 * 1200; m.castShadow = d2 < 400 * 400; }
       }
       animateWalkCycle(this.playerMesh, speed, dt);
     }

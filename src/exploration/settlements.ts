@@ -13,7 +13,7 @@ import { BufferAttribute, BufferGeometry, Group, Material, Mesh, Object3D } from
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { ContentRegistry } from '@core/content';
 import type { WorldService } from '@core/services';
-import type { PoiKind } from '@core/schemas';
+import type { PlacedModel, PoiKind } from '@core/schemas';
 import { PLACES, ROADS } from '@content/gazetteer';
 import { generateLayout, type HeightProbe } from './layout';
 import { buildColliders, type Collider } from './colliders';
@@ -44,9 +44,42 @@ function roadFacingYaw(poiId: string): number {
   return 0;
 }
 
+export interface SettlementPlan {
+  poiId: string;
+  x: number;
+  z: number;
+  layout: PlacedModel[];
+  /** merged meshes currently in the scene (empty while the village is out of build range) */
+  meshes: Mesh[];
+}
+
 export interface BuiltSettlements {
   colliders: Collider[];
   gallowsPole: Object3D | null;
+  /** every settlement's layout; geometry is built on demand by `buildSettlementMeshes` (index.ts LOD) */
+  plans: SettlementPlan[];
+}
+
+/** Build range (m): a village's merged geometry exists only while the player is within this radius, and
+ *  is disposed again beyond BUILD_DROP_M. All ~60 settlements built up front kept ~800 MB of vertex data
+ *  in the JS heap (harness census wave2e/wave2g) for villages that are hidden past 1.2 km anyway. */
+export const BUILD_M = 1500;
+export const BUILD_DROP_M = 2200;
+
+export function buildSettlementMeshes(plan: SettlementPlan, world: WorldService, propsRoot: Group): void {
+  if (plan.meshes.length) return;
+  const byMat = new Map<Material, BufferGeometry[]>();
+  for (const m of plan.layout) {
+    const obj = world.spawnModel(m.modelId, { variant: m.variant });
+    const y = world.heightAt(m.x, m.z) + (m.dy ?? 0);
+    collectBaked(obj, m.x, y, m.z, m.yaw ?? 0, m.scale ?? 1, byMat);
+  }
+  plan.meshes = emitMerged(byMat, propsRoot, plan.poiId, plan.x, plan.z);
+}
+
+export function dropSettlementMeshes(plan: SettlementPlan, propsRoot: Group): void {
+  for (const m of plan.meshes) { propsRoot.remove(m); m.geometry.dispose(); }
+  plan.meshes = [];
 }
 
 /** Accumulates every mesh's world-transformed geometry into `byMat`, keyed by the *material instance*
@@ -76,7 +109,8 @@ function collectBaked(obj: Object3D, x: number, y: number, z: number, yaw: numbe
 
 /** Merges each material's accumulated geometry into one static mesh and adds it to `propsRoot` — the
  *  actual draw-call reduction: N buildings sharing a material become 1 draw call, not N×(meshes/building). */
-function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, clusterName = 'settlements', cx = 0, cz = 0): void {
+function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, clusterName = 'settlements', cx = 0, cz = 0): Mesh[] {
+  const out: Mesh[] = [];
   for (const [mat, geos] of byMat) {
     if (geos.length === 0) continue;
     let merged: BufferGeometry | null = null;
@@ -99,7 +133,9 @@ function emitMerged(byMat: Map<Material, BufferGeometry[]>, propsRoot: Group, cl
     releaseOnUpload(merged);
     mesh.raycast = () => {};
     propsRoot.add(mesh);
+    out.push(mesh);
   }
+  return out;
 }
 
 function releaseOnUpload(geometry: BufferGeometry): void {
@@ -111,9 +147,12 @@ function releaseOnUpload(geometry: BufferGeometry): void {
   if (geometry.index) geometry.index.onUpload(drop);
 }
 
-export function buildSettlements(content: ContentRegistry, world: WorldService, propsRoot: Group, showGesslerHat: boolean): BuiltSettlements {
+/** Lays out every settlement (colliders for all, so NPC spawns and the player collide everywhere) and
+ *  builds geometry only for those within BUILD_M of `near` (all of them when `near` is omitted — tests). */
+export function buildSettlements(content: ContentRegistry, world: WorldService, propsRoot: Group, showGesslerHat: boolean, near?: { x: number; z: number }): BuiltSettlements {
   const probe: HeightProbe = { heightAt: (x, z) => world.heightAt(x, z), isWater: (x, z) => world.isWater(x, z) };
   const colliders: Collider[] = [];
+  const plans: SettlementPlan[] = [];
 
   // One merged mesh per (POI, material): a per-settlement bounding sphere keeps far villages frustum- and
   // shadow-culled (requests/art-1.md), while everything within one settlement stays one draw call per material.
@@ -121,13 +160,9 @@ export function buildSettlements(content: ContentRegistry, world: WorldService, 
     if (!SETTLEMENT_KINDS.has(poi.kind)) continue;
     const yaw = roadFacingYaw(poi.id);
     const layout = generateLayout({ id: poi.id, kind: poi.kind, x: poi.x, z: poi.z, yaw, population: poi.population }, probe);
-    const byMat = new Map<Material, BufferGeometry[]>();
-    for (const m of layout) {
-      const obj = world.spawnModel(m.modelId, { variant: m.variant });
-      const y = world.heightAt(m.x, m.z) + (m.dy ?? 0);
-      collectBaked(obj, m.x, y, m.z, m.yaw ?? 0, m.scale ?? 1, byMat);
-    }
-    emitMerged(byMat, propsRoot, poi.id, poi.x, poi.z);
+    const plan: SettlementPlan = { poiId: poi.id, x: poi.x, z: poi.z, layout, meshes: [] };
+    plans.push(plan);
+    if (!near || Math.hypot(poi.x - near.x, poi.z - near.z) < BUILD_M) buildSettlementMeshes(plan, world, propsRoot);
     colliders.push(...buildColliders(layout));
   }
 
@@ -149,5 +184,5 @@ export function buildSettlements(content: ContentRegistry, world: WorldService, 
     colliders.push({ x, z, radius: 1 });
   }
 
-  return { colliders, gallowsPole };
+  return { colliders, gallowsPole, plans };
 }
