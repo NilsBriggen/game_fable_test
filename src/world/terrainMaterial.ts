@@ -385,7 +385,9 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // the canopy: multiplying a warm brown by a green just gives a duller warm brown, which is
           // how the wooded slopes ended up the colour of ploughed earth.
           float litterLum = dot(albedo, vec3(0.30, 0.59, 0.11));
-          albedo = mix(albedo, mix(albedo, vec3(litterLum), 0.55) * vec3(0.52, 0.66, 0.44), w2 * 0.82);
+          // the canopy colour follows the season too, or a November wood stays June-green beside grey pasture
+          vec3 canopy = vec3(0.52, 0.66, 0.44) * mix(vec3(1.0), tint * 1.5, 0.6);
+          albedo = mix(albedo, mix(albedo, vec3(litterLum), 0.55) * canopy, w2 * 0.82);
 
           // limestone is grey-white, not the green-grey the season tint would drag it toward, and a
           // cliff face is brighter on its bedding ledges than in the joints

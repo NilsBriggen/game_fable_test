@@ -3,6 +3,7 @@
  * ARCHITECTURE.md §6–7. Integrator-owned.
  */
 import { Bone, Box3, Frustum, Matrix4, Mesh, Object3D, Raycaster, SkinnedMesh, Vector3 } from 'three';
+import { gameTimeFor } from '@core/clock';
 import { GameContext } from '@core/context';
 import type { GameState } from '@core/state';
 import { MeshRef, Name, Transform } from '@core/components';
@@ -304,6 +305,14 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
   if (sc.chapter && quest) await quest.setChapter(sc.chapter);
   if (sc.flags && quest) for (const [k, v] of Object.entries(sc.flags)) quest.setFlag(k, v);
   // 3. time & weather
+  // a seasonal scenario also moves the calendar into that season, so the HUD date, sun height and
+  // day length agree with the tint and snow line (a 'winter' capture used to read "1 August")
+  if (sc.season) {
+    const cal = ctx.clock.calendar();
+    const md: Record<string, [number, number]> = { winter: [12, 15], spring: [5, 1], summer: [8, 1], autumn: [10, 15] };
+    const [m, d] = md[sc.season as string] ?? [cal.month, cal.day];
+    ctx.clock.set(gameTimeFor(cal.year, m, d, typeof sc.hour === 'number' ? sc.hour : ctx.clock.hour));
+  }
   if (typeof sc.hour === 'number') { ctx.clock.setHour(sc.hour); world?.setTimeOfDay(sc.hour); }
   if (sc.weather && world) world.setWeather(sc.weather as any);
   if (sc.season && world) world.setSeason(sc.season as any);
