@@ -492,10 +492,26 @@ function memSplit(): Record<string, number> {
     for (const c of o.children) n += bytesOf(c);
     return n;
   };
+  const top: { name: string; bytes: number }[] = [];
+  const bytesNamed = (o: Object3D): number => {
+    const m = o as Mesh & { isMesh?: boolean };
+    let n = 0;
+    if (m.isMesh && m.geometry && !seenGeo.has(m.geometry.uuid)) {
+      const g = m.geometry; let b = 0;
+      for (const a of Object.values(g.attributes)) b += (a as { array?: ArrayBufferView }).array?.byteLength ?? 0;
+      b += g.index?.array?.byteLength ?? 0;
+      top.push({ name: `${o.name || o.type}${(m as unknown as { isInstancedMesh?: boolean }).isInstancedMesh ? '[inst]' : ''}`, bytes: b });
+    }
+    n += bytesOf(o);
+    return n;
+  };
   for (const child of ctx.gfx.scene.children) {
     const name = child.name || child.type;
-    out[`geo:${name}`] = (out[`geo:${name}`] ?? 0) + bytesOf(child);
+    for (const g of child.children) if (g.children.length > 50 || g.name) { const k = `geo:${name}/${g.name || g.type}`; out[k] = (out[k] ?? 0) + bytesNamed(g); }
+    out[`geo:${name}`] = (out[`geo:${name}`] ?? 0) + bytesNamed(child);
   }
+  top.sort((a, b) => b.bytes - a.bytes);
+  top.slice(0, 12).forEach((t, i) => { out[`top${i}:${t.name}`] = t.bytes; });
   out['geoCount'] = seenGeo.size;
   out['texDataBytes'] = texBytes; out['texCount'] = texCount; out['texImages'] = imgCount;
   const mem = (performance as { memory?: { totalJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
