@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-03T23:18:45Z",
+  "updatedAt": "2026-09-04T03:01:52Z",
   "wave": "visual-2 + final gate",
   "waves": {
     "1": {
@@ -244,11 +244,19 @@
       "fixed": 2
     },
     "budgets": {
-      "status": "pending verification capture after settlement LOD + vegetation trim",
-      "before": "8–11 M tris (3 M budget), heap 1.0 GB",
-      "sources": "settlements within 3 km 3.2 M, vegetation 1.45 M, terrain 0.39 M, characters 0.13 M (Altdorf split)"
+      "status": "draw calls and triangles within budget on every verification capture; heap over budget, census added",
+      "captures": "tools/harness/out/wave2c (altdorf-square-noon 444 calls / 2.20 M tris / 0 errors; schwyz-village-dusk 335 / 2.82 M / 0)",
+      "heap": "937–952 MB after gc against a 512 MB budget; tools/harness stats now carry `mem` (geometry bytes per scene root, data-texture bytes) to attribute it — see wave2d",
+      "before": "8–11 M tris (3 M budget), heap 1.0 GB"
     },
     "blindComparison": "pending",
-    "worldCriticRound2": "pending (stood down until the visual wave verified)"
+    "worldCriticRound2": "running: sheet tools/critic/wave2-world.md (probes green, 10 captures in flight); integrator fixes landed meanwhile: far-backdrop sink (figures no longer cut at the waist, verified wave2c delta 0), Axen path rerouted off the open Urnersee, shore-wet band 4 m, low-sun exposure, free-altdorf camera",
+    "visualRound": {
+      "crowd": "well/cross/hayrack solid; market ring 5–16 m from the well; church 21 m from the well; ±5 % stature",
+      "faces": "per-seed hair/beard dye on the Peasant Man (white/brown/black/red/ash) so a crowd is not one face",
+      "bodies": "Paladin J Nordstrom added (knight/sergeant/raubritter); second Mixamo variety pass found nothing else in period dress (manifest notShipped)",
+      "terrain": "drier high-summer pasture with hay-coloured grazed patches; shore wetness 9 m → 4 m, wet roughness floor 0.58",
+      "verification": "tools/harness/out/wave2d (altdorf-square-noon, combat-morgarten-setup) in flight"
+    }
   }
 }
