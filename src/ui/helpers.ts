@@ -153,7 +153,150 @@ export function buildSaveSlots(metas: SaveMeta[]): SaveSlotView[] {
   });
 }
 
-// ---------------- Misc formatting ----------------
+// ---------------- Combat: enemy inspect card + reaction prompt (pure render models) ----------------
+
+import type { CombatantView, CombatStateView } from '@core/services';
+
+export interface TargetCardModel {
+  name: string;
+  hpLine: string;
+  defLine: string;
+  statuses: string[];
+  formationLine: string | null;
+  /** false when the unit is gone (down/dead/routed) — the card must hide, not go stale. */
+  alive: boolean;
+}
+
+/** Pure model for the enemy inspect card (`.cbt-target-card`): null means "hide the card".
+ *  Mirrors `renderTargetCard`'s decision logic so it is unit-testable without a DOM. */
+export function buildTargetCardModel(u: CombatantView | null | undefined): TargetCardModel | null {
+  if (!u) return null;
+  const alive = !u.down && u.hp > 0 && !u.routed;
+  if (!alive) return null;
+  return {
+    name: u.name,
+    hpLine: `HP ${u.hp}/${u.hpMax} · Morale ${u.morale}/${u.moraleMax}`,
+    defLine: `Defense ${u.defense}${u.weapon ? ` · ${u.weapon.name}` : ''}${u.mounted ? ' · mounted' : ''}`,
+    statuses: u.status.map((st) => st.id),
+    formationLine: u.formation.inHaufen ? `Haufen +${u.formation.defenseBonus}` : null,
+    alive: true,
+  };
+}
+
+/** Null when the hovered unit is not an inspectable enemy of the active unit, else the card model. */
+export function targetCardForHover(
+  hovered: CombatantView | null | undefined,
+  active: CombatantView | null | undefined,
+): TargetCardModel | null {
+  if (!hovered || !active) return null;
+  if (hovered.side === active.side) return null;
+  return buildTargetCardModel(hovered);
+}
+
+/** Refresh decision for an already-visible card on a fresh `CombatStateView` (called from
+ *  `renderAll`/`update`, not only mousemove): returns 'hide' when the tracked unit is gone or
+ *  the phase ended, 'refresh' when the caller should re-render (same unit, new numbers). */
+export function targetCardRefresh(
+  view: CombatStateView,
+  cardUnitId: number | null | undefined,
+): 'hide' | 'refresh' {
+  if (cardUnitId === null || cardUnitId === undefined) return 'hide';
+  if (view.phase === 'ended') return 'hide';
+  const cu = view.units.find((u) => u.id === cardUnitId);
+  if (!cu) return 'hide';
+  return buildTargetCardModel(cu) ? 'refresh' : 'hide';
+}
+
+export interface ReactionPromptModel {
+  question: string;
+  unitId: number;
+  abilityName: string;
+}
+
+/** Pure model for the reaction modal (`.cbt-reaction-modal`): null means "no modal".
+ *  `abilityName` resolves via the passed lookup (content registry in-game, a stub in tests). */
+export function buildReactionPrompt(
+  view: CombatStateView,
+  abilityNameOf: (abilityId: string) => string | undefined,
+): ReactionPromptModel | null {
+  const r = view.pendingReaction;
+  if (!r) return null;
+  const unitName = view.units.find((u) => u.id === r.unit)?.name ?? String(r.unit);
+  const targetName = view.units.find((u) => u.id === r.target)?.name ?? String(r.target);
+  const abilityName = abilityNameOf(r.ability) ?? r.ability;
+  return {
+    question: `${unitName} may ${abilityName} against ${targetName} — Accept?`,
+    unitId: r.unit as number,
+    abilityName,
+  };
+}
+
+// ---------------- Trade: per-merchant stock ----------------
+
+export const MERCHANT_STOCK: string[] = ['item.bread', 'item.alpkaese', 'item.wine', 'item.rope', 'item.torch', 'item.bandage', 'item.herbs', 'item.salt-sack'];
+
+/** Small per-POI restock addendum: a merchant town stocks its own wares on top of the
+ *  global fallback, so Luzern/Zug/Altdorf read differently from a roadside stall. */
+const MERCHANT_RESTOCK: Record<string, string[]> = {
+  'poi.luzern': ['item.cloth-bale', 'item.salt-sack', 'item.wine', 'item.salve', 'item.fishing-line'],
+  'poi.zug': ['item.hammer', 'item.rope', 'item.torch', 'item.bread', 'item.leather-boots'],
+  'poi.altdorf': ['item.rope', 'item.mule-tack', 'item.salt-sack', 'item.bread', 'item.flint'],
+  'poi.schwyz': ['item.alpkaese', 'item.dried-meat', 'item.axe', 'item.bandage'],
+  'poi.stans': ['item.alpkaese', 'item.bread', 'item.herbs'],
+  'poi.sarnen': ['item.dried-meat', 'item.herbs', 'item.rope'],
+  'poi.brunnen': ['item.fishing-line', 'item.bread', 'item.wine'],
+  'poi.arth': ['item.bread', 'item.dried-meat', 'item.rope'],
+  'poi.einsiedeln': ['item.psalter', 'item.herbs', 'item.salve', 'item.bread'],
+};
+
+/** Resolve a merchant's stock: carried stall `Container` items first (what the world
+ *  actually spawned), merged with the small per-POI restock addendum when `merchantId`
+ *  (a `poi.*` id from `Interactable.data.merchant`) is known, else the global fallback.
+ *  Unknown defIds are kept here (the renderer filters via `itemDef`) so tests can assert
+ *  the raw merge order. */
+export function resolveMerchantStock(
+  carriedDefIds: string[] | null | undefined,
+  merchantId?: string | null,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (id: string): void => { if (!seen.has(id)) { seen.add(id); out.push(id); } };
+  if (carriedDefIds && carriedDefIds.length) {
+    for (const id of carriedDefIds) push(id);
+  }
+  if (merchantId && MERCHANT_RESTOCK[merchantId]) {
+    for (const id of MERCHANT_RESTOCK[merchantId]!) push(id);
+  }
+  if (!out.length) return [...MERCHANT_STOCK];
+  return out;
+}
+
+// ---------------- Creation preview (scratch-entity derived stats) ----------------
+
+export interface CreationPreviewModel { hp: number; defense: number; morale: number; speed: string }
+
+function attrMod(v: number): number {
+  return Math.floor((v - 10) / 2);
+}
+
+/** Plain-attribute fallback estimate (used when `party.derived()` is unavailable). */
+export function creationPreviewFallback(attrs: { endurance: number; agility: number; presence: number }): CreationPreviewModel {
+  return {
+    hp: 20 + attrMod(attrs.endurance) * 4,
+    defense: 10 + attrMod(attrs.agility),
+    morale: 60 + attrMod(attrs.presence) * 3,
+    speed: '4.0 m/s',
+  };
+}
+
+/** Null-safe wrapper around `party.derived()` values for the creation preview:
+ *  missing/throwing derived falls back to the plain-attribute estimate. */
+export function creationPreviewFromDerived(derived: { defense: number } | null | undefined, attrs: { endurance: number; agility: number; presence: number }): CreationPreviewModel {
+  if (derived && Number.isFinite(derived.defense)) {
+    return { hp: NaN, defense: derived.defense, morale: NaN, speed: '' };
+  }
+  return creationPreviewFallback(attrs);
+}
 
 export function formatWeight(kg: number): string {
   return `${kg.toFixed(1)} kg`;

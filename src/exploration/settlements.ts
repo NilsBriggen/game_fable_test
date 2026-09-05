@@ -49,6 +49,8 @@ export interface SettlementPlan {
   x: number;
   z: number;
   layout: PlacedModel[];
+  /** per-POI activity anchors for NpcSystem.populate (critic N2): well/church/inn/house pads */
+  anchors: PoiAnchors;
   /** merged meshes currently in the scene (empty while the village is out of build range) */
   meshes: Mesh[];
 }
@@ -147,6 +149,33 @@ function releaseOnUpload(geometry: BufferGeometry): void {
   if (geometry.index) geometry.index.onUpload(drop);
 }
 
+/** Per-POI activity anchors for NPC scheduling (critic N2): world coords of the well, church,
+ *  inn (house.blockbau with variant 'inn', else the first house) and every house pad, derived from
+ *  the settlement's own generated layout. Empty when the layout placed nothing of that kind. */
+export interface PoiAnchors {
+  well: { x: number; z: number } | null;
+  church: { x: number; z: number } | null;
+  inn: { x: number; z: number } | null;
+  houses: { x: number; z: number }[];
+}
+
+export function anchorsForLayout(layout: PlacedModel[]): PoiAnchors {
+  let well: PoiAnchors['well'] = null;
+  let church: PoiAnchors['church'] = null;
+  let inn: PoiAnchors['inn'] = null;
+  const houses: { x: number; z: number }[] = [];
+  for (const m of layout) {
+    if (m.modelId === 'well' && !well) well = { x: m.x, z: m.z };
+    else if ((m.modelId === 'church' || m.modelId === 'chapel' || m.modelId === 'monastery') && !church) church = { x: m.x, z: m.z };
+    else if ((m.modelId === 'house.blockbau' || m.modelId === 'house.stone')) {
+      houses.push({ x: m.x, z: m.z });
+      if (m.variant === 'inn' && !inn) inn = { x: m.x, z: m.z };
+    }
+  }
+  if (!inn && houses.length) inn = houses[0];
+  return { well, church, inn, houses };
+}
+
 /** Lays out every settlement (colliders for all, so NPC spawns and the player collide everywhere) and
  *  builds geometry only for those within BUILD_M of `near` (all of them when `near` is omitted — tests). */
 export function buildSettlements(content: ContentRegistry, world: WorldService, propsRoot: Group, showGesslerHat: boolean, near?: { x: number; z: number }): BuiltSettlements {
@@ -160,7 +189,7 @@ export function buildSettlements(content: ContentRegistry, world: WorldService, 
     if (!SETTLEMENT_KINDS.has(poi.kind)) continue;
     const yaw = roadFacingYaw(poi.id);
     const layout = generateLayout({ id: poi.id, kind: poi.kind, x: poi.x, z: poi.z, yaw, population: poi.population }, probe);
-    const plan: SettlementPlan = { poiId: poi.id, x: poi.x, z: poi.z, layout, meshes: [] };
+    const plan: SettlementPlan = { poiId: poi.id, x: poi.x, z: poi.z, layout, anchors: anchorsForLayout(layout), meshes: [] };
     plans.push(plan);
     if (!near || Math.hypot(poi.x - near.x, poi.z - near.z) < BUILD_M) buildSettlementMeshes(plan, world, propsRoot);
     colliders.push(...buildColliders(layout));

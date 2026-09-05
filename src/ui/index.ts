@@ -9,7 +9,7 @@ import { createHud, createLoading, showConfirm } from './hud';
 import { createDialogueUi } from './dialogueUi';
 import { createCutsceneUi } from './cutsceneUi';
 import { createCombatUi } from './combatUi';
-import { renderMenu, type MenuApi } from './menus';
+import { renderMenu, applyUiSettingsSideEffects, type MenuApi } from './menus';
 
 export async function register(ctx: GameContext): Promise<void> {
   const mount = ctx.uiRoot;
@@ -107,6 +107,11 @@ export async function register(ctx: GameContext): Promise<void> {
     },
   };
   ctx.services.register('ui', service);
+
+  // Settings the UI module can apply without touching src/world: pixel ratio, camera far,
+  // shadow enable flag — applied once at boot and on every later change.
+  applyUiSettingsSideEffects(ctx);
+  ctx.onSettings(() => applyUiSettingsSideEffects(ctx));
 
   // ---------------- combat wiring: drive combatUi from CombatService's own event stream ----------------
   // "Wiring" (task spec): poll combat.getState() via combat.on('state')/on('event'); combatUi's own

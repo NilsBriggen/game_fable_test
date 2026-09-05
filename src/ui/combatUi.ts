@@ -10,7 +10,7 @@ import type { EntityId } from '@core/ecs';
 import { el, clear } from './dom';
 import { showConfirm } from './hud';
 import { abilityIcon, ICONS } from './icons';
-import { formatHitChance, worldToCell, buildInitiativeChips } from './helpers';
+import { formatHitChance, worldToCell, buildInitiativeChips, buildTargetCardModel, buildReactionPrompt } from './helpers';
 
 export interface CombatUiHandle {
   show(state: CombatStateView): void;
@@ -286,13 +286,11 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
 
   function renderReaction(view: CombatStateView): void {
     clear(reactionModalHost);
-    if (!view.pendingReaction) return;
-    const r = view.pendingReaction;
-    const unitName = view.units.find((u) => u.id === r.unit)?.name ?? String(r.unit);
-    const targetName = view.units.find((u) => u.id === r.target)?.name ?? String(r.target);
-    const def = ctx.content.abilities.get(r.ability);
+    const prompt = buildReactionPrompt(view, (id) => ctx.content.abilities.get(id)?.name);
+    if (!prompt) return;
+    const r = view.pendingReaction!;
     reactionModalHost.appendChild(el('div', { class: 'eid-panel cbt-reaction-modal' }, [
-      el('div', { class: 'q' }, [`${unitName} may ${def?.name ?? r.ability} against ${targetName} — Accept?`]),
+      el('div', { class: 'q' }, [prompt.question]),
       el('div', { class: 'row' }, [
         el('button', { class: 'eid-btn', onclick: () => submit({ type: 'reaction', unit: r.unit, accept: false }) }, ['Decline']),
         el('button', { class: 'eid-btn primary', onclick: () => submit({ type: 'reaction', unit: r.unit, accept: true }) }, ['Accept']),
@@ -328,15 +326,22 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     renderLog(view);
     renderReaction(view);
     renderResult(view);
-    if (cardUnitId !== null) {
-      // the hovered target card goes stale when its unit dies or routs without the mouse moving (bughunt ui #4)
-      const cu = view.units.find((u) => u.id === cardUnitId);
-      if (!cu || cu.down || cu.hp <= 0 || cu.routed || view.phase === 'ended') renderTargetCard(null, 0, 0);
-    }
+    refreshTargetCardFromState(view);
     const active = view.units.find((u) => u.id === view.activeUnit);
     const playersTurn = !!(active && active.isPlayerControlled && view.phase === 'active');
     endTurnBtn.style.display = playersTurn ? '' : 'none';
     fleeBtn.style.display = playersTurn ? '' : 'none';
+  }
+
+  /** Re-render (or hide) the enemy inspect card from state on every show()/update() —
+   *  not only on mousemove — so a hovered card can never go stale when its unit dies,
+   *  routs, or the phase ends without the mouse moving. */
+  function refreshTargetCardFromState(view: CombatStateView): void {
+    if (cardUnitId === null) return;
+    const cu = view.units.find((u) => u.id === cardUnitId);
+    const model = view.phase === 'ended' ? null : buildTargetCardModel(cu ?? null);
+    if (!model) { renderTargetCard(null, 0, 0); return; }
+    renderTargetCard(cu!, lastCardX, lastCardY);
   }
 
   // ---------------- input ----------------
@@ -389,19 +394,24 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   }
 
   let cardUnitId: number | null = null;
+  let lastCardX = 0;
+  let lastCardY = 0;
   function renderTargetCard(u: CombatantView | null, x: number, y: number): void {
     cardUnitId = u ? u.id : null;
-    if (!u) { targetCard.style.display = 'none'; return; }
+    lastCardX = x;
+    lastCardY = y;
+    const model = buildTargetCardModel(u);
+    if (!model) { targetCard.style.display = 'none'; return; }
     clear(targetCard);
     targetCard.style.display = '';
     targetCard.style.left = `${x + 16}px`;
     targetCard.style.top = `${y + 16}px`;
     const rows: (HTMLElement | null)[] = [
-      el('div', { class: 'nm' }, [u.name]),
-      el('div', {}, [`HP ${u.hp}/${u.hpMax} · Morale ${u.morale}/${u.moraleMax}`]),
-      el('div', {}, [`Defense ${u.defense}${u.weapon ? ` · ${u.weapon.name}` : ''}${u.mounted ? ' · mounted' : ''}`]),
-      u.status.length ? el('div', { class: 'cbt-status-row' }, u.status.map((st) => el('span', { class: 'cbt-status-chip' }, [st.id]))) : null,
-      u.formation.inHaufen ? el('div', {}, [`Haufen +${u.formation.defenseBonus}`]) : null,
+      el('div', { class: 'nm' }, [model.name]),
+      el('div', {}, [model.hpLine]),
+      el('div', {}, [model.defLine]),
+      model.statuses.length ? el('div', { class: 'cbt-status-row' }, model.statuses.map((id) => el('span', { class: 'cbt-status-chip' }, [id]))) : null,
+      model.formationLine ? el('div', {}, [model.formationLine]) : null,
     ];
     for (const r of rows) if (r) targetCard.appendChild(r);
   }
@@ -414,6 +424,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     lastView = null;
     selectedAbility = null;
     hoverPreviewLine = null;
+    cardUnitId = null;
     deployStaged = new Map();
     deploySelected = null;
   }

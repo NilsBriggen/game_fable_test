@@ -13,8 +13,8 @@ import { pointInPolygon } from '@core/math';
 import { PLACES } from '@content/gazetteer';
 import { PLACE_REGION_ID } from '@content/geography';
 
-import { TerrainManager } from './terrain';
-import { VegetationManager } from './vegetation';
+import { TerrainManager, setViewRadius } from './terrain';
+import { VegetationManager, setVegetationDensity } from './vegetation';
 import { buildWater, type WaterHandle } from './water';
 import { buildSky, type SkyHandle } from './sky';
 import { ModelLibrary } from './models';
@@ -23,7 +23,9 @@ import { renderMapImage, worldToMapUv, invalidateMapCache } from './map';
 import { getTerrainMaterial } from './terrainMaterial';
 import { snowLineFor } from './heightmodel';
 
-const STREAM_CORE_RADIUS = 1100;
+const STREAM_CORE_RADIUS_DEFAULT = 1100;
+/** Settled radius for the harness/camera gate; follows `viewDistance` (see applyWorldSettings below). */
+let streamCoreRadius = STREAM_CORE_RADIUS_DEFAULT;
 
 export async function register(ctx: GameContext): Promise<void> {
   const { renderer, scene, camera } = ctx.gfx;
@@ -202,7 +204,7 @@ export async function register(ctx: GameContext): Promise<void> {
         poll();
       });
     },
-    isSettled: () => terrain.isSettledAround(camera.position.x, camera.position.z, STREAM_CORE_RADIUS),
+    isSettled: () => terrain.isSettledAround(camera.position.x, camera.position.z, streamCoreRadius),
     placeInstances,
     spawnModel: (modelId: string, opts?: { variant?: string; scale?: number; seed?: number }) => models.spawn(modelId, opts),
     spawnCharacter: (archetype: string, opts?: { variant?: string; mounted?: boolean; seed?: number }) => spawnCharacter(archetype, opts),
@@ -223,6 +225,33 @@ export async function register(ctx: GameContext): Promise<void> {
   };
 
   ctx.services.register('world', service);
+
+  // Settings the world module owns (requests/ui-4, ui-5): CSM shadow resolution, streaming radius,
+  // and quality-tier vegetation density. Render scale / pixel ratio / shadowMap.enabled / camera far
+  // stay UI-side in `applyUiSettingsSideEffects` (src/ui/menus.ts) — this subscriber only adds what
+  // the UI legally cannot reach. Applied once at boot (loaded settings) and on every later change.
+  // `streamAround` callers (exploration fast-travel, harness) pass their own radius and are untouched.
+  function applyWorldSettings(): void {
+    const s = ctx.settings;
+    if (s.shadowRes !== lastShadowRes) { lastShadowRes = s.shadowRes; sky.setShadowSize(s.shadowRes); }
+    // viewDistance 4000 (the default) maps to the authored 3000 m streaming ring, so boot with
+    // loaded/default settings renders exactly what the fixed radius always rendered; the panel
+    // then scales the ring down/up from there.
+    setViewRadius(s.viewDistance * 0.75);
+    streamCoreRadius = Math.max(400, Math.min(2000, Math.round(s.viewDistance * 0.275)));
+    const density = s.quality === 'low' ? 0.4 : s.quality === 'medium' ? 0.7 : 1;
+    if (density !== lastDensity) {
+      lastDensity = density;
+      setVegetationDensity(density);
+      // already-placed chunks keep their old instances until a tier change; force a re-scatter so
+      // the new tier is visible without a teleport (same path as a season change).
+      vegetation.reseason();
+    }
+  }
+  let lastShadowRes = -1;
+  let lastDensity = -1;
+  applyWorldSettings();
+  ctx.onSettings(() => applyWorldSettings());
 
   ctx.events.on('state-changed', () => { /* no-op hook point; kept for future pause/resume of particles etc. */ });
   void unsubClock; // kept subscribed for the lifetime of the app (no teardown path in this game)

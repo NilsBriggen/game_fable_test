@@ -493,22 +493,38 @@ export class CombatEngineImpl implements CombatService {
     const budget = u.speedMBase * 2; // "flees toward own edge at Dash speed"
     if (!this.grid) return;
     const dist = dijkstra(u.q, u.r, budget, u.side, { cols: this.grid.cols, rows: this.grid.rows, cellM: this.grid.cellM, cells: this.cells }, this.occupants(u.id), u.mounted);
-    // Round-3 minor fix: a routed unit used to head for a fixed row (its "own" edge — r=0 for enemy, rows-1
-    // for player) regardless of what's actually there. At Brunnen that row IS the lake, so routed units waded
-    // straight into the water they should have been fleeing from. Now it's the nearest reachable non-water
-    // cell to ANY map edge — genuinely "away from the fight," never "into the lake."
+    // Round-3 minor fix: a routed unit used to head for a fixed row (its "own" edge — r=0 for enemy,
+    // rows-1 for player) regardless of what's actually there. At Brunnen that row IS the lake, so routed
+    // units waded straight into the water they should have been fleeing from. Now: enemies flee toward the
+    // deploy-OPPOSITE half (off the field, past where the player's party came from), player units toward
+    // their own deploy half, falling back to the nearest non-water cell to ANY map edge when that half has
+    // no reachable dry cell. Water cells are always excluded from the choice.
     const { cols, rows } = this.grid;
-    const edgeDist = (q: number, r: number) => Math.min(r, rows - 1 - r, q, cols - 1 - q);
-    let best: CellKey | null = null;
-    let bestScore = -Infinity;
-    for (const [key, v] of dist) {
-      if (v.cost === 0) continue;
-      const [q, r] = key.split(',').map(Number);
-      if (this.occupantAt(q, r, u.id)) continue;
-      if (this.cellAt(q, r)?.surface === 'water') continue;
-      const score = -edgeDist(q, r);
-      if (score > bestScore) { bestScore = score; best = { q, r }; }
-    }
+    const dz = this.deployZone;
+    const deployCenterR = dz.r + Math.max(1, dz.rows) / 2;
+    const deployCenterQ = dz.q + Math.max(1, dz.cols) / 2;
+    // Which half the unit flees toward: enemies away from the player's deploy zone, players back toward it.
+    const fleeSouth = u.side === 'enemy' ? deployCenterR < rows / 2 : deployCenterR >= rows / 2;
+    const fleeEast = u.side === 'enemy' ? deployCenterQ < cols / 2 : deployCenterQ >= cols / 2;
+    const edgeDistOpposite = (q: number, r: number) => Math.min(
+      fleeSouth ? rows - 1 - r : r,
+      fleeEast ? cols - 1 - q : q,
+    );
+    const edgeDistAny = (q: number, r: number) => Math.min(r, rows - 1 - r, q, cols - 1 - q);
+    const collect = (scoreOf: (q: number, r: number) => number): CellKey | null => {
+      let best: CellKey | null = null;
+      let bestScore = -Infinity;
+      for (const [key, v] of dist) {
+        if (v.cost === 0) continue;
+        const [q, r] = key.split(',').map(Number);
+        if (this.occupantAt(q, r, u.id)) continue;
+        if (this.cellAt(q, r)?.surface === 'water') continue;
+        const score = -scoreOf(q, r);
+        if (score > bestScore) { bestScore = score; best = { q, r }; }
+      }
+      return best;
+    };
+    const best = collect(edgeDistOpposite) ?? collect(edgeDistAny);
     if (best) { u.q = best.q; u.r = best.r; this.pushLog('move', `${u.name} flees.`, u.id, { cell: best }); }
     this.recomputeFormation();
   }

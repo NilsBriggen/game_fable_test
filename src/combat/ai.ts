@@ -52,6 +52,59 @@ function furthestFrom(engine: CombatEngineImpl, u: Unit, enemies: Unit[]): CellK
   return best;
 }
 
+/** Round-3 minor (wave2-combat.md §"Ranked notable issues" item 5): how many live enemies could take an
+ *  opportunity attack against `u` if it left their reach right now (reaction still available). Cheap
+ *  O(enemies) scan — no pathfinding. */
+function provokerCount(engine: CombatEngineImpl, u: Unit): number {
+  return engine.unitList().filter((o) => o.side !== u.side && !o.dead && !o.down
+    && o.ap.reaction && cellDistance(o.q, o.r, u.q, u.r) <= (o.weapon?.reach ?? 1)).length;
+}
+
+/** Round-3 minor: proactive Disengage, but ONLY on retreat/rally/flee moves — never on an attacker's turn.
+ *  Disengage costs the action, so spending it before an attack/rally would eat the very thing the turn is
+ *  for. Callers below invoke this solely in branches that move without attacking (knight flee, crossbowman
+ *  retreat, sergeant rally-approach). Fires when fragile (≤50% HP) or facing 2+ provokers. */
+function tryDisengageForRetreat(engine: CombatEngineImpl, u: Unit): void {
+  if (!u.ap.action || hasStatus(u, 'disengaged')) return;
+  const n = provokerCount(engine, u);
+  if (n === 0) return;
+  const fragile = u.hp <= u.hpMax * 0.5;
+  if (!fragile && n < 2) return;
+  engine.aiAbility(u, 'ability.disengage');
+}
+
+/** Cheap OA estimate for one candidate destination (one previewMove ≈ one Dijkstra on a ≤40×24 grid). */
+function provokesFor(engine: CombatEngineImpl, u: Unit, cell: CellKey): number {
+  const preview = engine.previewMove(u.id, cell);
+  return preview ? preview.provokes.length : 999;
+}
+
+/** Round-3 minor: safe-path choice. `scored` is the caller's already-ranked candidate list; only the top-N
+ *  shortlist pays for a previewMove each, keeping the whole turn O(N) Dijkstras and well under budget.
+ *  Prefers OA-free destinations, breaking ties by the caller's own score. */
+function pickSafeCell(engine: CombatEngineImpl, u: Unit, scored: { cell: CellKey; score: number }[], topN = 4): CellKey | null {
+  if (scored.length === 0) return null;
+  scored.sort((a, b) => b.score - a.score);
+  const short = scored.slice(0, Math.max(1, topN));
+  let best = short[0];
+  let bestProv = provokesFor(engine, u, best.cell);
+  for (let i = 1; i < short.length; i++) {
+    const p = provokesFor(engine, u, short[i].cell);
+    if (p < bestProv) { best = short[i]; bestProv = p; }
+  }
+  return best.cell;
+}
+
+/** Round-3 minor: bonus-action rescue — an adjacent drowning ally (mail dragging them under, LORE §1) is
+ *  hauled out before anything else this turn. Returns true when a rescue was attempted. */
+function tryHaulOut(engine: CombatEngineImpl, u: Unit): boolean {
+  if (!u.ap.bonus || hasStatus(u, 'drowning')) return false;
+  const ally = engine.unitList().find((o) => o.side === u.side && o.id !== u.id && !o.dead
+    && hasStatus(o, 'drowning') && cellDistance(o.q, o.r, u.q, u.r) <= 1);
+  if (!ally) return false;
+  return engine.aiAbility(u, 'ability.haul-out', ally.id);
+}
+
 /** round-2 issue (c)/3: a bonus-action Shove costs nothing the main attack needs, so try it opportunistically
  *  on any adjacent enemy the shove would actually drop into water or off a ledge — the AI never used Shove
  *  at all before this (round-1 issue 15's admitted gap), which is also why Drowning never happened in play. */
@@ -108,13 +161,20 @@ function findChargeApproach(engine: CombatEngineImpl, u: Unit, target: Unit): Ce
 }
 
 function knightAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
+  tryHaulOut(engine, u); // bonus action — never costs the morale check or the move below
   if (u.morale < 20) {
     // round-2 issue (a)(c): a forced DC-14 check every round below 20 morale — real odds of steady/shaken/
     // Routed, not the old "run to the furthest cell forever, never actually Rout" special case that left a
     // broken knight alive and fleeing for 100+ rounds, blocking the `rout` objective from ever completing.
     engine.forceMoraleCheck(u, 14, 'shattered');
     if (u.routed) return; // doRoutedTurn takes over from here on
-    const away = furthestFrom(engine, u, enemies);
+    // Round-3 minor: a broken knight still under arms disengages before running (a pure flee move, never an
+    // attacker's turn) and takes the OA-free way out when several equally-far lines read the same.
+    tryDisengageForRetreat(engine, u);
+    const scored = engine.reachable(u.id).map((cell) => ({
+      cell, score: Math.min(...enemies.map((e) => cellDistance(cell.q, cell.r, e.q, e.r))),
+    }));
+    const away = pickSafeCell(engine, u, scored) ?? furthestFrom(engine, u, enemies);
     if (away) engine.aiMove(u, away);
     return;
   }
@@ -145,6 +205,7 @@ function knightAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng
 }
 
 function footmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
+  tryHaulOut(engine, u); // bonus action — never costs the attack below
   tryShoveIntoHazard(engine, u, enemies); // bonus action — doesn't cost the attack below
   // Round-3 critic issue 2: generic footmen (this doctrine covers the Habsburg column's own spearmen, not
   // just the Confederate `waldstaetteAct`) never used Brace even though they carry the same brace-property
@@ -159,23 +220,25 @@ function footmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rn
   if (!target) return;
   if (tryAttack(engine, u, target)) return;
   // issue 15: prefer a cell that actually flanks the target (an ally already on the opposite side) over the
-  // merely-nearest one, when both are reachable within melee reach.
+  // merely-nearest one, when both are reachable within melee reach. Round-3 minor: the top-4 shortlist is
+  // then re-ranked OA-free-first, so a flanking line that eats a free sword-blow loses to an equal one that
+  // doesn't — but a plain attacker never Disengages (that would eat its action, and the attack itself).
   const reach = u.weapon?.reach ?? 1;
   const allies = engine.unitList().filter((o) => o.side === u.side && o.id !== u.id && !o.dead && !o.down);
-  let best: CellKey | null = null;
-  let bestScore = -Infinity;
+  const scored: { cell: CellKey; score: number }[] = [];
   for (const c of engine.reachable(u.id)) {
     const d = cellDistance(c.q, c.r, target.q, target.r);
     if (d > reach) continue;
     const flanks = allies.some((a) => cellDistance(a.q, a.r, target.q, target.r) <= (a.weapon?.reach ?? 1) && onOppositeSides(c, { q: a.q, r: a.r }, target));
-    const score = (flanks ? 5 : 0) - d;
-    if (score > bestScore) { bestScore = score; best = c; }
+    scored.push({ cell: c, score: (flanks ? 5 : 0) - d });
   }
+  const best = pickSafeCell(engine, u, scored);
   if (best) { engine.aiMove(u, best); tryAttack(engine, u, target); return; }
   moveThenAttack(engine, u, target);
 }
 
 function crossbowmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
+  tryHaulOut(engine, u); // bonus action — never costs the shot/retreat below
   if (!u.ranged) { footmanAct(engine, u, enemies, _rng); return; }
   // round-2 issue (a): an empty quiver — refused reload, no bolt to fire — means "close with the dagger",
   // not "keep kiting uphill forever." This was the actual mechanism behind the 85-142-round attrition grind
@@ -194,16 +257,19 @@ function crossbowmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
   const short = u.ranged.range?.short ?? 6;
   const adjacentEnemy = enemies.some((e) => dist(u, e) <= 1);
   if (adjacentEnemy || dist(u, nearest) > short) {
-    // issue 15: prefer high ground within range over the merely-closest in-range cell.
-    let best: CellKey | null = null;
-    let bestScore = -Infinity;
+    // issue 15: prefer high ground within range over the merely-closest in-range cell. Round-3 minor: an
+    // adjacent-threatened retreat Disengages first (pure flee move — the action buys nothing this turn, since
+    // a threatened crossbowman isn't shooting well anyway), and the top-4 high-ground lines are re-ranked
+    // OA-free-first.
+    if (adjacentEnemy) tryDisengageForRetreat(engine, u);
+    const scored: { cell: CellKey; score: number }[] = [];
     for (const c of engine.reachable(u.id)) {
       const d = cellDistance(c.q, c.r, nearest.q, nearest.r);
       if (d > short || d < 1) continue;
       const height = engine.cellViewAt(c.q, c.r)?.height ?? 0;
-      const score = height - d * 0.1;
-      if (score > bestScore) { bestScore = score; best = c; }
+      scored.push({ cell: c, score: height - d * 0.1 });
     }
+    const best = pickSafeCell(engine, u, scored);
     if (best) engine.aiMove(u, best);
     else if (adjacentEnemy) { const away = furthestFrom(engine, u, enemies); if (away) engine.aiMove(u, away); }
     else { const cell = stepToward(engine, u, nearest, short - 1); if (cell) engine.aiMove(u, cell); }
@@ -212,6 +278,7 @@ function crossbowmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
 }
 
 function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rng): void {
+  tryHaulOut(engine, u); // bonus action — never costs the brace/cache/attack below
   // Roll boulders if standing on a ready feature AND the column has actually bunched up in its line —
   // balance pass: firing on the first lone soldier to wander past (the old `hasTarget` check) wasted the
   // cache on 1 enemy instead of catching several; a competent defender waits.
@@ -248,15 +315,18 @@ function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
       return;
     }
     // Move toward the target but prefer a cell that keeps/builds adjacency with allied polearms (Haufen).
+    // Round-3 minor: the top-4 cohesion lines are re-ranked OA-free-first — same hold-the-block preference,
+    // just not through a free enemy blade when an equal line exists. Never Disengages here: this branch
+    // exists to close and attack, and Disengage would eat the action the attack needs.
     const reach = engine.reachable(u.id);
     const allies = engine.unitList().filter((o) => o.side === u.side && isPolearm(o.weapon) && o.id !== u.id && !o.dead);
-    let best: CellKey | null = null; let bestScore = -Infinity;
+    const scored: { cell: CellKey; score: number }[] = [];
     for (const c of reach) {
       const dEnemy = cellDistance(c.q, c.r, target.q, target.r);
       const adjAllies = allies.filter((a) => cellDistance(a.q, a.r, c.q, c.r) <= 1).length;
-      const score = adjAllies * 2 - dEnemy * 0.5;
-      if (score > bestScore) { bestScore = score; best = c; }
+      scored.push({ cell: c, score: adjAllies * 2 - dEnemy * 0.5 });
     }
+    const best = pickSafeCell(engine, u, scored);
     if (best) engine.aiMove(u, best);
     tryAttack(engine, u, target);
     return;
@@ -265,6 +335,7 @@ function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
 }
 
 function sergeantAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], rng: Rng): void {
+  tryHaulOut(engine, u); // bonus action — never costs the rally/attack below
   // Round-3 critic issue 2: Rally's own 3-cell radius was fine, but the AI only ever checked "is someone
   // already standing next to me" — on a column strung across up to 24 rows, that meant the sergeant almost
   // never actually reached anyone. Now it closes the distance to the nearest shaken/routed ally in its own
@@ -273,7 +344,13 @@ function sergeantAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], rng: Rn
   const nearestTrouble = [...inTrouble].sort((a, b) => dist(u, a) - dist(u, b))[0];
   if (nearestTrouble && u.ap.action) {
     if (dist(u, nearestTrouble) <= 3) { engine.aiAbility(u, 'ability.rally'); return; }
-    const cell = stepToward(engine, u, nearestTrouble, 2);
+    // Round-3 minor: closing to rally range is a pure rally-approach move (the action is reserved for Rally
+    // itself), so Disengage first when the sergeant would otherwise walk out under blades, and prefer the
+    // OA-free line among the near-equivalent approach cells.
+    tryDisengageForRetreat(engine, u);
+    const reach = engine.reachable(u.id);
+    const scored = reach.map((cell) => ({ cell, score: -Math.abs(cellDistance(cell.q, cell.r, nearestTrouble.q, nearestTrouble.r) - 2) }));
+    const cell = pickSafeCell(engine, u, scored) ?? stepToward(engine, u, nearestTrouble, 2);
     if (cell) engine.aiMove(u, cell);
     if (dist(u, nearestTrouble) <= 3 && u.ap.action) { engine.aiAbility(u, 'ability.rally'); return; }
   }

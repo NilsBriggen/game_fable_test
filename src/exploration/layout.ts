@@ -26,6 +26,9 @@ export interface LayoutInput {
 }
 
 const MAX_SLOPE_DY = 1.6; // ≈ 28° over a 3 m probe step: buildings must not sit on ground the player cannot walk (40°)
+/** CAMP_SLOPE: camps (quarries, charcoal burners, forest bivouacs) may sit on ground up to ~35°
+ *  (tan 35° × 3 m ≈ 2.1 m over the 3 m probe step) — scree and forest slopes no village would take. */
+export const CAMP_SLOPE_DY = 2.1;
 
 function isGentle(x: number, z: number, probe: HeightProbe, maxDy = MAX_SLOPE_DY): boolean {
   const h0 = probe.heightAt(x, z);
@@ -36,7 +39,7 @@ function isGentle(x: number, z: number, probe: HeightProbe, maxDy = MAX_SLOPE_DY
 
 class Builder {
   readonly out: PlacedModel[] = [];
-  /** camps may use ground up to ~40° */
+  /** camps may use ground up to CAMP_SLOPE (~35°) */
   steepOk = false;
   constructor(private cx: number, private cz: number, private probe: HeightProbe, private allowWater = false) {}
 
@@ -64,7 +67,7 @@ class Builder {
       for (const da of [0, 0.52, -0.52, 1.05, -1.05, 1.57, -1.57]) {
         const a = baseAngle + da, r = baseR * shrink;
         const x = this.cx + Math.sin(a) * r, z = this.cz + Math.cos(a) * r;
-        if (this.probe.isWater(x, z) || !isGentle(x, z, this.probe, this.steepOk ? 2.5 : MAX_SLOPE_DY) || this.overlaps(modelId, x, z)) continue;
+        if (this.probe.isWater(x, z) || !isGentle(x, z, this.probe, this.steepOk ? CAMP_SLOPE_DY : MAX_SLOPE_DY) || this.overlaps(modelId, x, z)) continue;
         this.out.push({ modelId, x, z, yaw: opts.yaw, scale: opts.scale, variant: opts.variant });
         return true;
       }
@@ -84,6 +87,30 @@ class Builder {
     }
     return r;
   }
+
+  /** Gentleness of the ground at a point with this builder's slope allowance (village 28°, camp 35°). */
+  gentleAt(x: number, z: number): boolean {
+    return isGentle(x, z, this.probe, this.steepOk ? CAMP_SLOPE_DY : MAX_SLOPE_DY);
+  }
+}
+
+/** Driest-centre search (critic N3): the gazetteer point of a lake-shore town (Zug in the lake
+ *  polygon) may sit on water, so a town is laid out from the candidate centre — on a 5×5 grid at
+ *  ±150 m around the POI centre — with the largest `dryRadius`. Ties break toward the gazetteer
+ *  point (least displacement). Pure function of the probe, deterministic. */
+export function findDriestCentre(x: number, z: number, probe: HeightProbe, maxRadius: number): { x: number; z: number; dry: number } {
+  let best = { x, z, dry: -1 };
+  let bestDist = 0;
+  for (let ix = -2; ix <= 2; ix++) {
+    for (let iz = -2; iz <= 2; iz++) {
+      const cx = x + ix * 75, cz = z + iz * 75;
+      const b = new Builder(cx, cz, probe);
+      const dry = b.dryRadius(maxRadius);
+      const dist = Math.hypot(cx - x, cz - z);
+      if (dry > best.dry || (dry === best.dry && dist < bestDist)) { best = { x: cx, z: cz, dry }; bestDist = dist; }
+    }
+  }
+  return best;
 }
 
 function popTotal(pop?: Record<string, number>): number {
@@ -115,7 +142,9 @@ function layoutVillage(b: Builder, rng: Rng, yaw: number, pop?: Record<string, n
   b.add('cross', Math.sin(yaw) * 30, Math.cos(yaw) * 30, { yaw });
 }
 
-/** town (Luzern/Zug): `house.stone` rows, `castle.wall` perimeter with a gate, a church (task spec). */
+/** town (Luzern/Zug): `house.stone` rows, `castle.wall` perimeter with a gate, a church (task spec).
+ *  The gazetteer point of a lake-shore town (Zug) may sit on water, so a driest-centre search picks the
+ *  build centre first (N3); all offsets below are relative to that centre, not the POI point. */
 function layoutTown(b: Builder, rng: Rng, yaw: number, pop?: Record<string, number>): void {
   const half = Math.max(30, Math.min(55, b.dryRadius(60) - 8));
   const houses = Math.max(8, Math.min(20, Math.round(6 + popTotal(pop)), Math.floor((half * 2 - 20) / 11) * 3));
@@ -191,7 +220,9 @@ function layoutBridge(b: Builder, yaw: number): void {
   b.add('bridge.stone', 0, 0, { yaw: yaw + Math.PI / 2 });
 }
 
-/** port: boats and a quay (task spec) — boats sit on/near the water so they skip the dry-spot check. */
+/** port: boats and a quay (task spec) — boats sit on/near the water so they skip the dry-spot check.
+ *  The quay hut/cross use a dryRadius-style inland search (up to 40 m) instead of a fixed offset (N3b):
+ *  a fixed 12 m step from a water-level centre (Treib) can still be water, leaving the port boat-only. */
 function layoutPort(b: Builder, out: Builder, rng: Rng, yaw: number, pop?: Record<string, number>): void {
   const boats = Math.max(2, Math.min(5, Math.round((pop?.boatman ?? 0) + (pop?.fisher ?? 0) + 1)));
   for (let i = 0; i < boats; i++) {
@@ -199,10 +230,20 @@ function layoutPort(b: Builder, out: Builder, rng: Rng, yaw: number, pop?: Recor
     const dz = (i - (boats - 1) / 2) * 1 + Math.cos(yaw + Math.PI / 2) * 10;
     out.add('boat', dx, dz, { yaw: yaw + rng.next() * 0.3 });
   }
-  // the quay hut goes on the landward side: try successively further from the water
+  // the quay hut goes on the landward side: probe successive inland rings, keep the driest spot
   const inland = yaw - Math.PI / 2;
+  const hutSpots: [number, number][] = [];
+  for (let d = 8; d <= 40; d += 8) {
+    // a few lateral candidates per ring so a narrow shore strip still yields a pad
+    for (const lat of [-8, 0, 8]) {
+      hutSpots.push([Math.sin(inland) * d + Math.cos(inland) * lat - 6, Math.cos(inland) * d - Math.sin(inland) * lat + 4]);
+    }
+  }
   let placed = false;
-  for (let d = 12; d <= 48 && !placed; d += 12) placed = b.add('house.blockbau', Math.sin(inland) * d - 6, Math.cos(inland) * d + 4, { yaw, variant: 'small' });
+  for (const [dx, dz] of hutSpots) {
+    if (b.add('house.blockbau', dx, dz, { yaw, variant: 'small' })) { placed = true; break; }
+  }
+  if (!placed) b.add('house.blockbau', Math.sin(inland) * 40 - 6, Math.cos(inland) * 40 + 4, { yaw, variant: 'small' });
   for (let d = 10; d <= 40; d += 10) if (b.add('cross', Math.sin(inland) * d + 10, Math.cos(inland) * d - 4, { yaw })) break;
 }
 
@@ -231,12 +272,19 @@ function layoutRuin(b: Builder): void {
 }
 
 /** Generate a settlement's static prop layout. Deterministic per POI id (seeded RNG) so the same POI
- *  always lays out identically across a session and across test runs. */
+ *  always lays out identically across a session and across test runs. Towns first run the
+ *  driest-centre search (N3); ports/camps build from the POI centre with their own inland/slope
+ *  allowances (N3b). The returned `PlacedModel` coordinates are absolute world xz. */
 export function generateLayout(input: LayoutInput, probe: HeightProbe): PlacedModel[] {
   const rng = new Rng(hashString(input.id));
   const yaw = input.yaw ?? 0;
-  const b = new Builder(input.x, input.z, probe);
-  const water = new Builder(input.x, input.z, probe, true);
+  let cx = input.x, cz = input.z;
+  if (input.kind === 'town') {
+    const best = findDriestCentre(input.x, input.z, probe, 60);
+    cx = best.x; cz = best.z;
+  }
+  const b = new Builder(cx, cz, probe);
+  const water = new Builder(cx, cz, probe, true);
   switch (input.kind) {
     case 'village': layoutVillage(b, rng, yaw, input.population); break;
     case 'town': layoutTown(b, rng, yaw, input.population); break;

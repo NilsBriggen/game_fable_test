@@ -67,6 +67,12 @@ const TREE_SPECIES: { kind: TreeKind; weight: number }[] = [
   { kind: 'spruce', weight: 0.5 }, { kind: 'fir', weight: 0.19 }, { kind: 'larch', weight: 0.13 }, { kind: 'beech', weight: 0.18 },
 ];
 
+/** Quality-tier density scale (requests/ui-4, ui-5: settings `quality`): applied to tree/cover keep rates. */
+let densityScale = 1;
+export function setVegetationDensity(scale: number): void {
+  densityScale = Number.isFinite(scale) ? Math.max(0.1, Math.min(1, scale)) : 1;
+}
+
 /** Per-pool starting capacity: a typical scene, not the worst case — grow() covers the rest, and a
  *  worst-case pool for every species up front is heap that is never used. */
 const CAPACITY: Record<string, number> = { full: 1200, mid: 3000, impostor: 12000, rock: 500, cover: 5000 };
@@ -342,7 +348,7 @@ export class VegetationManager {
   private populateCell(rng: Rng, originX: number, originZ: number, tier: Tier, lod: number, allocs: Alloc[]): void {
     const spacing = SPACING;
     const size = CELL;
-    const keep = tier !== 'impostor' ? 1 : lod >= 2 ? FAR_KEEP : IMPOSTOR_KEEP;
+    const keep = (tier !== 'impostor' ? 1 : lod >= 2 ? FAR_KEEP : IMPOSTOR_KEEP) * densityScale;
     for (let gz = 0; gz < size; gz += spacing) {
       for (let gx = 0; gx < size; gx += spacing) {
         const x = originX + gx + (rng.next() - 0.5) * spacing * 0.85;
@@ -411,7 +417,9 @@ export class VegetationManager {
   private populateGround(key: string, cx: number, cz: number, originX: number, originZ: number, camX: number, camZ: number): void {
     const rng = new Rng(hashString(`${this.seed}:grass:${cx}:${cz}`) >>> 0);
     const allocs: Alloc[] = [];
-    const step = GRASS_SPACING;
+    // quality tier thins the near-field sward by widening the grid (keeps the RNG stream aligned:
+    // every candidate still consumes the same rolls in the same order, low keeps the same tufts).
+    const step = GRASS_SPACING / Math.sqrt(densityScale);
     const x0 = Math.max(originX, camX - GRASS_RADIUS), x1 = Math.min(originX + 500, camX + GRASS_RADIUS);
     const z0 = Math.max(originZ, camZ - GRASS_RADIUS), z1 = Math.min(originZ + 500, camZ + GRASS_RADIUS);
     for (let z = z0; z < z1; z += step) {

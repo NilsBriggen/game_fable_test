@@ -10,11 +10,53 @@ const WATER_ID = SURFACE_IDS.indexOf('water');
 import { CHUNK_SIZE, LOD_SPACING } from './chunkmesh';
 import { loadCachedGrid, saveCachedGrid } from './idbcache';
 import { getTerrainMaterial } from './terrainMaterial';
+import { buildWorldGeo, insideAnyLake, type WorldGeo } from './geodata';
 
-export const GEOGRAPHY_VERSION = 10; // bumped again: shore-blend nearest-wins + smoothstep profile, road/peak protection gating, gorge widen
+export const GEOGRAPHY_VERSION = 13; // pads before lake-bed drop, quay-core/road-bench rules; stronger massifProtect
 const UPLOAD_PER_FRAME = 2;
-const VIEW_RADIUS = 3000; // metres; chunks beyond this are unloaded — big enough for the Seelisberg/Pilatus vistas
+let VIEW_RADIUS = 3000; // metres; chunks beyond this are unloaded — big enough for the Seelisberg/Pilatus vistas
 const LOD_DIST = [180, 420, 900]; // switch points between LOD0/1/2/3; keeps the triangle budget sane at VIEW_RADIUS
+
+/** Streaming radius override from the settings panel (requests/ui-4, ui-5: `viewDistance`).
+ *  The default settings value 4000 maps to the authored 3000 m ring (index.ts scales by 0.75). */
+export function setViewRadius(radiusM: number): void {
+  if (!Number.isFinite(radiusM)) return;
+  VIEW_RADIUS = Math.max(500, Math.min(6000, Math.round(radiusM)));
+}
+
+/** Pure far-backdrop sampler, exported so the lake-water invariant has a real regression test. */
+export function sampleFarMeshVertex(
+  heights: Float32Array,
+  surface: Uint8Array,
+  width: number,
+  height: number,
+  ix: number,
+  iz: number,
+  step: number,
+  scaleX: number,
+  scaleZ: number,
+  geo: WorldGeo,
+): { x: number; z: number; terrainHeight: number; water: boolean } {
+  const x = MAP_BOUNDS.minX + ix * scaleX;
+  const z = MAP_BOUNDS.minZ + iz * scaleZ;
+  let terrainHeight = heights[iz * width + ix];
+  let water = false;
+  for (let bz = Math.max(0, iz - (step >> 1)); bz <= Math.min(height - 1, iz + (step >> 1)); bz += 2) {
+    for (let bx = Math.max(0, ix - (step >> 1)); bx <= Math.min(width - 1, ix + (step >> 1)); bx += 2) {
+      const j = bz * width + bx;
+      if (heights[j] < terrainHeight) terrainHeight = heights[j];
+      if (surface[j] === WATER_ID) water = true;
+    }
+  }
+  // Exact polygon containment is the final authority. A playable shore road may deliberately retain
+  // a dry high-resolution texel, but it must never lift the separately-decimated distant backdrop.
+  const lake = insideAnyLake(x, z, geo);
+  if (lake) {
+    water = true;
+    terrainHeight = Math.min(terrainHeight, lake.levelGameH - 3);
+  }
+  return { x, z, terrainHeight, water };
+}
 
 function lodForDistance(d: number): number {
   if (d < LOD_DIST[0]) return 0;
@@ -231,22 +273,14 @@ export class TerrainManager {
     const uvs = new Float32Array(count * 2);
     const surfaceId = new Float32Array(count);
     const H = this.heights, S = this.surface;
+    const geo = buildWorldGeo();
     const gx = (c: number) => Math.min(w - 1, c * step), gz = (r: number) => Math.min(h - 1, r * step);
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const ix = gx(c), iz = gz(r);
         const i = r * cols + c;
-        const x = MAP_BOUNDS.minX + ix * this.cpuScaleX, z = MAP_BOUNDS.minZ + iz * this.cpuScaleZ;
-        // block minimum and water-wins surface: nearest-sampling every 8th texel let a road bed strip
-        // stand as a causeway across the Urnersee (critic round 2, issue 4)
-        let hMin = H[iz * w + ix], water = false;
-        for (let bz = Math.max(0, iz - (step >> 1)); bz <= Math.min(h - 1, iz + (step >> 1)); bz += 2) {
-          for (let bx = Math.max(0, ix - (step >> 1)); bx <= Math.min(w - 1, ix + (step >> 1)); bx += 2) {
-            const j = bz * w + bx;
-            if (H[j] < hMin) hMin = H[j];
-            if (S[j] === WATER_ID) water = true;
-          }
-        }
+        const sample = sampleFarMeshVertex(H, S, w, h, ix, iz, step, this.cpuScaleX, this.cpuScaleZ, geo);
+        const { x, z, terrainHeight: hMin, water } = sample;
         positions[i * 3] = x; positions[i * 3 + 1] = hMin - 1.5; positions[i * 3 + 2] = z;
         const xl = Math.max(0, ix - step), xr = Math.min(w - 1, ix + step), zn = Math.max(0, iz - step), zs = Math.min(h - 1, iz + step);
         const dhdx = (H[iz * w + xr] - H[iz * w + xl]) / ((xr - xl) * this.cpuScaleX);

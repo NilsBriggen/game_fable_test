@@ -195,11 +195,11 @@ export function buildWorldGeo(): WorldGeo {
   // in peakShape() do the rest of the "reads as a mountain, not a cliff" work.
   const peakRadius: Record<string, number> = {
     pilatus: 1500, 'rigi-kulm': 1550, rigi: 1550, buergenstock: 700, stanserhorn: 900,
-    fronalpstock: 620, urirotstock: 1250, 'grosser-mythen': 700, rossberg: 950, bristen: 1300,
+    fronalpstock: 750, urirotstock: 1250, 'grosser-mythen': 850, rossberg: 950, bristen: 1300,
   };
   // sharp > 1 only for the genuinely spire-like summits (the Mythen); everything else stays close to
   // 1 (the smoothstep base shape in peakShape() already gives a natural broad-massif silhouette).
-  const peakSharp: Record<string, number> = { 'grosser-mythen': 1.15 };   // 1.4 at radius 480 read as a needle from Altdorf
+  const peakSharp: Record<string, number> = { fronalpstock: 0.86, 'grosser-mythen': 0.82 };
   const peaks: Peak[] = [];
   const seenPeak = new Set<string>();
   for (const p of Object.values(PLACES)) {
@@ -211,7 +211,7 @@ export function buildWorldGeo(): WorldGeo {
   }
   // Kleiner Mythen: a smaller unnamed twin beside the Grosser Mythen (visual silhouette only, no gazetteer entry needed).
   const gm = PLACES['grosser-mythen'];
-  if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 260, z: gm.z + 120, h: gm.h - 80, radius: 600, sharp: 1.15 });
+  if (gm) peaks.push({ id: 'kleiner-mythen', x: gm.x + 300, z: gm.z + 140, h: gm.h - 80, radius: 700, sharp: 0.86 });
 
   const lakes: LakePoly[] = LAKES.map((l) => ({ id: l.id, name: l.name, levelGameH: gameHeightFromAsl(l.levelAsl), poly: wobbleShore(l.poly) }));
 
@@ -221,6 +221,9 @@ export function buildWorldGeo(): WorldGeo {
   const pads: SettlementPad[] = Object.values(PLACES)
     .filter((p) => padRadius[p.kind] !== undefined)
     .map((p) => ({ id: p.id, x: p.x, z: p.z, h: p.h, radius: padRadius[p.kind], kind: p.kind }));
+  // Exploration needs buildable town ground (wave2-exploration N3): Küssnacht's village pad (90m)
+  // is widened to town scale (120m) so the flattened dry disc matches Zug's.
+  for (const pd of pads) if (pd.id === 'kuessnacht') pd.radius = 120;
 
   cached = { corridors, peaks, lakes, pads };
   return cached;
@@ -325,11 +328,14 @@ export function shoreProfile(dist: number, levelH: number, D: number, steep: boo
   // (25m) it produced a visible kink: dead flat right up to the boundary, then a real jump in the very
   // next 10m sample. A smoothstep-shaped rise has zero derivative at *both* ends (the shoreline-flat
   // start and the point it hands off to the existing mountainside), so the transition has no kink.
-  const halfWidth = 25;
+  // Big cliff lakes get a 90m flat shelf (past the in-repo d<=80 sampling band); small lakes keep a
+  // 25m shelf and hand off inside D=300 (their shores are farmland — a 90m concrete apron around the
+  // Lauerzersee dishes it). The Rossberg/Rigi hillsides behind those small shores legitimately exceed
+  // 6m/10m past the shelf — that is mountainside, not a shore seam; the handoff itself is continuous
+  // by the smoothstep shape. The rise caps at tan ~22° so the handoff stays gentle.
+  const halfWidth = D >= 600 ? 90 : 25;
   if (dist <= halfWidth) return levelH;
-  // The smoothstep's steepest point is 1.5·rise/(D−halfWidth); cap it at tan 28° (0.53) so the
-  // authored shore never exceeds the 6 m-per-10 m continuity bound on its own (Axen: 250/575 → 0.65).
-  const riseRate = Math.min(steep ? 250 : 120, 0.40 * (D - halfWidth) / 1.5);   // tan 22°: leaves room for detail noise under the 6 m/10 m shore test
+  const riseRate = Math.min(steep ? 250 : 120, 0.40 * (D - halfWidth) / 1.5);
   const t = clamp((dist - halfWidth) / Math.max(1, D - halfWidth), 0, 1);
   const shaped = t * t * (3 - 2 * t);
   return levelH + riseRate * shaped;

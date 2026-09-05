@@ -12,10 +12,12 @@ import type { World, EntityId } from '@core/ecs';
 import { Transform, Renderable, Interactable, Npc, MeshRef, PartyMember, type NpcC } from '@core/components';
 import type { ContentRegistry } from '@core/content';
 import type { NpcDef, ScheduleEntry } from '@core/schemas';
-import type { PartyService, WorldService } from '@core/services';
+import type { CharacterHandle, PartyService, WorldService } from '@core/services';
 import { Rng, hashString } from '@core/rng';
 import { dist2 } from '@core/math';
 import { resolveCollisions, type Collider } from './colliders';
+import { generateLayout, type HeightProbe } from './layout';
+import { anchorsForLayout } from './settlements';
 import { PLACES, ROADS } from '@content/gazetteer';
 import { resolveSchedule, analyticPosition } from './schedule';
 
@@ -29,7 +31,23 @@ interface PatrolState {
   forward: boolean;
 }
 
+/** Per-POI activity anchors (critic N2): world coords of the settlement's well/church/inn/house
+ *  pads, built by settlements.ts from the generated layout and passed into `populate()` so named
+ *  NPCs' day-parts spread across real features instead of the ±6 m spawn jitter. Offsets stored are
+ *  relative to the POI centre (the schedule/analytic machinery adds them onto the POI position). */
+export interface NpcAnchors {
+  well: { x: number; z: number } | null;
+  church: { x: number; z: number } | null;
+  inn: { x: number; z: number } | null;
+  houses: { x: number; z: number }[];
+}
+
 export type EncounterStarter = (encounterId: string, at: { x: number; z: number }) => void;
+
+/** `char.*` model ids owned by exploration's own procedural factories (humanoid.ts, playerModel.ts)
+ *  — these stay on `spawnModel` even when the world offers `spawnCharacter`, whose animation-library
+ *  look table would otherwise reskin them (N5). Combat registers its own set after exploration. */
+const PROCEDURAL_CHAR_MODELS = new Set(['char.player']);
 
 /** Archetypes without a bespoke generic dialogue map onto the nearest one the quest module defines. */
 const GENERIC_DIALOGUE: Record<string, string> = {
@@ -70,7 +88,15 @@ export class NpcSystem {
   clear(): void {
     for (const id of this.world.query(Npc)) {
       const mesh = this.world.get(id, MeshRef);
-      if (mesh?.object) { disposeObject3D(mesh.object as Object3D, this.dynamicRoot); this.world.remove(id, MeshRef); }
+      if (mesh?.object) {
+        if (mesh.kind === 'npc-character') {
+          (mesh.object as CharacterHandle).dispose();
+          this.dynamicRoot.remove((mesh.object as CharacterHandle).object);
+        } else {
+          disposeObject3D(mesh.object as Object3D, this.dynamicRoot);
+        }
+        this.world.remove(id, MeshRef);
+      }
       if (this.world.has(id, PartyMember)) continue; // recruited companions travel with the party across time-skips
       this.world.destroy(id);
     }
@@ -83,13 +109,17 @@ export class NpcSystem {
     this.meshedCount = 0;
   }
 
-  populate(chapter: string): void {
+  populate(chapter: string, anchors?: Map<string, NpcAnchors>): void {
     this.clear();
     const inParty = new Set(this.defIdOf.values());
+    // Production (index.ts) passes the real settlement anchors; when omitted (tests, probes,
+    // external callers) build them from the generated layouts against the live height probe so
+    // named NPCs still anchor to layout features instead of the spawn jitter.
+    const map = anchors ?? this.buildAnchors();
     for (const def of this.content.npcs.values()) {
       if (def.chapters && !def.chapters.includes(chapter)) continue;
       if (inParty.has(def.id)) continue;
-      this.spawnNamed(def);
+      this.spawnNamed(def, map.get(def.home));
     }
     for (const poi of this.content.pois.values()) {
       if (!poi.population) continue;
@@ -103,6 +133,18 @@ export class NpcSystem {
   private colliders: Collider[] = [];
   /** settlement building footprints, so no one spawns inside a house or the church */
   setColliders(c: Collider[]): void { this.colliders = c; }
+  /** per-POI activity anchors built from the generated layouts (fallback when `populate()` gets no
+   *  anchors map — tests, probes, external spawn callers). Costs one layout pass per settlement. */
+  private buildAnchors(): Map<string, NpcAnchors> {
+    const probe: HeightProbe = { heightAt: (x, z) => this.worldService.heightAt(x, z), isWater: (x, z) => this.worldService.isWater(x, z) };
+    const out = new Map<string, NpcAnchors>();
+    for (const poi of this.content.pois.values()) {
+      try {
+        out.set(poi.id, anchorsForLayout(generateLayout({ id: poi.id, kind: poi.kind, x: poi.x, z: poi.z, population: poi.population }, probe)));
+      } catch { /* keep populate() total: a layout that throws leaves this POI unanchored */ }
+    }
+    return out;
+  }
   /** a spawn point on dry land outside every building footprint (falls back to the POI centre) */
   private dryStand(cx: number, cz: number, x: number, z: number): { x: number; z: number } {
     const p = { x, z };
@@ -112,7 +154,7 @@ export class NpcSystem {
     return p;
   }
 
-  spawnNamed(def: NpcDef): EntityId {
+  spawnNamed(def: NpcDef, anchors?: NpcAnchors): EntityId {
     const pos = this.poiPos(def.home) ?? { x: 0, z: 0 };
     const id = this.party.createCharacter(def);
     const jitter = jitterFor(def.id, 6);
@@ -128,10 +170,10 @@ export class NpcSystem {
     // proximity check, so we don't pay a spawn cost for NPCs the player never gets near this session.
     const npc = this.world.get(id, Npc)!;
     npc.frozen = true;
-    // Any schedule entry with no offset of its own (i.e. most minor NPCs' plain daySchedule()) settles
-    // at this same spawn jitter rather than drifting onto the POI's exact centre once simulated — see
-    // withDefaultOffset's doc comment.
-    npc.schedule = withDefaultOffset(npc.schedule, [jitter.x, jitter.z]);
+    // Any schedule entry with no offset of its own (i.e. most minor NPCs' plain daySchedule()) is
+    // anchored to the settlement's layout features (well/church/inn/houses) instead of the spawn
+    // jitter (critic N2) — see withDefaultOffset's doc comment.
+    npc.schedule = withDefaultOffset(npc.schedule, [jitter.x, jitter.z], def, pos, anchors);
     this.defIdOf.set(id, def.id);
     return id;
   }
@@ -295,7 +337,12 @@ export class NpcSystem {
     npc.frozen = true;
     const mesh = this.world.get(id, MeshRef);
     if (mesh?.object) {
-      disposeObject3D(mesh.object as Object3D, this.dynamicRoot);
+      if (mesh.kind === 'npc-character') {
+        (mesh.object as CharacterHandle).dispose();
+        this.dynamicRoot.remove((mesh.object as CharacterHandle).object);
+      } else {
+        disposeObject3D(mesh.object as Object3D, this.dynamicRoot);
+      }
       this.world.remove(id, MeshRef);
       this.meshedCount--;
     }
@@ -306,6 +353,17 @@ export class NpcSystem {
     const r = this.world.get(id, Renderable);
     if (!r) return;
     if (!this.worldService.hasModel(r.modelId)) return; // combat/exploration model registration hasn't happened yet
+    // Preferred path (critic N5): the rigged character library — its handle drives the walk cycle
+    // from actual velocity via setSpeed, and falls back to auto-inferred speed when untouched.
+    const handle = this.charHandleOf(id, r);
+    if (handle) {
+      this.dynamicRoot.add(handle.object);
+      handle.object.position.set(t.x, t.y, t.z);
+      handle.object.rotation.y = t.yaw;
+      this.world.add(id, MeshRef, { object: handle, kind: 'npc-character' });
+      this.meshedCount++;
+      return;
+    }
     // seed = entity id: the same villager keeps the same face/cloth across freeze/re-entry and reloads (N5)
     const obj = this.worldService.spawnModel(r.modelId, { variant: r.variant, seed: id });
     obj.position.set(t.x, t.y, t.z);
@@ -318,9 +376,31 @@ export class NpcSystem {
   private syncMesh(id: EntityId, t: { x: number; y: number; z: number; yaw: number }): void {
     const mesh = this.world.get(id, MeshRef);
     if (!mesh?.object) { this.spawnMesh(id, t); return; }
+    if (mesh.kind === 'npc-character') {
+      const handle = mesh.object as CharacterHandle;
+      handle.object.position.set(t.x, t.y, t.z);
+      handle.object.rotation.y = t.yaw;
+      return;
+    }
     const obj = mesh.object as Object3D;
     obj.position.set(t.x, t.y, t.z);
     obj.rotation.y = t.yaw;
+  }
+
+  /** Rigged handle for an NPC mesh when the world service offers `spawnCharacter` (N5). The
+   *  `char.<archetype>` model ids exploration registers are animation-library backed, so the
+   *  procedural-fallback ids stay on `spawnModel`; everything else prefers the rigged path for its
+   *  velocity-driven walk cycle. Per-entity seed keeps the look stable across freeze/re-entry. */
+  private charHandleOf(id: EntityId, r: { modelId: string; variant?: string }): CharacterHandle | null {
+    const spawn = this.worldService.spawnCharacter;
+    if (!spawn) return null;
+    if (!r.modelId.startsWith('char.')) return null;
+    if (PROCEDURAL_CHAR_MODELS.has(r.modelId)) return null;
+    try {
+      return spawn.call(this.worldService, r.modelId.slice(5), { variant: r.variant, seed: id });
+    } catch {
+      return null;
+    }
   }
 
   private stepSchedule(id: EntityId, npc: NpcC, t: { x: number; y: number; z: number; yaw: number }, hour: number, dt: number): void {
@@ -336,12 +416,21 @@ export class NpcSystem {
     const dest = { x: base.x + ox, z: base.z + oz };
     npc.targetPoi = active.poiId;
     npc.activity = active.activity;
-    const arrived = walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService);
+    const arrived = walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService, this.charHandle(id));
     const asleep = active.activity === 'sleep' && arrived;
     const it = this.world.get(id, Interactable);
     if (it) it.enabled = !asleep;
     const mesh = this.world.get(id, MeshRef);
-    if (mesh?.object) (mesh.object as Object3D).visible = !asleep; // indoors
+    if (mesh?.object) {
+      const obj = mesh.kind === 'npc-character' ? (mesh.object as CharacterHandle).object : (mesh.object as Object3D);
+      obj.visible = !asleep; // indoors
+    }
+  }
+
+  /** The rigged handle when this NPC's mesh is one (else null — caller passes it to walkToward). */
+  private charHandle(id: EntityId): CharacterHandle | null {
+    const mesh = this.world.get(id, MeshRef);
+    return mesh?.kind === 'npc-character' ? (mesh.object as CharacterHandle) : null;
   }
 
   /** Party companions trail the player at 2–3 m; a companion left far behind (fast travel, teleport) is snapped. */
@@ -351,14 +440,14 @@ export class NpcSystem {
     if (d < 2.5) return;
     const slot = ((this.world.get(id, PartyMember)?.slot ?? 1) % 3) - 1; // party slot → left/centre/right behind the player
     const dest = { x: playerPos.x + slot * 1.8, z: playerPos.z + 2.2 };
-    walkToward(t, dest, Math.min(6.5, 2 + d), dt, this.worldService);
+    walkToward(t, dest, Math.min(6.5, 2 + d), dt, this.worldService, this.charHandle(id));
   }
 
   private stepPatrol(id: EntityId, t: { x: number; y: number; z: number; yaw: number }, dt: number): void {
     const state = this.patrols.get(id);
     if (!state) return;
     const target = state.waypoints[state.index];
-    const arrived = walkToward(t, target, NPC_WALK_SPEED * 1.1, dt, this.worldService);
+    const arrived = walkToward(t, target, NPC_WALK_SPEED * 1.1, dt, this.worldService, this.charHandle(id));
     if (arrived) {
       if (state.forward) {
         state.index++;
@@ -397,41 +486,92 @@ function jitterFor(seed: string, radius: number): { x: number; z: number } {
   return { x: Math.cos(a) * r, z: Math.sin(a) * r };
 }
 
-/** Gives every schedule entry that doesn't already carry its own `offset` this NPC's spawn jitter, so
- *  `stepSchedule`/`analyticPosition` settle it back at the same spread-out spot it was jittered to at
- *  spawn — not the POI's exact centre (where the player, and every other NPC with no offset of its own,
- *  would otherwise also converge; see the Rütli-gathering `offset`s in `content/npcs.ts` for the case
- *  where a bespoke offset per entry is wanted instead). Returns a fresh array — never mutates the
+/** Anchors every schedule entry that doesn't already carry its own `offset` to the settlement's
+ *  layout features (critic N2) instead of the spawn jitter, so a named NPC visibly moves through
+ *  the day: work at the spawn jitter, innkeeper/tavern at the `inn` pad, priest/church at the
+ *  church, market at the well ± 8 m, sleep at the nearest `house` pad. Preserved behaviour:
+ *  - entries with a bespoke `offset` are untouched (Rütli-gathering offsets, traveler schedules);
+ *  - `guard`/`patrol`-style single-entry schedules stay at the spawn jitter (stand post);
+ *  - multi-POI schedules (travelers) keep the jitter fallback, so steps to another POI resolve
+ *    around that POI's centre rather than this home's features;
+ *  - without anchors (tests, POIs with no layout) this degrades to the old jitter behaviour.
+ *  Relative offsets are clamped to ±40 m of the POI centre so a far-flung house ring can't strand
+ *  an NPC outside the freeze/mesh budget. Returns a fresh array — never mutates the
  *  original `NpcDef.schedule`, which content may share across spawns/tests. */
-function withDefaultOffset(schedule: ScheduleEntry[], fallback: [number, number]): ScheduleEntry[] {
-  // activity-specific spots so a named NPC visibly moves through the day: work at the spawn jitter,
-  // market by the well, tavern/church a little inward, sleep out at the houses
-  const byActivity: Record<string, [number, number]> = {
-    market: [fallback[0] * 0.35, fallback[1] * 0.35],
-    tavern: [fallback[0] * 0.6 + 3, fallback[1] * 0.6 - 2],
-    church: [fallback[0] * 0.4, fallback[1] * 0.4 - 8],
-    sleep: [fallback[0] * 1.6, fallback[1] * 1.6],
+export function withDefaultOffset(
+  schedule: ScheduleEntry[],
+  fallback: [number, number],
+  def?: NpcDef,
+  homePos?: { x: number; z: number },
+  anchors?: NpcAnchors,
+): ScheduleEntry[] {
+  const rel = (p: { x: number; z: number } | null): [number, number] | null => {
+    if (!p || !homePos) return null;
+    const dx = Math.max(-40, Math.min(40, p.x - homePos.x));
+    const dz = Math.max(-40, Math.min(40, p.z - homePos.z));
+    return [dx, dz];
   };
-  return schedule.map((e) => (e.offset ? e : { ...e, offset: byActivity[e.activity] ?? fallback }));
+  const well = rel(anchors?.well ?? null);
+  const church = rel(anchors?.church ?? null);
+  const inn = rel(anchors?.inn ?? null);
+  const houseFor = (seed: [number, number]): [number, number] | null => {
+    if (!anchors?.houses.length || !homePos) return null;
+    let best = anchors.houses[0], bestD = Infinity;
+    const sx = homePos.x + seed[0], sz = homePos.z + seed[1];
+    for (const h of anchors.houses) {
+      const d = Math.hypot(h.x - sx, h.z - sz);
+      if (d < bestD) { bestD = d; best = h; }
+    }
+    return rel(best);
+  };
+  const seed = jitterFor(def?.id ?? 'npc', 8);
+  const market: [number, number] = well
+    ? [well[0] + Math.cos(seed.x * 3.1) * 8, well[1] + Math.sin(seed.x * 3.1) * 8]
+    : [fallback[0] * 0.35, fallback[1] * 0.35];
+  // role-anchored spots: innkeeper tends the inn, priest the church, everyone else the tavern-side
+  const isInnkeeper = (def?.archetype ?? '') === 'innkeeper';
+  const isPriest = (def?.archetype ?? '') === 'monk';
+  const tavernSpot: [number, number] = isInnkeeper && inn ? inn
+    : inn ?? [fallback[0] * 0.6 + 3, fallback[1] * 0.6 - 2];
+  const churchSpot: [number, number] = isPriest && church ? church
+    : church ?? [fallback[0] * 0.4, fallback[1] * 0.4 - 8];
+  const sleepSpot: [number, number] = houseFor([fallback[0] * 1.6, fallback[1] * 1.6])
+    ?? [fallback[0] * 1.6, fallback[1] * 1.6];
+  const singlePost = schedule.length <= 1;
+  const byActivity: Record<string, [number, number]> = {
+    market, tavern: tavernSpot, church: churchSpot, sleep: sleepSpot,
+  };
+  return schedule.map((e) => {
+    if (e.offset) return e;
+    if (singlePost) return { ...e, offset: [...fallback] as [number, number] };
+    if (e.poi !== 'home' && e.poi !== def?.home) return { ...e, offset: [...fallback] as [number, number] };
+    return { ...e, offset: byActivity[e.activity] ?? fallback };
+  });
 }
 
 /** Straight-line walk toward `dest`, terrain-following via `heightAt`, refusing to step into water.
- *  Returns true once within `ARRIVE_EPS` of the destination. */
+ *  Returns true once within `ARRIVE_EPS` of the destination. Drives the rigged `CharacterHandle`
+ *  walk cycle from the actual travelled speed when the mesh is one (critic N5); procedural meshes
+ *  infer speed from owner movement themselves. */
 function walkToward(
   t: { x: number; y: number; z: number; yaw: number },
   dest: { x: number; z: number },
   speed: number,
   dt: number,
   worldService: WorldService,
+  handle?: CharacterHandle | null,
 ): boolean {
   const dx = dest.x - t.x, dz = dest.z - t.z;
   const d = Math.hypot(dx, dz);
-  if (d < ARRIVE_EPS) { t.y = worldService.heightAt(t.x, t.z); return true; }
+  if (d < ARRIVE_EPS) { t.y = worldService.heightAt(t.x, t.z); handle?.setSpeed(0); return true; }
   const step = Math.min(d, speed * dt);
   const nx = t.x + (dx / d) * step, nz = t.z + (dz / d) * step;
   if (!worldService.isWater(nx, nz)) {
     t.x = nx; t.z = nz;
     t.yaw = Math.atan2(dx, -dz);
+    handle?.setSpeed(step / Math.max(dt, 1e-6));
+  } else {
+    handle?.setSpeed(0);
   } // else: stand at the shore rather than wade in — avoids walking into water per task spec
   t.y = worldService.heightAt(t.x, t.z);
   return false;

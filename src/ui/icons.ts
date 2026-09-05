@@ -72,31 +72,119 @@ export const ICONS = {
 
 // ---------------- ability icons (by weapon skill / ability id keyword) ----------------
 
+// One ink-line glyph per ability family so the ability bar reads at a glance: exact
+// matches first (every ability id in content/abilities.ts), then keyword fallbacks for
+// any future/custom ids, then the bare circle for the truly unknown.
+const GLYPH = {
+  attack: '<path d="M5 20L18 6"/><path d="M16 4l4 4-2 2-4-4z"/><path d="M4 16l3 3"/>',
+  aimedShot: '<circle cx="12" cy="12" r="6"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><path d="M12 12l5-5"/>',
+  reload: '<path d="M4 8c4 4 12 4 16 0"/><path d="M12 10v8"/><path d="M9 18h6"/>',
+  shove: '<rect x="3" y="9" width="9" height="7" rx="1"/><path d="M12 11h8M17 8l3 3-3 3"/>',
+  disengage: '<path d="M9 4L4 12l5 8"/><path d="M15 4l5 8-5 8"/>',
+  dash: '<path d="M2 8h9M1 12h10M2 16h9"/><path d="M15 6l6 6-6 6"/>',
+  bandage: '<rect x="4" y="8" width="16" height="8" rx="1"/><path d="M12 10.5v3M10.5 12h3"/>',
+  bandageQuick: '<rect x="2" y="9" width="14" height="7" rx="1"/><path d="M14 5l5 7-5 7"/>',
+  haulOut: '<circle cx="10" cy="14" r="6"/><circle cx="10" cy="14" r="2.5"/><path d="M14 10L20 4"/><path d="M17 4h3v3"/>',
+  rally: '<path d="M6 21V4"/><path d="M6 5l11 3-11 3z"/><path d="M18 14l1 2M20.5 12l2 1"/>',
+  rallyBonus: '<path d="M6 21V4"/><path d="M6 5l8 2-8 2z"/><path d="M17 15v5M14.5 17.5h5"/>',
+  brace: '<path d="M7 21L17 5"/><path d="M15 3l2 2-2 2"/><path d="M3 21h18"/>',
+  charge: '<path d="M2 14h15"/><path d="M5 10l3 2-3 2M5 14l3 2-3 2"/><path d="M17 11l4 3-4 3"/>',
+  rollBoulders: '<path d="M2 20L12 8l10 1"/><circle cx="8" cy="15" r="3"/><circle cx="15" cy="12" r="2"/>',
+  hook: '<path d="M6 21L16 7"/><path d="M16 7c3-1 5 1 4 4"/><path d="M16 7l-2-3 3-1 1 3z"/>',
+  wallOfIron: '<path d="M3 20v-8h4v-3h4v3h4v-3h4v3h4v8z"/><path d="M3 20h18"/>',
+  pushOfPike: '<path d="M3 19L14 8"/><path d="M14 8l4-1-1 4z"/><path d="M16 15l5 5M18 15l3 3"/>',
+  shieldWall: '<path d="M12 4l6 2v5c0 3-2.5 5.5-6 7-3.5-1.5-6-4-6-7V6z"/><path d="M2 9l3 1M22 9l-3 1"/>',
+  shield: '<path d="M12 3l7 3v6c0 4-3 7-7 8-4-1-7-4-7-8V6z"/>',
+  secondWind: '<path d="M3 9c4-3 8 3 12 0s7 1 5 4"/><path d="M3 14c4-3 8 3 12 0"/><circle cx="19" cy="17.5" r="1.5"/>',
+  warCry: '<path d="M4 10v4h4l5 4V6l-5 4z"/><path d="M16 9c1.5 1.5 1.5 4.5 0 6M18.5 7c2.5 2.5 2.5 7.5 0 10"/>',
+  riposte: '<path d="M4 20L17 7"/><path d="M20 20L7 7"/><path d="M6 6a8 8 0 0112 0"/>',
+  disarm: '<path d="M6 20L16 6"/><path d="M18 3l3 3"/><path d="M17 17l4 4M21 17l-4 4"/>',
+  crossbowSnapshot: '<path d="M5 9c4 3 10 3 14 0"/><path d="M12 9v9"/><path d="M18.5 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
+  crossbow: '<path d="M3 12h18M8 6l4 6-4 6M16 6l-4 6 4 6"/>',
+  mountainStride: '<path d="M2 19l6-10 4 5 3-3 7 8z"/><path d="M13 19h8M18 16l3 3-3 3"/>',
+  sureFoot: '<ellipse cx="10" cy="8" rx="3.5" ry="4.5"/><path d="M14 15l2 2 4-4"/>',
+  sling: '<circle cx="9" cy="15" r="2.5"/><path d="M11 13l7-9"/>',
+  axe: '<path d="M6 20L17 5"/><path d="M15 3l5 4-3 3-4-3z"/>',
+  dagger: '<path d="M6 20L18 4M18 4l2 2-3 3"/>',
+  sword: '<path d="M5 20L18 6M18 6l2-2 2 2-2 2M6 15l3 3"/>',
+  move: '<path d="M12 3v18M6 9l6-6 6 6M6 15l6 6 6-6"/>',
+  endTurn: '<path d="M4 12a8 8 0 1116 0"/><path d="M12 8v4l3 2"/>',
+  push: '<path d="M3 12h13M12 6l6 6-6 6"/>',
+};
+
+/** Every ability id in content/abilities.ts, each with its own glyph (no shared fallback). */
+const ABILITY_GLYPHS: Record<string, string> = {
+  'ability.attack': GLYPH.attack,
+  'ability.aimed-shot': GLYPH.aimedShot,
+  'ability.reload': GLYPH.reload,
+  'ability.shove': GLYPH.shove,
+  'ability.disengage': GLYPH.disengage,
+  'ability.dash': GLYPH.dash,
+  'ability.bandage': GLYPH.bandage,
+  'ability.bandage-quick': GLYPH.bandageQuick,
+  'ability.haul-out': GLYPH.haulOut,
+  'ability.rally': GLYPH.rally,
+  'ability.rally-bonus': GLYPH.rallyBonus,
+  'ability.brace': GLYPH.brace,
+  'ability.charge': GLYPH.charge,
+  'ability.roll-boulders': GLYPH.rollBoulders,
+  'ability.hook': GLYPH.hook,
+  'ability.wall-of-iron': GLYPH.wallOfIron,
+  'ability.push-of-pike': GLYPH.pushOfPike,
+  'ability.shield-wall': GLYPH.shieldWall,
+  'ability.second-wind': GLYPH.secondWind,
+  'ability.war-cry': GLYPH.warCry,
+  'ability.riposte': GLYPH.riposte,
+  'ability.disarm': GLYPH.disarm,
+  'ability.crossbow-snapshot': GLYPH.crossbowSnapshot,
+  'ability.mountain-stride': GLYPH.mountainStride,
+  'ability.sure-foot': GLYPH.sureFoot,
+};
+
+/** Ability ids with a dedicated glyph — tests assert abilityIcon() is distinct for each. */
+export const ABILITY_ICON_IDS: string[] = Object.keys(ABILITY_GLYPHS);
+
 export function abilityIcon(id: string, size = 20): string {
   const s = id.toLowerCase();
-  if (s.includes('move')) return ink('<path d="M12 3v18M6 9l6-6 6 6M6 15l6 6 6-6"/>', size);
-  if (s.includes('end') || s.includes('turn')) return ink('<path d="M4 12a8 8 0 1116 0" /><path d="M12 8v4l3 2"/>', size);
+  const exact = ABILITY_GLYPHS[s];
+  if (exact) return ink(exact, size);
+  if (s.includes('move')) return ink(GLYPH.move, size);
+  if (s.includes('end') || s.includes('turn')) return ink(GLYPH.endTurn, size);
+  if (s.includes('disengage') || s.includes('dodge')) return ink(GLYPH.disengage, size);
+  if (s.includes('dash') || s.includes('run') || s.includes('sprint')) return ink(GLYPH.dash, size);
+  if (s.includes('haul') || s.includes('rescue') || s.includes('drown')) return ink(GLYPH.haulOut, size);
+  if (s.includes('second') || s.includes('wind') || s.includes('verschnauf') || s.includes('breath')) return ink(GLYPH.secondWind, size);
+  if (s.includes('mountain') || s.includes('alpine') || s.includes('stride')) return ink(GLYPH.mountainStride, size);
+  if (s.includes('sure-foot') || s.includes('surefoot')) return ink(GLYPH.sureFoot, size);
+  if (s.includes('riposte') || s.includes('counter') || s.includes('parry')) return ink(GLYPH.riposte, size);
+  if (s.includes('charge') || s.includes('lance') || s.includes('mounted')) return ink(GLYPH.charge, size);
+  if (s.includes('boulder') || s.includes('roll') || s.includes('trunk')) return ink(GLYPH.rollBoulders, size);
+  if (s.includes('wall-of-iron') || s.includes('wall')) return ink(GLYPH.wallOfIron, size);
+  if (s.includes('push-of-pike') || s.includes('pike')) return ink(GLYPH.pushOfPike, size);
   if (s.includes('brace') || s.includes('spear') || s.includes('spiess') || s.includes('halberd') || s.includes('halbarte') || s.includes('reach') || s.includes('hook')) {
-    return ink('<path d="M4 20L18 6M18 6l2-2M18 6l3 1-1 3z"/>', size);
+    return ink(GLYPH.brace, size);
   }
-  if (s.includes('shield') || s.includes('block') || s.includes('guard')) return ink('<path d="M12 3l7 3v6c0 4-3 7-7 8-4-1-7-4-7-8V6z"/>', size);
-  if (s.includes('crossbow') || s.includes('reload') || s.includes('aim') || s.includes('armbrust')) {
-    return ink('<path d="M3 12h18M8 6l4 6-4 6M16 6l-4 6 4 6"/>', size);
+  if (s.includes('shield') || s.includes('block') || s.includes('guard')) return ink(GLYPH.shield, size);
+  if (s.includes('snapshot') || s.includes('schnell')) return ink(GLYPH.crossbowSnapshot, size);
+  if (s.includes('crossbow') || s.includes('reload') || s.includes('aim') || s.includes('armbrust') || s.includes('bolt')) {
+    return ink(GLYPH.crossbow, size);
   }
-  if (s.includes('throw') || s.includes('sling') || s.includes('boulder') || s.includes('roll')) {
-    return ink('<circle cx="9" cy="15" r="2.5"/><path d="M11 13l7-9"/>', size);
-  }
-  if (s.includes('rally') || s.includes('leadership') || s.includes('shout') || s.includes('war-cry')) {
-    return ink('<path d="M4 15c3-4 5-6 8-8 3 2 5 4 8 8"/><path d="M4 15l3 3M20 15l-3 3"/>', size);
+  if (s.includes('war-cry') || s.includes('warcry') || s.includes('cry')) return ink(GLYPH.warCry, size);
+  if (s.includes('rally') || s.includes('leadership') || s.includes('shout')) {
+    return ink(GLYPH.rally, size);
   }
   if (s.includes('bandage') || s.includes('heal') || s.includes('herbal') || s.includes('stabil')) {
-    return ink('<path d="M5 8h14v8H5z"/><path d="M12 10v4M10 12h4"/>', size);
+    return ink(GLYPH.bandage, size);
   }
-  if (s.includes('shove') || s.includes('push')) return ink('<path d="M3 12h13M12 6l6 6-6 6"/>', size);
-  if (s.includes('axe') || s.includes('mace') || s.includes('morgenstern')) return ink('<path d="M6 20L17 5"/><path d="M15 3l5 4-3 3-4-3z"/>', size);
-  if (s.includes('dagger') || s.includes('messer') || s.includes('dolch')) return ink('<path d="M6 20L18 4M18 4l2 2-3 3"/>', size);
+  if (s.includes('shove') || s.includes('push')) return ink(GLYPH.push, size);
+  if (s.includes('throw') || s.includes('sling')) {
+    return ink(GLYPH.sling, size);
+  }
+  if (s.includes('axe') || s.includes('mace') || s.includes('morgenstern')) return ink(GLYPH.axe, size);
+  if (s.includes('disarm')) return ink(GLYPH.disarm, size);
+  if (s.includes('dagger') || s.includes('messer') || s.includes('dolch')) return ink(GLYPH.dagger, size);
   if (s.includes('sword') || s.includes('schwert') || s.includes('attack') || s.includes('strike')) {
-    return ink('<path d="M5 20L18 6M18 6l2-2 2 2-2 2M6 15l3 3"/>', size);
+    return ink(GLYPH.sword, size);
   }
   return ink('<circle cx="12" cy="12" r="7"/>', size);
 }

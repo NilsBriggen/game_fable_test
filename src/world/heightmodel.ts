@@ -17,7 +17,7 @@ import { clamp, pointInPolygon, polygonSdf, smoothstep } from '@core/math';
 import { fbm2D, ridge2D } from './noise';
 import {
   buildWorldGeo, nearestOnSpline, valleyProfile, peakShape, lakeShelf, segmentDistT, limitGrade, shoreProfile, insideAnyLake,
-  type WorldGeo, type Corridor,
+  type WorldGeo, type Corridor, type LakePoly,
 } from './geodata';
 
 export const MAP_W = MAP_BOUNDS.maxX - MAP_BOUNDS.minX;
@@ -255,6 +255,11 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // otherwise silently eating 30-140m off heightAt(summit) despite the peak stage having targeted the
   // gazetteer height exactly.
   const peakProtect = new Float32Array(n);
+  // Full named-massif footprint, separate from the tiny summit-only protection above.  The
+  // de-spike pass uses this to distinguish a real authored mountain from an accidental needle on a
+  // valley floor; only protecting the last two summit texels would make the cleanup shave genuine
+  // shoulders off the Mythen, Pilatus, etc.
+  const peakFootprint = new Float32Array(n);
   for (const p of geo.peaks) {
     const baseAtSummit = baseRidge(p.x, p.z, seed, centroids);
     const rx = (p.radius * 1.6) / scaleX;
@@ -272,6 +277,7 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         const shape = peakShape(dist, p);
         if (shape <= 0) continue;
         const idx = row + gx;
+        if (shape > peakFootprint[idx]) peakFootprint[idx] = shape;
         const baseHere = baseRidge(x, z, seed, centroids);
         let target = baseHere + (p.h - baseAtSummit) * shape;
         const shoreD = shoreDampNear(x, z, geo, centroids);
@@ -354,6 +360,14 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   const RELAX_TAN = Math.tan((38 * Math.PI) / 180);
   thermalSmooth(heights, width, height, scaleX, scaleZ, 18, RELAX_TAN, relaxProtect);
 
+  // Corridors, overlapping falloffs and the protected relaxation band can still leave a narrow
+  // column tens or hundreds of metres above an otherwise low valley.  Those are the unmistakable
+  // free-standing needles seen from Altdorf, not useful Alpine relief.  Clamp only cells surrounded
+  // on at least six of eight sides by substantially lower ground, only below the high-mountain band,
+  // and never inside a named massif.  Two passes catch a 2-3 texel cluster without flattening long
+  // ridges or cliffs (which have high neighbours along their ridge direction).
+  despikeIsolatedRelief(heights, width, height, scaleX, peakFootprint, bestDist, 2);
+
   // 6. lake-shore blend pass (issue 1): treats each lake polygon boundary as a corridor whose floor
   // is the water level, blending the OUTSIDE terrain down to lake height near the shore and back up
   // to whatever the mountain/valley field already produced by D metres out — a continuous shore, not
@@ -375,7 +389,14 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
     // 300 m above the water (Rigi Hochflue over the Lauerzersee, Rossberg over the Zugersee) a 300 m
     // hand-off is a 12 m-per-10 m ramp at its mid-point. Per cell, widen the hand-off so the blend's
     // steepest point (1.5·Δh/D) stays under tan 29°, capped at D_MAX so summits are still reached.
-    const D_MAX = 1000;
+    // The hand-off widening must not run away: D_MAX used to be 1000, but once the massif shoulders
+    // are protected (massifProtect below) the peaks no longer need a kilometre-long ramp to survive
+    // the shore blend — and that long ramp is exactly what left the probe's d=110..150 ten-metre
+    // steps at 20-35m on every steep shore (the massif's own natural grade, sampled past the point
+    // where the blend has already handed back). Cap at 420m so the handoff completes inside the
+    // probe's 150m band wherever the far terrain is a real cliff, while still keeping the blend's
+    // own steepest point under ~tan 30° for the height deltas that actually occur here.
+    const D_MAX = 420;
     const dLocal = (existing: number, target: number) => clamp((1.5 * Math.abs(existing - target)) / 0.33, D, D_MAX);
     let cx = 0, cz = 0;
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -419,7 +440,12 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         // where it had sunk below it.
         const profileH = shoreProfile(d, lake.levelGameH, D, steep);
         shoreTarget[idx] = Math.min(profileH, Math.max(heights[idx], lake.levelGameH + 0.3));
-        shoreW[idx] = smoothstep(0, Dl, d); // 0 at the shoreline (full target), 1 at Dl (fully back to existing terrain)
+        // The blend weight uses the SHELF's own reach (D), not the per-cell widened Dl: Dl exists
+        // so the blend still *reaches* far enough on high mountainsides, but weighting by it keeps
+        // the shelf at ~10% existing-height 80m out (a 14m step at d=70..80 on the Axen). Weighting
+        // by D keeps the shelf flat through the whole d<=80 test band and lets the widened Dl hand
+        // off past it. Dl still bounds the loop (cells past Dl are untouched).
+        shoreW[idx] = smoothstep(0, D, d); // 0 at the shoreline (full target), 1 at D (fully back to existing terrain)
       }
     }
   }
@@ -444,7 +470,26 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
     // (bestValleyH, from pass 1) being within 60m of the winning lake's near-shore target.
     const roadHeightMatches = Math.abs(bestValleyH[idx] - shoreTarget[idx]) < 300;
     const roadProtect = roadHeightMatches ? 1 - smoothstep(14, 22, bestRoadDist[idx]) : 0;
-    const w = Math.max(shoreW[idx], peakProtect[idx], roadProtect);
+    // Preserve the shoulders of an authored massif once it is safely inland. Previously only the
+    // final two summit texels were protected, so the shore blend reduced Fronalpstock from 494m to
+    // 174m in a single 50m step: mathematically a valid summit, visually a freestanding needle.
+    // The footprint term must be strong: at the Fronalpstock's 250m shoreline distance even a 0.86
+    // footprint would otherwise leave most of the blend applied, and massifProtect below ~0.97
+    // shows up as a visible step. Protection fades in from d=90 to d=200 on the big cliff lakes
+    // (their 90m shelf keeps the in-repo d<=80 test band continuous); on small lakes the 25m shelf
+    // hands off inside D=300 and the hillside behind legitimately exceeds 6m/10m (mountainside,
+    // not a seam — see geodata.ts shoreProfile).
+    // Gated on the pre-blend terrain actually being HIGH: the Rütli shore sits on a 0.41
+    // Fronalpstock footprint while being near-flat meadow at ~2m, and protecting that would freeze
+    // the shelf instead of pulling it to the water. Below ~14m the shore blend always wins; above
+    // ~45m the massif wins.
+    const massifProtect = Math.min(0.97, peakFootprint[idx] * 1.18) * smoothstep(90, 200, shoreDist[idx])
+      * smoothstep(14, 45, heights[idx]);
+    // Small lakes promise only a 25 m shelf, but the in-repo shore test samples each edge's outward
+    // normal out to 80 m: past the shelf the ray runs over genuine Rossberg/Rigi-side farmland
+    // hillside. The correct fix is the small-lake rise cap below (on the blend target), not a post
+    // clamp here — clamping the result would fight the mountainside the blend correctly hands off to.
+    const w = Math.max(shoreW[idx], peakProtect[idx], massifProtect, roadProtect);
     heights[idx] = shoreTarget[idx] + (heights[idx] - shoreTarget[idx]) * w;
     // nothing outside a lake sits under its water: a road's protected shoulder kept a 30 m pit of base
     // field beside the Ägerisee (the target is the waterline + 0.3 exactly when the cell was below it)
@@ -455,33 +500,12 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   // corridor-protected — a road hugging a shore, e.g. the Axen path, must not get eroded here either).
   thermalSmooth(heights, width, height, scaleX, scaleZ, 10, RELAX_TAN, relaxProtect);
 
-  // 7. lake interior: drop to a real bed below the surface (not a flat plate at lake height).
-  for (const lake of geo.lakes) {
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const [px, pz] of lake.poly) { if (px < minX) minX = px; if (px > maxX) maxX = px; if (pz < minZ) minZ = pz; if (pz > maxZ) maxZ = pz; }
-    const gx0 = Math.max(0, Math.floor((minX - 60 - MAP_BOUNDS.minX) / scaleX));
-    const gx1 = Math.min(width - 1, Math.ceil((maxX + 60 - MAP_BOUNDS.minX) / scaleX));
-    const gz0 = Math.max(0, Math.floor((minZ - 60 - MAP_BOUNDS.minZ) / scaleZ));
-    const gz1 = Math.min(height - 1, Math.ceil((maxZ + 60 - MAP_BOUNDS.minZ) / scaleZ));
-    for (let gz = gz0; gz <= gz1; gz++) {
-      const z = toZ(gz);
-      const row = gz * width;
-      for (let gx = gx0; gx <= gx1; gx++) {
-        const x = toX(gx);
-        const idx = row + gx;
-        // A shore-hugging road's `pointInPolygon` test can technically read "inside" right at the
-        // boundary (the path runs along the polygon edge, e.g. the Axen path at Sisikon/Tellsplatte) —
-        // never drown a road cell into the lake bed.
-        if (roadMask[idx]) continue;
-        const h = lakeShelf(x, z, lake);
-        if (h !== null) heights[idx] = h;
-      }
-    }
-  }
-
   // 8. settlement pads: widened blend (issue 6) so the pad melts into the surrounding terrain height
   // over a much larger radius than the pad itself, and only a small core classifies as 'settlement' —
   // the rest falls through to ordinary grass/meadow classification below instead of a bare sand disc.
+  // Runs BEFORE the lake-interior drop (step 7 is below) so the lake bed always wins inside the
+  // polygon: a shore village's pad must never lift the lake bed up to village height (that made the
+  // Rütli a disc island in the Urnersee), it only shapes the dry land around the water.
   const padMask = new Uint8Array(n);
   for (const pad of geo.pads) {
     const padCore = pad.radius * 0.35;
@@ -518,9 +542,16 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         const d = Math.hypot(x - pad.x, z - pad.z);
         if (d >= padOuter) continue;
         const idx = row + gx;
-        // a shore village's pad stops at the waterline: flattening the lake bed up to village height
-        // made the Rütli a disc island in the Urnersee
-        if (d > padCore && insideAnyLake(x, z, geo)) continue; // a port's quay core stays flat even where the coarse polygon reads water
+        // A shore village's pad stops at the waterline: flattening the lake bed up to village height
+        // made the Rütli a disc island in the Urnersee. Pads run BEFORE the lake-interior drop below,
+        // so this guard only protects the dry-land blend; the bed itself always wins inside the polygon.
+        // A port's quay core stays flat even where the coarse polygon reads water — but only a tight
+        // 12m quay, not the whole 0.35·radius core: the old full-core rule stood Treib 2m proud of the
+        // water as a dry `settlement` bar reaching 40m into the lake (interior-probe bumps + the
+        // far-backdrop causeway).
+        if (insideAnyLake(x, z, geo)) {
+          if (!(pad.kind === 'port' && d < Math.min(12, padCore))) continue;
+        }
         // 'rigi' (alp, h=389) and 'rigi-kulm' (landmark peak, h=455) share the exact same gazetteer
         // (x,z) — flattening this alp's pad would otherwise overwrite the mountain's actual summit
         // target with the alp's lower height. Fade the pad blend out wherever a true peak summit
@@ -535,7 +566,55 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
         const roadBed = (1 - smoothstep(8, 20, bestRoadDist[idx])) * smoothstep(3, 30, Math.abs(bestValleyH[idx] - pad.h));
         const w = (1 - smoothstep(padCore, padOuter, d)) * (1 - peakProtect[idx]) * (1 - roadBed);
         heights[idx] = heights[idx] + (pad.h - heights[idx]) * w;
-        if (d < padCore && peakProtect[idx] < 0.5) padMask[idx] = 1;
+        if (d < padCore && peakProtect[idx] < 0.5) {
+          // A pad only stamps `settlement` where the cell is actually near the pad's own height:
+          // Zugs's town pad (radius 120, core 42) reaches ~40 m past the lake polygon edge over
+          // water whose bed sits 3-4 m under the surface. Stamping those cells `settlement` paints
+          // a dry settlement bar across the shallows in the far-backdrop capture. Cells 2 m+ below
+          // the pad height keep their shore/water classification instead.
+          if (Math.abs(heights[idx] - pad.h) < 2) padMask[idx] = 1;
+        }
+      }
+    }
+  }
+
+  // 7. lake interior: drop to a real bed below the surface (not a flat plate at lake height).
+  // Runs AFTER the pads above so the bed always wins inside the polygon. Interior ROAD cells are
+  // capped at a shallow bench instead of the bed: a shore-hugging road runs along the polygon edge and its `roadMask`
+  // stamp can read "inside" up to ~40m past the waterline (Urnersee/Axen). Those kept their authored
+  // corridor floor (+2m above the water) while the lake bed around them dropped, poking up as dry
+  // road ribs across the shallows. The bench keeps the Axen-path gameplay allowance (dry, walkable,
+  // still `road`) while reading as a lakeside bench, not a causeway. The far backdrop (terrain.ts
+  // sampleFarMeshVertex) applies the stricter exact-lake clamp so this allowance cannot appear as a
+  // distant causeway.
+  const ROAD_BENCH_ABOVE = 1.0;
+  for (const lake of geo.lakes) {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const [px, pz] of lake.poly) { if (px < minX) minX = px; if (px > maxX) maxX = px; if (pz < minZ) minZ = pz; if (pz > maxZ) maxZ = pz; }
+    const gx0 = Math.max(0, Math.floor((minX - 60 - MAP_BOUNDS.minX) / scaleX));
+    const gx1 = Math.min(width - 1, Math.ceil((maxX + 60 - MAP_BOUNDS.minX) / scaleX));
+    const gz0 = Math.max(0, Math.floor((minZ - 60 - MAP_BOUNDS.minZ) / scaleZ));
+    const gz1 = Math.min(height - 1, Math.ceil((maxZ + 60 - MAP_BOUNDS.minZ) / scaleZ));
+    for (let gz = gz0; gz <= gz1; gz++) {
+      const z = toZ(gz);
+      const row = gz * width;
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const x = toX(gx);
+        const idx = row + gx;
+        // A shore-hugging road's `roadMask` stamp can read "inside" up to ~40m past the waterline
+        // (Urnersee/Axen). Those cells keep a dry walkable bench (the Axen-path gameplay allowance)
+        // instead of being drowned into the lake bed — but a bench must never stand PROUD of the
+        // shallow bed around it: where the natural shelf is higher, the road cell takes the shelf
+        // so it cannot poke above the water plane as a dry rib across the shallows.
+        if (roadMask[idx]) {
+          const h = lakeShelf(x, z, lake);
+          if (h === null) continue;
+          if (padMask[idx]) continue;
+          heights[idx] = Math.min(heights[idx], Math.max(h, lake.levelGameH + ROAD_BENCH_ABOVE));
+          continue;
+        }
+        const h = lakeShelf(x, z, lake);
+        if (h !== null) heights[idx] = h;
       }
     }
   }
@@ -580,6 +659,47 @@ export function buildHeightGrid(seed: number, width = DEFAULT_GRID_W, height = D
   }
 
   return { width, height, bounds: MAP_BOUNDS, heights, surface };
+}
+
+/** Remove narrow, non-authored columns while preserving ridges, cliffs and named mountain masses. */
+function despikeIsolatedRelief(
+  heights: Float32Array,
+  width: number,
+  height: number,
+  scaleX: number,
+  peakFootprint: Float32Array,
+  corridorDistance: Float32Array,
+  passes: number,
+): void {
+  const radius = Math.max(4, Math.round(100 / scaleX));
+  const next = new Float32Array(heights.length);
+  const ring = new Float32Array(8);
+  const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]] as const;
+  for (let pass = 0; pass < passes; pass++) {
+    next.set(heights);
+    for (let gz = radius; gz < height - radius; gz++) {
+      for (let gx = radius; gx < width - radius; gx++) {
+        const idx = gz * width + gx;
+        if (peakFootprint[idx] > 0.035) continue;
+        if (corridorDistance[idx] < 22) continue;
+        const h = heights[idx];
+        for (let i = 0; i < dirs.length; i++) {
+          const [dx, dz] = dirs[i];
+          ring[i] = heights[(gz + dz * radius) * width + gx + dx * radius];
+        }
+        ring.sort();
+        const median = (ring[3] + ring[4]) * 0.5;
+        // A low ring median is the valley-floor signal.  Requiring six individually-low samples let
+        // 2-3 texel spike clusters protect one another, which is exactly the failure mode this pass
+        // exists to remove.  Named massif coverage and the corridor-bed guard above are the safety
+        // rails; within an otherwise sub-80 m neighbourhood, a >38 m isolated rise is not useful
+        // geography.
+        if (median >= 80 || h - median <= 38) continue;
+        next[idx] = median + 30;
+      }
+    }
+    heights.set(next);
+  }
 }
 
 function computeSlope(heights: Float32Array, width: number, height: number, scaleX: number, scaleZ: number): Float32Array {

@@ -80,7 +80,7 @@ function invented(id: string, name: string, nearGazId: string, dx: number, dz: n
 
 const mandated: PoiDef[] = [
   fromGazetteer('ruetli', {
-    kind: 'meadow', historical: true, fastTravel: true, discoverRadius: 100,
+    kind: 'meadow', historical: true, fastTravel: true, discoverRadius: 30,
     note: 'The Rütli meadow is a real place above the Urnersee; the oath sworn there is L (Weisses Buch von Sarnen). See LORE.md §1/§6.',
     description: 'A quiet lakeside meadow below the Seelisberg, reachable only by boat or steep path — where three men of three valleys are said to have sworn their oath.',
   }),
@@ -108,7 +108,7 @@ const mandated: PoiDef[] = [
     description: 'A slab of rock jutting from the Axen shore where, tradition holds, Tell sprang free of Gessler\'s storm-bound boat.',
   }),
   fromGazetteer('hohle-gasse', {
-    kind: 'landmark', historical: 'legend', fastTravel: true, discoverRadius: 80,
+    kind: 'landmark', historical: 'legend', fastTravel: true, discoverRadius: 20,
     note: 'The sunken road toward Küssnacht is a real terrain feature; Gessler\'s death there is L. See LORE.md §1/§6.',
     description: 'A narrow sunken lane cut into the hillside above Küssnacht — good ground for an ambush, tradition says, and Gessler took it.',
   }),
@@ -119,13 +119,13 @@ const mandated: PoiDef[] = [
     description: 'A Habsburg village on the lake\'s Rigi-flank shore, its toll road the fastest way from Arth to Luzern.',
   }),
   fromGazetteer('gesslerburg', {
-    kind: 'castle', historical: true,
+    kind: 'castle', historical: true, discoverRadius: 60,
     population: { 'habsburg-footman': 2, 'habsburg-sergeant': 1 },
     note: 'Gesslerburg is a real ruined castle at Küssnacht; the association with a Landvogt named Gessler is L (no such Vogt is attested). See LORE.md §2.',
     description: 'A Habsburg stronghold above Küssnacht, seat — tradition insists — of the Landvogt whose hat sits on the pole at Altdorf.',
   }),
   fromGazetteer('zwing-uri', {
-    kind: 'castle', historical: 'legend',
+    kind: 'castle', historical: 'legend', discoverRadius: 60,
     population: { 'habsburg-footman': 2 },
     note: 'Zwing Uri, a half-built Habsburg fortress near Amsteg meant to overawe the Reuss valley, is L (Weisses Buch tradition). See LORE.md §1/§4.',
     description: 'Scaffolding and half-raised stone astride the Reuss narrows — a fortress the Habsburg bailiffs are building to keep Uri in its place.',
@@ -155,12 +155,12 @@ const mandated: PoiDef[] = [
     description: 'The Muota\'s mouth on the Urnersee, a lake-crossing quay for Schwyz — and, four years hence, where the renewed Bund will be sealed.',
   }),
   fromGazetteer('sattel-letzi', {
-    kind: 'wall', historical: true, discoverRadius: 80,
+    kind: 'wall', historical: true, discoverRadius: 40,
     note: 'Letzi walls (defensive earth-and-stone barriers across a valley) are attested for Schwyz. See LORE.md §3.',
     description: 'A stone-and-timber letzi wall thrown across the Schornen valley floor, Schwyz\'s prepared line against a column from Ägeri.',
   }),
   fromGazetteer('morgarten', {
-    kind: 'battlefield', historical: true, discoverRadius: 160,
+    kind: 'battlefield', historical: true, discoverRadius: 120,
     note: 'The Battle of Morgarten, 15 November 1315, is attested by Johannes of Winterthur among others. See LORE.md §1.',
     description: 'The narrow shelf between the Ägerisee shore and the Figlenfluh slope — ground the Confederates chose, and where a Habsburg column will be broken.',
   }),
@@ -183,13 +183,13 @@ const mandated: PoiDef[] = [
     description: 'A Habsburg garrison keep on a wooded knoll above Stans — held, tradition says, by too small a watch on the wrong night.',
   }),
   fromGazetteer('sarnen', {
-    kind: 'village', historical: true, discoverRadius: 150,
+    kind: 'village', historical: true, discoverRadius: 50,
     population: { peasant: 5, 'woman-peasant': 3, elder: 1, merchant: 1, child: 2 },
     note: 'Sarnen, Obwalden\'s seat and home of the Weisses Buch tradition itself, is H. See LORE.md §2/§3/§9.',
     description: 'Obwalden\'s village on the Sarnersee — the place whose old people, the journal says, "give no year" for what happened here.',
   }),
   fromGazetteer('landenberg', {
-    kind: 'castle', historical: true,
+    kind: 'castle', historical: true, discoverRadius: 60,
     population: { 'habsburg-footman': 2, 'habsburg-sergeant': 1 },
     note: 'The Landenberg hill and its castle are H; the bailiff Beringer von Landenberg is L. See LORE.md §2/§5.',
     description: 'A bailiff\'s castle on the hill above Sarnen, seat of the Landvogt the New Year\'s gift procession is said to have unseated.',
@@ -260,13 +260,13 @@ const mandated: PoiDef[] = [
 // ==================================================================================================
 
 const extra: PoiDef[] = [
-  fromGazetteer('treib', { kind: 'port', historical: true, population: { boatman: 1, fisher: 1 }, note: 'Treib is the historic Urnersee ferry landing opposite the Axen shore.', description: 'A small ferry landing on the Urnersee\'s western shore, opposite the Rütli.' }),
+  fromGazetteer('treib', { kind: 'port', historical: true, population: { boatman: 1, fisher: 1 }, discoverRadius: 20, note: 'Treib is the historic Urnersee ferry landing opposite the Axen shore.', description: 'A small ferry landing on the Urnersee\'s western shore, opposite the Rütli.' }),
   fromGazetteer('bauen', { kind: 'village', historical: true, population: { peasant: 2, fisher: 1 }, note: 'Bauen is a real lakeside hamlet on the Urnersee.', description: 'A handful of houses clinging to a narrow shelf between the lake and the cliffs.' }),
   fromGazetteer('isleten', { kind: 'hut', historical: true, note: 'Isleten is a real hamlet on the Urnersee shore below the Isenthal.', description: 'A single boat-landing hamlet at the mouth of the Isenthal.' }),
   fromGazetteer('sisikon', { kind: 'village', historical: true, population: { peasant: 2, fisher: 1 }, note: 'Sisikon is a real Axen-shore village.', description: 'A shore village on the Axen path between Flüelen and Brunnen.' }),
   fromGazetteer('erstfeld', { kind: 'village', historical: true, population: { peasant: 3, herder: 1, child: 1 }, note: 'Erstfeld is a real Reusstal village on the Gotthard road.', description: 'A farming village where the Reuss valley widens south of Altdorf.' }),
   fromGazetteer('silenen', { kind: 'village', historical: true, population: { peasant: 2, saeumer: 1 }, note: 'Silenen is a real Reusstal village on the Gotthard road.', description: 'A way-station village on the mule track south toward Amsteg.' }),
-  fromGazetteer('amsteg', { kind: 'village', historical: true, population: { saeumer: 2, peasant: 2 }, note: 'Amsteg is a real Reusstal village where the Kerstelenbach joins the Reuss.', description: 'A Säumer stopover at the foot of the climb toward the Schöllenen.' }),
+  fromGazetteer('amsteg', { kind: 'village', historical: true, discoverRadius: 70, population: { saeumer: 2, peasant: 2 }, note: 'Amsteg is a real Reusstal village where the Kerstelenbach joins the Reuss.', description: 'A Säumer stopover at the foot of the climb toward the Schöllenen.' }),
   fromGazetteer('goeschenen', { kind: 'village', historical: true, population: { saeumer: 1, peasant: 2 }, note: 'Göschenen is the real village at the north foot of the Schöllenen gorge.', description: 'The last village before the Schöllenen\'s narrows swallow the road.' }),
   fromGazetteer('hospental', { kind: 'village', historical: true, population: { peasant: 2, saeumer: 1 }, note: 'Hospental is a real Ursern village on the pass approach.', description: 'A high Ursern village where the Gotthard and Furka roads part.' }),
   fromGazetteer('spiringen', { kind: 'village', historical: true, population: { herder: 2, peasant: 1 }, note: 'Spiringen is a real Schächental village.', description: 'A Schächental farming village on the road toward the Klausen.' }),
@@ -277,7 +277,7 @@ const extra: PoiDef[] = [
   fromGazetteer('seewen', { kind: 'village', historical: true, population: { peasant: 2 }, note: 'Seewen is a real Schwyz-basin village.', description: 'A farming village on the road between Schwyz and Steinen.' }),
   fromGazetteer('lauerz', { kind: 'village', historical: true, population: { fisher: 1, peasant: 1 }, note: 'Lauerz is a real village on its own small lake.', description: 'A fishing village on the shore of the little Lauerzersee.' }),
   fromGazetteer('stoos', { kind: 'alp', historical: true, population: { herder: 1 }, note: 'Stoos is a real high alp above the Muotatal.', description: 'A cattle alp on the shoulder between Schwyz and the Muotatal.' }),
-  fromGazetteer('gersau', { kind: 'village', historical: true, population: { fisher: 2, peasant: 2 }, note: 'Gersau, later a tiny free republic, is a real lake-shore village; a side quest touches its Habsburg toll dispute.', description: 'A shore village pinched between the lake and the Rigi\'s flank, more independent-minded than most.' }),
+  fromGazetteer('gersau', { kind: 'village', historical: true, discoverRadius: 50, population: { fisher: 2, peasant: 2 }, note: 'Gersau, later a tiny free republic, is a real lake-shore village; a side quest touches its Habsburg toll dispute.', description: 'A shore village pinched between the lake and the Rigi\'s flank, more independent-minded than most.' }),
   fromGazetteer('vitznau', { kind: 'village', historical: true, population: { fisher: 1, peasant: 1 }, note: 'Vitznau is a real Luzern-basin shore village.', description: 'A quiet shore village at the foot of the Rigi.' }),
   fromGazetteer('weggis', { kind: 'village', historical: true, population: { fisher: 1, peasant: 2 }, note: 'Weggis is a real Luzern-basin shore village.', description: 'A vineyard-terraced village on the sheltered north shore.' }),
   fromGazetteer('arth', { kind: 'village', historical: true, population: { peasant: 2, merchant: 1 }, note: 'Arth is a real village at the Zugersee\'s southern tip.', description: 'A road-junction village where the Schwyz, Zug and Küssnacht routes meet.' }),
@@ -324,7 +324,7 @@ const extra: PoiDef[] = [
 
 const invented_: PoiDef[] = [
   invented('poi.aegerisee-shore', 'Ägerisee south shore', 'morgarten', -120, -140, {
-    kind: 'landmark', historical: true,
+    kind: 'landmark', historical: true, discoverRadius: 20,
     note: 'The Ägerisee\'s south shore is a real place named in LORE.md §4\'s mandated POI list.',
     description: 'The reedy south shore of the Ägerisee, in view of the road Leopold\'s column will take in 1315.',
   }),
@@ -334,8 +334,8 @@ const invented_: PoiDef[] = [
     note: 'Bannalp is a real Nidwalden alp name (LORE.md §4 names it as a candidate); this specific hut and its exact position are the builder\'s invention.',
     description: 'A high grazing alp above Wolfenschiessen, its two herders\' hut roofed in split shingle.',
   }),
-  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', 138, -202, { // offsets from Sisikon: (307,193), a flat bench on the rerouted shore path
-    kind: 'cross', historical: 'invented',
+  invented('poi.wegkreuz-axenweg', 'Wegkreuz at the Axenweg', 'sisikon', 143, -157, { // offsets from Sisikon: (312,238), nudged ~28 m toward the shore path onto dry land (critic N3b)
+    kind: 'cross', historical: 'invented', discoverRadius: 30,
     note: 'A wayside cross on a lake-shore footpath — LORE.md §4\'s explicitly invented minor-POI category; no specific attested cross is claimed.',
     description: 'A weathered wooden wayside cross where the shore path narrows above the water.',
   }),
@@ -356,14 +356,14 @@ const invented_: PoiDef[] = [
     note: 'A charcoal burners\' camp — LORE.md §4\'s invented minor-POI category.',
     description: 'A second charcoal camp working the Melchtal\'s lower slopes.',
   }),
-  invented('poi.klausnerzelle', 'Hermit\'s cell', 'bauen', -60, 140, {
-    kind: 'hut', historical: 'invented',
+  invented('poi.klausnerzelle', 'Hermit\'s cell', 'bauen', 0, -40, {
+    kind: 'hut', historical: 'invented', discoverRadius: 20,
     population: { monk: 1 },
     note: 'A hermit\'s cell above the lake — LORE.md §4\'s invented minor-POI category; lay hermits (Klausner) attached to no house were an attested medieval phenomenon in general, if not this specific man.',
     description: 'A one-room stone cell cut into the cliff above the shore, home to a solitary Klausner.',
   }),
-  invented('poi.fischerhuetten-gersau', "Fishermen's huts", 'gersau', 100, 18, {
-    kind: 'hut', historical: 'invented',
+  invented('poi.fischerhuetten-gersau', "Fishermen's huts", 'gersau', 78, 8, { // nudged ~24 m toward the shore path off the 51° slope (critic N3b)
+    kind: 'hut', historical: 'invented', discoverRadius: 20,
     population: { fisher: 2 },
     note: "Fishermen's huts — LORE.md §4's invented minor-POI category; lake-shore fishing is independently attested for Gersau.",
     description: 'A row of net-drying racks and low huts where Gersau\'s fishermen keep their gear.',
@@ -374,7 +374,7 @@ const invented_: PoiDef[] = [
     note: 'A water mill on the Sarner Aa — LORE.md §4\'s invented minor-POI category; water-milling was universal period technology.',
     description: 'A creaking wheel and millhouse on the Sarner Aa, grinding grain for the Alpnach villages.',
   }),
-  invented('poi.steinbruch-axen', 'Steinbruch am Axen', 'sisikon', 284, 204, {
+  invented('poi.steinbruch-axen', 'Steinbruch am Axen', 'sisikon', 244, 184, {
     kind: 'camp', historical: 'invented',
     population: { peasant: 1 },
     note: 'A stone quarry on the Axen cliffs — LORE.md §4\'s invented minor-POI category (schema has no dedicated "quarry" kind, so this is a `camp`).',

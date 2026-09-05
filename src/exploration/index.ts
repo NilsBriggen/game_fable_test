@@ -84,7 +84,7 @@ class ExplorationServiceImpl implements ExplorationService {
     this.lastChapter = chapter;
     // settlements (and their colliders) first, so NPCs can be kept out of house footprints when they spawn
     this.rebuildSettlements();
-    this.npcSystem.populate(chapter);
+    this.npcSystem.populate(chapter, new Map(this.settlementPlans.map((p) => [p.poiId, p.anchors])));
     this.poiSystem.spawnPoiEntities();
     spawnContainers(this.ctx.world, this.ctx.content);
     spawnBoatTravel(this.ctx.world, this.ctx.content);

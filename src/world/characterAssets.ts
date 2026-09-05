@@ -121,8 +121,27 @@ function mergeSkeletons(root: Object3D): void {
   for (const b of extra) if (b.parent && !(b.parent as Bone).isBone) b.parent.remove(b);
 }
 
+/** Cosmetic-only sub-meshes pruned from downloaded bodies at load (never rendered, never cloned).
+ *  The Erika Archer body ships a 37 710-vertex `Eyelashes` mesh (2.1 MB vertex data per instance,
+ *  tri-budget leak in the Altdorf crowd scenes): dense eyelash cards invisible past 2 m. Matched by
+ *  name so any future body with the same cosmetic part gets the same treatment. */
+const PRUNE_PATTERNS = [/eyelash/i];
+export function pruneCosmeticMeshes(root: Object3D): string[] {
+  const doomed: Object3D[] = [];
+  root.traverse((o) => {
+    const m = o as Mesh;
+    if (m.isMesh && PRUNE_PATTERNS.some((p) => p.test(o.name))) doomed.push(o);
+  });
+  for (const o of doomed) {
+    o.parent?.remove(o);
+    (o as Mesh).geometry?.dispose?.();
+  }
+  return doomed.map((o) => o.name);
+}
+
 const modelCache = new Map<string, Promise<CharacterModel | null>>();
 const clipCache = new Map<string, Promise<{ clip: AnimationClip; hipY: number } | null>>();
+const pruneLogged = new Set<string>();
 
 function gltfLoader(): GLTFLoader | null {
   try { return new GLTFLoader(); } catch { return null; }
@@ -144,6 +163,15 @@ export function loadCharacterModel(id: string): Promise<CharacterModel | null> {
     const template = gltf.scene;
     template.traverse((o) => { o.name = boneName(o.name); });
     mergeSkeletons(template);
+    // drop cosmetic-only sub-meshes (Erika eyelashes: 37 k verts / 2.1 MB per instance) before the
+    // first clone — pruned here so no instance ever allocates the vertex data (prune, not hide).
+    for (const n of pruneCosmeticMeshes(template)) {
+      if (!pruneLogged.has(`${id}:${n}`)) {
+        pruneLogged.add(`${id}:${n}`);
+        // eslint-disable-next-line no-console
+        console.log(`[characters] pruned cosmetic mesh ${n} from body ${id}`);
+      }
+    }
     template.traverse((o) => {
       const m = o as Mesh;
       if (m.isMesh) {

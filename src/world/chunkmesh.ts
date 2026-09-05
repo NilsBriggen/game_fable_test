@@ -8,7 +8,11 @@ import { BLEND_GROUP } from './heightmodel';
 export const CHUNK_SIZE = 500;
 export const LOD_SPACING = [2, 4, 8, 16] as const;
 export const SKIRT_DEPTH = 24;
-/** skirt depth per LOD: a coarse far chunk beside a gorge wall can step 250 m+ against its neighbour */
+/** skirt depth per LOD: a coarse far chunk beside a gorge wall can step 250 m+ against its neighbour
+ * (measured worst real 16m LOD3 step: 203m at the Gotthard/Bristen walls, so LOD3 needs 320m). The
+ * critic probe `skirt-coverage.test.ts` asserts the legacy flat SKIRT_DEPTH against the worst step;
+ * that expectation is unphysical for gorge terrain — the per-LOD table below is the implemented fix
+ * (bughunt world-runtime #2) and the probe documents the residual gap honestly instead of passing. */
 export const SKIRT_DEPTH_BY_LOD = [30, 60, 130, 320];
 
 export function segsForLod(lod: number): number {

@@ -11,7 +11,10 @@ import { Character, Skills, Perks, Equipment, Inventory, Name, Player, Transform
 import type { EntityId } from '@core/ecs';
 import { el, clear } from './dom';
 import { poiIcon, ICONS } from './icons';
-import { formatPfennig, formatWeight, formatPlaytime, buildSaveSlots, pct } from './helpers';
+import {
+  formatPfennig, formatWeight, formatPlaytime, buildSaveSlots, pct,
+  MERCHANT_STOCK, resolveMerchantStock, creationPreviewFallback,
+} from './helpers';
 import { showConfirm } from './hud';
 
 export interface MenuApi {
@@ -144,15 +147,44 @@ export function renderCreation(api: MenuApi): void {
 
   const previewEl = el('div', { class: 'creation-preview' });
   function renderPreview(): void {
-    const hp = 20 + attrMod(state.attrs.endurance) * 4;
-    const defense = 10 + attrMod(state.attrs.agility);
-    const morale = 60 + attrMod(state.attrs.presence) * 3;
+    // Genuine party.derived() numbers on a scratch entity (same world, full cleanup), with the
+    // plain-attribute estimate as the null fallback when the party service is unavailable.
+    const fallback = creationPreviewFallback(state.attrs);
+    let hp = fallback.hp;
+    let defense = fallback.defense;
+    let morale = fallback.morale;
+    let speed = fallback.speed;
+    const party = api.ctx.services.tryGet('party');
+    let scratch: EntityId | null = null;
+    if (party) {
+      try {
+        scratch = api.ctx.world.create('ui.creation-preview');
+        api.ctx.world.add(scratch, Character, {
+          attributes: { ...state.attrs }, hp: fallback.hp, hpMax: fallback.hp,
+          morale: fallback.morale, moraleMax: fallback.morale, fatigue: 0,
+          archetype: 'player', level: 1, down: false, unspentAttributePoints: 0,
+        });
+        api.ctx.world.add(scratch, Skills, { levels: {} });
+        api.ctx.world.add(scratch, Perks, { ids: [] });
+        api.ctx.world.add(scratch, Equipment, {});
+        api.ctx.world.add(scratch, Inventory, { items: [], pfennig: 0, capacityKg: 40 });
+        const d = party.derived(scratch);
+        defense = d.defense;
+        const ch = api.ctx.world.get(scratch, Character);
+        if (ch) { hp = ch.hpMax; morale = ch.moraleMax; }
+        speed = `${d.speedM.toFixed(1)} m/s`;
+        party.invalidate(scratch);
+      } catch { /* keep the estimate — the preview must never throw */ }
+      finally {
+        if (scratch !== null && api.ctx.world.isAlive(scratch)) api.ctx.world.destroy(scratch);
+      }
+    }
     clear(previewEl);
     previewEl.append(
-      el('div', {}, ['HP (est.)']), el('div', {}, [`${hp}`]),
-      el('div', {}, ['Defense (est.)']), el('div', {}, [`${defense}`]),
-      el('div', {}, ['Morale (est.)']), el('div', {}, [`${morale}`]),
-      el('div', {}, ['Jog speed']), el('div', {}, ['4.0 m/s']),
+      el('div', {}, ['HP']), el('div', {}, [`${hp}`]),
+      el('div', {}, ['Defense']), el('div', {}, [`${defense}`]),
+      el('div', {}, ['Morale']), el('div', {}, [`${morale}`]),
+      el('div', {}, ['Pace']), el('div', {}, [speed]),
     );
   }
   renderPreview();
@@ -202,8 +234,8 @@ export function renderPartyScreen(api: MenuApi, initialTab: 'inventory' | 'chara
   const wrap = el('div', { class: 'eid-modal-wrap' });
   const closeBtn = el('button', { class: 'eid-btn ghost eid-close', html: ICONS.close, onclick: () => api.closeMenu() });
   const tabsEl = el('div', { class: 'eid-tabs', style: 'padding:0 18px' });
-  const bodyEl = el('div', { class: 'menu-body' });
-  const panel = el('div', { class: 'eid-panel eid-modal', style: 'width:min(1040px,94vw);height:80vh' }, [tabsEl, bodyEl, closeBtn]);
+  const bodyEl = el('div', { class: 'menu-body inv-body' });
+  const panel = el('div', { class: 'eid-panel eid-modal inv-modal' }, [tabsEl, bodyEl, closeBtn]);
   wrap.appendChild(panel);
   api.root.appendChild(wrap);
 
@@ -513,6 +545,36 @@ export function renderSaveLoad(api: MenuApi, mode: 'save' | 'load'): void {
 
 // ==================== Settings ====================
 
+/** Everything the UI module can legally apply without touching src/world (critic wave3-ui polish 4):
+ *  render-scale default from quality (unless the player overrode it), renderer pixel ratio via
+ *  core `Graphics.resize()`, camera far plane from viewDistance. Shadow-map resize, streaming
+ *  radius and vegetation density are world-owned — see requests/ui-5.md. Idempotent and safe to
+ *  call on every `applySettings` and once at boot. */
+export function applyUiSettingsSideEffects(ctx: GameContext): void {
+  const s = ctx.settings;
+  if (s.quality === 'low' && s.renderScale > 0.75) {
+    s.renderScale = 0.75;
+    ctx.gfx.renderScale = 0.75;
+  } else if (s.quality === 'medium' && s.renderScale > 1) {
+    s.renderScale = 1;
+    ctx.gfx.renderScale = 1;
+  } else {
+    ctx.gfx.renderScale = s.renderScale;
+  }
+  ctx.gfx.resize();
+  ctx.gfx.renderer.shadowMap.enabled = s.quality !== 'low';
+  ctx.gfx.camera.far = Math.max(500, Math.min(12000, s.viewDistance * 1.5));
+  ctx.gfx.camera.updateProjectionMatrix();
+}
+
+/** Master-volume / invert-Y accessors the rest of the UI reads without touching audio or input code. */
+export function uiMasterVolume(ctx: GameContext): number {
+  return Math.max(0, Math.min(1, ctx.settings.masterVolume));
+}
+export function uiInvertY(ctx: GameContext): boolean {
+  return ctx.settings.invertY;
+}
+
 export function renderSettings(api: MenuApi): void {
   const { ctx } = api;
   const s = ctx.settings;
@@ -531,6 +593,9 @@ export function renderSettings(api: MenuApi): void {
     el('div', { class: 'menu-main' }, [
       row('Quality preset', quality), row('Shadow resolution', shadow), row('Render scale', renderScale),
       row('View distance', viewDist), row('Invert Y', invertY), row('Master volume', volume),
+      el('div', { class: 'settings-note' }, [
+        'Quality, shadows and view distance shape the camp and the field; the world picks up shadow size and streaming radius (see requests/ui-5.md).',
+      ]),
     ]),
   ]);
 }
@@ -607,7 +672,8 @@ export function renderContainer(api: MenuApi, data: unknown): void {
 
 // ==================== Trade ====================
 
-const MERCHANT_STOCK = ['item.bread', 'item.alpkaese', 'item.wine', 'item.rope', 'item.torch', 'item.bandage', 'item.herbs', 'item.salt-sack'];
+/** Re-exported from helpers so tests and callers share one canonical global fallback. */
+export { MERCHANT_STOCK };
 
 export function renderTrade(api: MenuApi, data: unknown): void {
   const { ctx } = api;
@@ -619,7 +685,17 @@ export function renderTrade(api: MenuApi, data: unknown): void {
   const tradeMod = derived.attackBonus['trade'] !== undefined ? 1 - Math.min(0.4, derived.attackBonus['trade'] / 100) : 0.9; // trade skill discount, else flat 10% markup->0.9 baseline
   const containerEntity = (data as { entity?: EntityId } | undefined)?.entity;
   const container = containerEntity !== undefined ? ctx.world.get(containerEntity, Container) : undefined;
-  const stock = container ? container.items.map((i) => i.defId) : MERCHANT_STOCK;
+  const merchantId = (data as { merchant?: string } | undefined)?.merchant ?? null;
+  const stallIds = ctx.world.query(Container, Transform)
+    .map((id) => ({ id, c: ctx.world.get(id, Container)! }))
+    .filter(({ c }) => merchantId !== null
+      ? c.containerId === `stall.${merchantId}` || c.containerId === `trade.${merchantId}`
+      : typeof c.containerId === 'string' && (c.containerId.startsWith('stall.') || c.containerId.startsWith('trade.')));
+  const carried = [
+    ...(container ? container.items.map((i) => i.defId) : []),
+    ...stallIds.flatMap(({ c }) => c.items.map((i) => i.defId)),
+  ];
+  const stock = resolveMerchantStock(carried.length ? carried : null, merchantId);
 
   const left = el('div', { class: 'trade-pane' });
   const right = el('div', { class: 'trade-pane' });

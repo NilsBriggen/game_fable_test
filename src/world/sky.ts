@@ -248,6 +248,8 @@ export interface SkyHandle {
   setSeason(s: Season): void;
   /** turn-based combat at night or in rain gets a fill so the field stays legible (BG3 lights its fights) */
   setCombatFill(on: boolean): void;
+  /** resize the CSM cascade shadow maps (requests/ui-4, ui-5: settings `shadowRes`) */
+  setShadowSize(px: number): void;
   update(dt: number, renderer: WebGLRenderer): void;
   dispose(): void;
 }
@@ -543,6 +545,22 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
     setCombatFill(on: boolean) {
       combatFill = on;
       applySun();
+    },
+    setShadowSize(px: number) {
+      // CSM reads shadowMapSize once in createLights() plus per-frame in update(); push the new size
+      // onto all three places so the resize actually takes effect (verified against three r170 CSM.js).
+      if (!Number.isFinite(px) || px <= 0) return;
+      const size = Math.max(256, Math.min(8192, Math.round(px)));
+      csm.shadowMapSize = size;
+      for (const l of csm.lights) {
+        l.shadow.mapSize.width = size;
+        l.shadow.mapSize.height = size;
+        // force three to drop the old WebGLShadowMap render target and allocate at the new size
+        const map = l.shadow.map as { dispose?: () => void; setSize?: (w: number, h: number) => void } | null;
+        if (map?.dispose) map.dispose();
+        else if (map?.setSize) map.setSize(size, size);
+        (l.shadow as unknown as { needsUpdate?: boolean }).needsUpdate = true;
+      }
     },
     update(dt: number, glRenderer: WebGLRenderer) {
       clock += dt;

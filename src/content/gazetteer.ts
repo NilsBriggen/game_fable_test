@@ -50,7 +50,7 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'ibach': { id: 'ibach', name: 'Ibach', x: 591, z: -1137, kind: 'meadow', owner: 'schwyz', asl: 470, h: 12 },
   'steinen': { id: 'steinen', name: 'Steinen', x: 34, z: -2076, kind: 'village', owner: 'schwyz', asl: 470, h: 12 },
   'seewen': { id: 'seewen', name: 'Seewen', x: 304, z: -1705, kind: 'village', owner: 'schwyz', asl: 460, h: 9 },
-  'lauerz': { id: 'lauerz', name: 'Lauerz', x: -490, z: -1705, kind: 'village', owner: 'schwyz', asl: 460, h: 9 },
+  'lauerz': { id: 'lauerz', name: 'Lauerz', x: -490, z: -1632, /* on the north-east shore terrace; was 27 m inside the polygon, reading as lake bed */ kind: 'village', owner: 'schwyz', asl: 460, h: 9 },
   'muotathal': { id: 'muotathal', name: 'Muotathal', x: 2618, z: -272, kind: 'village', owner: 'schwyz', asl: 620, h: 62 },
   'stoos': { id: 'stoos', name: 'Stoos alp', x: 844, z: -371, kind: 'alp', owner: 'schwyz', asl: 1300, h: 289 },
   'gersau': { id: 'gersau', name: 'Gersau', x: -1436, z: -300, /* north shore under the Rigi; was 200 m inside the basin */ kind: 'village', owner: 'schwyz', asl: 440, h: 2 },
@@ -66,7 +66,7 @@ export const PLACES: Record<string, GazetteerPlace> = {
   'sattel': { id: 'sattel', name: 'Sattel', x: 439, z: -2866, kind: 'village', owner: 'schwyz', asl: 830, h: 132 },
   'sattel-letzi': { id: 'sattel-letzi', name: 'Letzi at Schornen', x: 388, z: -3163, kind: 'wall', owner: 'schwyz', asl: 750, h: 105 },
   'morgarten': { id: 'morgarten', name: 'Morgarten', x: 338, z: -3336, kind: 'battlefield', owner: 'schwyz', asl: 740, h: 102 },
-  'oberaegeri': { id: 'oberaegeri', name: 'Oberägeri', x: 118, z: -4226, kind: 'village', owner: 'habsburg', asl: 740, h: 102 },
+  'oberaegeri': { id: 'oberaegeri', name: 'Oberägeri', x: 118, z: -4420, /* south-east of the lake on the Morgarten road; was 98 m inside the polygon, the road's own floor is the lake bed there */ kind: 'village', owner: 'habsburg', asl: 740, h: 102 },
   'unteraegeri': { id: 'unteraegeri', name: 'Unterägeri', x: -456, z: -4176, kind: 'village', owner: 'habsburg', asl: 730, h: 99 },
   'zug': { id: 'zug', name: 'Zug', x: -1000, z: -5330, /* NE corner of the lake, 100 m off the polygon edge; was 250 m inside it */ kind: 'town', owner: 'habsburg', asl: 420, h: -5 },
   'cham': { id: 'cham', name: 'Cham', x: -1500, z: -5640, kind: 'village', owner: 'habsburg', asl: 418, h: -5 },
@@ -114,7 +114,10 @@ export const PLACES: Record<string, GazetteerPlace> = {
 
 /** Lake polygons (game xz), clockwise-ish. Surface y = 0 for the Vierwaldstättersee; other lakes have their own level. */
 export const LAKES: { id: string; name: string; levelAsl: number; poly: [number, number][] }[] = [
-  { id: 'urnersee', name: 'Urnersee', levelAsl: 434, poly: [[270, 1483], [507, 1236], [304, 371], [169, -494], [-84, -865], [-338, -618], [-169, -247], [-84, 247], [-338, 741], [-169, 1112]] },
+  // The east shore follows the authored Axen landmarks rather than cutting a four-point chord from
+  // Flüelen to Brunnen.  That old chord put Tellsplatte, Sisikon and the entire shore path up to 230m
+  // inside open water, producing a visible dashed land causeway across the lake.
+  { id: 'urnersee', name: 'Urnersee', levelAsl: 434, poly: [[270, 1483], [232, 1163], [214, 951], [191, 692], [157, 395], [318, 160], [258, -220], [178, -560], [48, -700], [-84, -865], [-338, -618], [-169, -247], [-84, 247], [-338, 741], [-169, 1112]] },
   { id: 'gersau-basin', name: 'Gersauer/Buochser Becken', levelAsl: 434, poly: [[-338, -618], [-1098, -865], [-1858, -988], [-2364, -1236], [-2871, -1483], [-3209, -1359], [-3547, -865], [-3378, -494], [-2871, -321], [-2364, -247], [-1520, -371], [-844, -494]] },
   { id: 'luzern-basin', name: 'Luzerner Becken', levelAsl: 434, poly: [[-2871, -1483], [-3547, -1977], [-4222, -2100], [-4898, -1977], [-5067, -1606], [-4729, -1359], [-4222, -988], [-3547, -865], [-3209, -1359]] },
   { id: 'kuessnachtersee', name: 'Küssnachtersee', levelAsl: 434, poly: [[-3547, -1977], [-3378, -2348], [-3040, -2965], [-2787, -3089], [-2618, -2842], [-2871, -2348], [-3040, -1977]] },
@@ -134,7 +137,7 @@ export const RIVERS: { id: string; name: string; via: string[] }[] = [
   { id: 'engelberger-aa', name: 'Engelberger Aa', via: ["engelberg", "wolfenschiessen", "stans", "buochs"] },
   { id: 'sarner-aa', name: 'Sarner Aa', via: ["melchtal", "kerns", "sarnen", "alpnach", "alpnachstad"] },
   { id: 'sihl', name: 'Sihl', via: ["alptal", "einsiedeln"] },
-  { id: 'lorze', name: 'Lorze', via: ["unteraegeri", "baar", "cham"] },
+  { id: 'lorze', name: 'Lorze', via: ["unteraegeri", "zug", "baar", "cham"] },
 ];
 
 /** Roads / paths as chains of place ids. */

@@ -306,12 +306,19 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
   if (sc.flags && quest) for (const [k, v] of Object.entries(sc.flags)) quest.setFlag(k, v);
   // 3. time & weather
   // a seasonal scenario also moves the calendar into that season, so the HUD date, sun height and
-  // day length agree with the tint and snow line (a 'winter' capture used to read "1 August")
+  // day length agree with the tint and snow line (a 'winter' capture used to read "1 August").
+  // Non-seasonal scenarios reset the clock to the game start (1 Aug 1291): the previous scenario's
+  // season move must not leak into later captures (a winter free-morgarten left ruetli-dawn in
+  // December darkness even though the scenario itself has no season).
   if (sc.season) {
     const cal = ctx.clock.calendar();
     const md: Record<string, [number, number]> = { winter: [12, 15], spring: [5, 1], summer: [8, 1], autumn: [10, 15] };
     const [m, d] = md[sc.season as string] ?? [cal.month, cal.day];
     ctx.clock.set(gameTimeFor(cal.year, m, d, typeof sc.hour === 'number' ? sc.hour : ctx.clock.hour));
+    if (world) world.setSeason(sc.season as any);
+  } else {
+    ctx.clock.set(gameTimeForStart());
+    if (world) world.setSeason('summer');
   }
   if (typeof sc.hour === 'number') { ctx.clock.setHour(sc.hour); world?.setTimeOfDay(sc.hour); }
   if (sc.weather && world) world.setWeather(sc.weather as any);
@@ -529,8 +536,10 @@ function groundProbe(): Record<string, number | null> | null {
     .filter((h) => !(ctx.world.get(pid, MeshRef)?.object as Object3D | undefined)?.getObjectById(h.object.id))
     .slice(0, 6).map((h) => `${h.object.name || h.object.type}@${Math.round(h.point.y * 100) / 100}`);
   const h = world.heightAt(t.x, t.z);
+  const asObject3D = (o: unknown): Object3D | undefined =>
+    o instanceof Object3D ? o : (o as { object?: unknown })?.object instanceof Object3D ? (o as { object: Object3D }).object : undefined;
   // the player figure itself: its object's world y and the lowest rendered vertex (skinned = bone-space approx)
-  const ref = ctx.world.get(pid, MeshRef)?.object as Object3D | undefined;
+  const ref = asObject3D(ctx.world.get(pid, MeshRef)?.object);
   let figureY: number | null = null, figureMinY: number | null = null;
   let hipsY: number | null = null, skinnedMinY: number | null = null;
   if (ref) {
@@ -565,7 +574,8 @@ function groundProbe(): Record<string, number | null> | null {
   ctx.world.each(Transform, (id, tr) => { if (id !== pid && ctx.world.has(id, MeshRef)) cand.push({ id, d: Math.hypot(tr.x - t.x, tr.z - t.z) }); });
   cand.sort((a, b) => a.d - b.d);
   for (const c of cand.slice(0, 6)) {
-    const tr = ctx.world.get(c.id, Transform)!; const obj = ctx.world.get(c.id, MeshRef)!.object as Object3D;
+    const tr = ctx.world.get(c.id, Transform)!; const obj = asObject3D(ctx.world.get(c.id, MeshRef)!.object);
+    if (!obj) continue;
     obj.updateMatrixWorld(true);
     const low = { y: null as number | null };
     const tmp = new Vector3(), acc = new Vector3(), bm = new Matrix4();

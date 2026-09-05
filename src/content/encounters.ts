@@ -35,12 +35,18 @@ export const encounters: EncounterDef[] = [
   {
     id: 'enc.brunnen-quay', name: 'The Brunnen Quay', location: { x: brunnen.x, z: brunnen.z, yaw: 0.3 },
     grid: { cols: 16, rows: 16, cellM: 1.5 }, heightOverride: 'quay',
-    deploy: { q: 2, r: 3, cols: 3, rows: 3 },
+    // Round-3 minor (wave2-combat.md issue 5: grid water sits opposite the real lake — the `quay` preset puts
+    // water at low r, but low r maps through yaw 0.3 to world NNE, the land side; the real lake is SSW, high
+    // r). The preset itself is shared geometry, so the fix here mirrors placements/deploy in r (r' = 15 - r):
+    // the boat party starts high-r (lake/SSW side, disembarking) with the toll party inland of them. The q
+    // axis is already correct (party west/lake-side, toll men east/inland) and the preset is q-invariant, so
+    // q is untouched.
+    deploy: { q: 2, r: 10, cols: 3, rows: 3 },
     units: [
-      { archetype: 'toll-collector', side: 'enemy', q: 11, r: 8 },
-      { archetype: 'habsburg-footman', side: 'enemy', q: 12, r: 9 },
-      { archetype: 'saeumer', side: 'player', q: 3, r: 7, group: 'escort', name: 'Säumer of the boat' },
-      { archetype: 'herder', side: 'player', q: 3, r: 9, group: 'escort', name: 'The elder\'s man' },
+      { archetype: 'toll-collector', side: 'enemy', q: 11, r: 7 },
+      { archetype: 'habsburg-footman', side: 'enemy', q: 12, r: 6 },
+      { archetype: 'saeumer', side: 'player', q: 3, r: 8, group: 'escort', name: 'Säumer of the boat' },
+      { archetype: 'herder', side: 'player', q: 3, r: 6, group: 'escort', name: 'The elder\'s man' },
     ],
     objectives: [{ type: 'defeat-all' }],
     terrainFeatures: [],
