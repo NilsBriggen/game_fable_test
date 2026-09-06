@@ -67,13 +67,47 @@ export function compassCardinals(yaw: number, windowDeg = 180): { x: number; let
 
 // ---------------- Combat: hit chance / check odds formatting ----------------
 
-/** "63% hit — Edge: high ground; Burden: exhausted" style breakdown for a hover tooltip. */
-export function formatHitChance(hitChance: number, edge: string[], burden: string[]): string {
+/** "63% hit — Edge: high ground; Burden: exhausted" style breakdown for a hover tooltip.
+ *  The optional `detail` carries everything `previewAttack`'s `AttackContext` already provides
+ *  (range/height/flank/charge/damage); when omitted the output is the legacy short form.
+ *  Single formatter for hit odds — extend here, don't fork a second one. */
+export function formatHitChance(
+  hitChance: number,
+  edge: string[],
+  burden: string[],
+  detail?: {
+    ranged?: boolean;
+    distanceCells?: number;
+    distanceM?: number;
+    heightDelta?: number;
+    flanked?: boolean;
+    charge?: boolean;
+    damage?: string;
+  },
+): string {
   const pct = Math.round(hitChance * 100);
   const parts: string[] = [];
   if (edge.length) parts.push(`Edge: ${edge.join(', ')}`);
   if (burden.length) parts.push(`Burden: ${burden.join(', ')}`);
-  return parts.length ? `${pct}% hit — ${parts.join('; ')}` : `${pct}% hit`;
+  const base = parts.length ? `${pct}% hit — ${parts.join('; ')}` : `${pct}% hit`;
+  if (!detail) return base;
+  const extras: string[] = [];
+  if (detail.ranged !== undefined) extras.push(detail.ranged ? 'ranged' : 'melee'); // i18n-delta ("ranged"/"melee")
+  if (detail.distanceCells !== undefined) {
+    extras.push(
+      detail.distanceM !== undefined
+        ? `Range ${detail.distanceCells} cells (${detail.distanceM.toFixed(1)} m)` // i18n-delta ("Range")
+        : `Range ${detail.distanceCells} cells`, // i18n-delta ("Range")
+    );
+  }
+  if (detail.heightDelta !== undefined && detail.heightDelta !== 0) {
+    const s = detail.heightDelta > 0 ? `+${detail.heightDelta}m high` : `${detail.heightDelta}m low`; // i18n-delta ("high"/"low")
+    extras.push(s);
+  }
+  if (detail.flanked) extras.push('flanked'); // i18n-delta ("flanked")
+  if (detail.charge) extras.push('charge'); // i18n-delta ("charge")
+  if (detail.damage) extras.push(detail.damage);
+  return extras.length ? `${base} · ${extras.join(' · ')}` : base;
 }
 
 /** BG3-style bracket odds shown on a dialogue choice, e.g. "[Speech 65%]". */
@@ -155,7 +189,7 @@ export function buildSaveSlots(metas: SaveMeta[]): SaveSlotView[] {
 
 // ---------------- Combat: enemy inspect card + reaction prompt (pure render models) ----------------
 
-import type { CombatantView, CombatStateView } from '@core/services';
+import type { AttackContext, CombatantView, CombatStateView } from '@core/services';
 
 export interface TargetCardModel {
   name: string;
@@ -165,11 +199,78 @@ export interface TargetCardModel {
   formationLine: string | null;
   /** false when the unit is gone (down/dead/routed) — the card must hide, not go stale. */
   alive: boolean;
+  /** BG3-style hover depth: everything `previewAttack`'s context already provides. Null when no
+   *  preview was supplied (e.g. state refresh without a hover). */
+  hit?: TargetCardHitBreakdown | null;
+}
+
+/** Structural subset of `previewAttack`'s return, kept local so tests can stub it headlessly. */
+export interface AttackPreviewLike {
+  hitChance: number;
+  context: Pick<AttackContext, 'edge' | 'burden' | 'ranged' | 'distanceCells' | 'heightDelta' | 'flanked' | 'charge'>;
+  damage: string;
+}
+
+/** Hit breakdown for the enemy inspect card. `cover` is explicitly null: `AttackContext`
+ *  (core/services.ts:171) carries no cover value, even though `CellView.cover` (0|1|2) and
+ *  `effectiveDefense` use it in the roll — see the task report. When the engine plumbs cover
+ *  through, widen this field to `number | null` without changing the model shape. */
+export interface TargetCardHitBreakdown {
+  hitChance: number;
+  hitLine: string;
+  edge: string[];
+  burden: string[];
+  ranged: boolean;
+  distanceCells: number;
+  distanceM: number;
+  heightDelta: number;
+  flanked: boolean;
+  charge: boolean;
+  damage: string;
+  cover: null;
+}
+
+/** Cheap string-building only: full hover/card line for a preview result. Single entry point
+ *  over `formatHitChance` so callers never fork the formatter. */
+export function formatPreviewHit(preview: AttackPreviewLike, cellM = 1.5): string {
+  return formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden, {
+    ranged: preview.context.ranged,
+    distanceCells: preview.context.distanceCells,
+    distanceM: preview.context.distanceCells * cellM,
+    heightDelta: preview.context.heightDelta,
+    flanked: preview.context.flanked,
+    charge: preview.context.charge,
+    damage: preview.damage,
+  });
+}
+
+/** Pure model for the hit-breakdown section of the enemy inspect card. */
+export function buildTargetCardHitBreakdown(preview: AttackPreviewLike, cellM = 1.5): TargetCardHitBreakdown {
+  return {
+    hitChance: preview.hitChance,
+    hitLine: formatPreviewHit(preview, cellM),
+    edge: [...preview.context.edge],
+    burden: [...preview.context.burden],
+    ranged: preview.context.ranged,
+    distanceCells: preview.context.distanceCells,
+    distanceM: preview.context.distanceCells * cellM,
+    heightDelta: preview.context.heightDelta,
+    flanked: preview.context.flanked,
+    charge: preview.context.charge,
+    damage: preview.damage,
+    cover: null,
+  };
 }
 
 /** Pure model for the enemy inspect card (`.cbt-target-card`): null means "hide the card".
- *  Mirrors `renderTargetCard`'s decision logic so it is unit-testable without a DOM. */
-export function buildTargetCardModel(u: CombatantView | null | undefined): TargetCardModel | null {
+ *  Mirrors `renderTargetCard`'s decision logic so it is unit-testable without a DOM.
+ *  Pass `preview` (a `previewAttack` result) + `cellM` to attach the hit breakdown; omit
+ *  both for the base card (e.g. state refreshes without a hover). */
+export function buildTargetCardModel(
+  u: CombatantView | null | undefined,
+  preview?: AttackPreviewLike | null,
+  cellM = 1.5,
+): TargetCardModel | null {
   if (!u) return null;
   const alive = !u.down && u.hp > 0 && !u.routed;
   if (!alive) return null;
@@ -180,6 +281,7 @@ export function buildTargetCardModel(u: CombatantView | null | undefined): Targe
     statuses: u.status.map((st) => st.id),
     formationLine: u.formation.inHaufen ? `Haufen +${u.formation.defenseBonus}` : null,
     alive: true,
+    hit: preview ? buildTargetCardHitBreakdown(preview, cellM) : null,
   };
 }
 

@@ -64,11 +64,19 @@ export class NpcSystem {
   private readonly patrolLead = new Set<EntityId>();
   private lastTrigger = -Infinity;
   private isHostileHabsburg = false;
+  /** Current game state (`ctx.state.state`), pushed by exploration/index.ts each frame; undefined in
+   *  unit-test fakes, which behave as `explore`. Gates patrol encounter triggers (never interrupt a
+   *  dialogue/cutscene/combat/loading scene). */
+  gameState: string | undefined = undefined;
   /** Draw-call budget safety valve (coordinator alert: 5 295 draw calls at Altdorf; target <= 1 200):
    *  even with the 300 m freeze radius, a single dense village can have more generic crowd than is
    *  worth rendering at once. Named NPCs are exempt (there are only ever a handful near at a time). */
   private readonly maxVisibleCrowd = 60;
   private meshedCount = 0;
+  /** Ambient bark timer: at most one one-liner per BARK_INTERVAL, only when the UI sink is wired. */
+  private barkAcc = 0;
+  /** HUD toast sink for ambient barks; unset in unit tests (barks stay silent, still queryable). */
+  private emitBark: ((msg: string) => void) | null = null;
 
   constructor(
     private world: World,
@@ -81,6 +89,18 @@ export class NpcSystem {
 
   setHostileHabsburg(v: boolean): void {
     this.isHostileHabsburg = v;
+  }
+
+  /** Wire the HUD toast sink for ambient barks (index.ts passes ui.toast). Unset = silent. */
+  setBarkSink(sink: ((msg: string) => void) | null): void {
+    this.emitBark = sink;
+  }
+
+  /** Test hook: resolve the bark an NPC would currently utter (null = none eligible), without emitting. */
+  barkFor(id: EntityId, hour: number): string | null {
+    const npc = this.world.get(id, Npc);
+    if (!npc || npc.frozen || npc.activity === 'sleep' || this.world.has(id, PartyMember)) return null;
+    return pickBark(this.defIdOf.get(id) ?? npc.defId, npc, hour);
   }
 
   /** Removes every previously-populated NPC entity (used before a fresh `populate()` on new-game/load,
@@ -278,9 +298,18 @@ export class NpcSystem {
   }
 
   /** Per-frame lifecycle: freeze/unfreeze by distance, spawn/despawn meshes, walk near NPCs, drive
-   *  patrols and (if hostile) trigger a fight when a patrol reaches the player. */
+   *  patrols and (if hostile) trigger a fight when a patrol reaches the player. Barks (ambient one-liners
+   *  shown as HUD toasts) fire from the same pass. */
   update(dt: number, playerPos: { x: number; z: number } | null, hour: number): void {
     if (!playerPos) return;
+    this.barkAcc += dt;
+    const barkReady = this.barkAcc >= BARK_INTERVAL && this.emitBark;
+    if (barkReady) this.barkAcc = 0;
+    // Pick at most one barker per interval: the nearest unfrozen bark-eligible NPC already solved below
+    // is found with a two-pass approach — first pass resolves lifecycle, second picks the bark. To keep
+    // the walk single-pass, candidates are collected inline and the bark resolves after the loop.
+    const barkCandidate: { id: EntityId; npc: NpcC; d2: number } = { id: -1, npc: null as unknown as NpcC, d2: Infinity };
+    let hasBarkCandidate = false;
     this.world.each(Npc, (id, npc) => {
       const t = this.world.get(id, Transform);
       if (!t) return;
@@ -311,7 +340,12 @@ export class NpcSystem {
       else this.stepSchedule(id, npc, t, hour, dt);
       this.syncMesh(id, t);
       if (npc.activity === 'patrol' && this.isHostileHabsburg) this.checkPatrolTrigger(t, playerPos, id);
+      if (barkReady && npc.activity !== 'sleep') {
+        const d2 = dist2(t.x, t.z, playerPos.x, playerPos.z);
+        if (d2 <= BARK_RADIUS * BARK_RADIUS && d2 < barkCandidate.d2) { barkCandidate.id = id; barkCandidate.npc = npc; barkCandidate.d2 = d2; hasBarkCandidate = true; }
+      }
     });
+    if (hasBarkCandidate) this.fireBark(barkCandidate.id, barkCandidate.npc, hour);
   }
 
   private homeOf(id: EntityId, npc: NpcC): string | undefined {
@@ -416,7 +450,11 @@ export class NpcSystem {
     const dest = { x: base.x + ox, z: base.z + oz };
     npc.targetPoi = active.poiId;
     npc.activity = active.activity;
-    const arrived = walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService, this.charHandle(id));
+    const arrived = walkToward(t, dest, NPC_WALK_SPEED, dt, this.worldService, this.charHandle(id), this.colliders);
+    // Settlement-life poses (3.5): locomotion owns the handle while walking; once arrived, tavern
+    // evenings sit and work parties work. walkToward's setSpeed(0) on arrival only blends to idle, so
+    // the pose call after it wins for settled NPCs without fighting the walk cycle.
+    if (arrived) this.poseForActivity(id, active.activity);
     const asleep = active.activity === 'sleep' && arrived;
     const it = this.world.get(id, Interactable);
     if (it) it.enabled = !asleep;
@@ -433,6 +471,20 @@ export class NpcSystem {
     return mesh?.kind === 'npc-character' ? (mesh.object as CharacterHandle) : null;
   }
 
+  /** Settlement-life pose hooks (3.5): a seated tavern evening and working wall-gang read at a glance.
+   *  Driven from the schedule activity the NPC already resolved this frame — no new state, no new
+   *  schedule values. One-shots (talk/cheer) are NOT auto-played here: dialogue and combat own those. */
+  private poseForActivity(id: EntityId, activity: string | undefined): void {
+    if (activity !== 'tavern' && activity !== 'work') return;
+    const handle = this.charHandle(id);
+    if (!handle) return;
+    // play() on a loop returns immediately; re-issuing every frame would restart the crossfade every
+    // frame, so only fire when the handle isn't already holding that loop.
+    const want = activity === 'tavern' ? 'sit' : 'work';
+    if (handle.currentAnimName() === want) return;
+    void handle.play(want, { loop: true });
+  }
+
   /** Party companions trail the player at 2–3 m; a companion left far behind (fast travel, teleport) is snapped. */
   private stepFollow(id: EntityId, t: { x: number; y: number; z: number; yaw: number }, playerPos: { x: number; z: number }, dt: number): void {
     const d = dist2(t.x, t.z, playerPos.x, playerPos.z);
@@ -440,14 +492,14 @@ export class NpcSystem {
     if (d < 2.5) return;
     const slot = ((this.world.get(id, PartyMember)?.slot ?? 1) % 3) - 1; // party slot → left/centre/right behind the player
     const dest = { x: playerPos.x + slot * 1.8, z: playerPos.z + 2.2 };
-    walkToward(t, dest, Math.min(6.5, 2 + d), dt, this.worldService, this.charHandle(id));
+    walkToward(t, dest, Math.min(6.5, 2 + d), dt, this.worldService, this.charHandle(id), this.colliders);
   }
 
   private stepPatrol(id: EntityId, t: { x: number; y: number; z: number; yaw: number }, dt: number): void {
     const state = this.patrols.get(id);
     if (!state) return;
     const target = state.waypoints[state.index];
-    const arrived = walkToward(t, target, NPC_WALK_SPEED * 1.1, dt, this.worldService, this.charHandle(id));
+    const arrived = walkToward(t, target, NPC_WALK_SPEED * 1.1, dt, this.worldService, this.charHandle(id), this.colliders);
     if (arrived) {
       if (state.forward) {
         state.index++;
@@ -461,12 +513,70 @@ export class NpcSystem {
 
   private checkPatrolTrigger(t: { x: number; z: number }, playerPos: { x: number; z: number }, id: EntityId): void {
     if (!this.patrolLead.has(id)) return;
+    // Never interrupt an active scene: quest/dialogue/cutscene/loading own the screen, and the quest
+    // module's own {encounter} effects own story fights — a proximity patrol must not double-fire them.
+    // NpcSystem has no state-machine handle, soNpcSystem.update receives the current game state from
+    // exploration/index.ts (which reads ctx.state.state); unit-test fakes may omit it (undefined = explore).
+    if (this.gameState !== undefined && this.gameState !== 'explore') return;
     const now = performance.now();
     if (now - this.lastTrigger < 15000) return; // cooldown so one patrol can't refire every frame
     if (dist2(t.x, t.z, playerPos.x, playerPos.z) > 8) return;
+    // Authored road over player position: the fight must happen on walkable ground, not wherever the
+    // player happens to stand (water, steep shore, inside a house). The override location is snapped
+    // to dry, gentle terrain near the patrol before combat starts.
+    const at = this.snapEncounterGround(playerPos.x, playerPos.z, t.x, t.z);
+    if (!at) return;
     this.lastTrigger = now;
-    this.startEncounter('enc.habsburg-patrol', { x: playerPos.x, z: playerPos.z });
+    this.startEncounter('enc.habsburg-patrol', at);
   }
+
+  /** Snap a patrol-fight location to dry, walkable ground near the meeting point. Null = no safe
+   *  ground found, caller must not start the encounter. */
+  private snapEncounterGround(px: number, pz: number, fx: number, fz: number): { x: number; z: number } | null {
+    const w = this.worldService;
+    const ok = (x: number, z: number): boolean => !w.isWater(x, z) && w.slopeAt(x, z) <= 0.7;
+    if (ok(px, pz)) return { x: px, z: pz };
+    if (ok(fx, fz)) return { x: fx, z: fz };
+    for (const [ox, oz] of [[4, 0], [-4, 0], [0, 4], [0, -4], [8, 0], [-8, 0], [0, 8], [0, -8]] as [number, number][]) {
+      if (ok(px + ox, pz + oz)) return { x: px + ox, z: pz + oz };
+    }
+    return null;
+  }
+
+  /** Emit one ambient bark for the chosen NPC (seeded by entity id + hour so it is stable, not chatty). */
+  private fireBark(id: EntityId, npc: NpcC, hour: number): void {
+    if (!this.emitBark) return;
+    const line = pickBark(this.defIdOf.get(id) ?? npc.defId, npc, hour);
+    if (line) this.emitBark(line);
+  }
+}
+
+/** Ambient bark tuning: at most one line per interval, only within earshot, never from sleepers. */
+const BARK_INTERVAL = 45;
+const BARK_RADIUS = 25;
+
+/**
+ * Ambient one-liner tables (3.3): short period-register remarks keyed by what the NPC *is* (def id for a
+ * few named voices, archetype/faction/activity otherwise). Shown as HUD toasts, never modal dialogue;
+ * no quest state reads, no quest state writes — pure colour. Deterministic per (npc, hour): the same
+ * NPC at the same hour always says the same line, so barks are stable under freeze/re-entry.
+ */
+const BARK_TABLES: { match: (defId: string, npc: NpcC) => boolean; lines: string[] }[] = [
+  { match: (defId) => defId.startsWith('patrol.'), lines: ['"Papers? No — walk on, and keep your hands where I see them."', '"The Landvogt pays us to watch this road. So we watch."'] },
+  { match: (_d, npc) => npc.activity === 'guard', lines: ['"Nothing to report. That is the whole point of standing here."', '"Move along unless the Vogt\'s business is yours."'] },
+  { match: (_d, npc) => npc.activity === 'market', lines: ['"Tolls up again, they say. When are they not?"', '"Fine cheese today — if the toll-men leave any of it."'] },
+  { match: (_d, npc) => npc.activity === 'tavern', lines: ['"Sit a while. The road will still be there tomorrow."', '"They say Schwyz grazes where it pleases now. Drink to that, or don\'t."'] },
+  { match: (_d, npc) => npc.activity === 'church', lines: ['"Bei Sankt Verena, keep your voice down in here."', '"The hours keep whether the valley does or not."'] },
+  { match: (_d, npc) => npc.activity === 'work', lines: ['"Good grazing this year, God willing it stays that way."', '"Mind the mist up high — a man can walk off an edge he never saw."'] },
+];
+
+function pickBark(defId: string, npc: NpcC, hour: number): string | null {
+  for (const table of BARK_TABLES) {
+    if (!table.match(defId, npc)) continue;
+    const rng = new Rng(hashString(`${defId}:${Math.floor(hour)}`));
+    return table.lines[Math.floor(rng.next() * table.lines.length)];
+  }
+  return null;
 }
 
 /** True when a schedule actually sends its NPC to more than one distinct POI (Stauffacher/Fürst/Melchtal
@@ -560,19 +670,28 @@ function walkToward(
   dt: number,
   worldService: WorldService,
   handle?: CharacterHandle | null,
+  colliders?: Collider[],
 ): boolean {
   const dx = dest.x - t.x, dz = dest.z - t.z;
   const d = Math.hypot(dx, dz);
   if (d < ARRIVE_EPS) { t.y = worldService.heightAt(t.x, t.z); handle?.setSpeed(0); return true; }
   const step = Math.min(d, speed * dt);
   const nx = t.x + (dx / d) * step, nz = t.z + (dz / d) * step;
-  if (!worldService.isWater(nx, nz)) {
-    t.x = nx; t.z = nz;
-    t.yaw = Math.atan2(dx, -dz);
-    handle?.setSpeed(step / Math.max(dt, 1e-6));
+  // Player parity (player.ts MAX_SLOPE 40°): NPCs must not scale cliffs the player cannot climb,
+  // and must not walk through houses/walls the player collides with.
+  if (!worldService.isWater(nx, nz) && worldService.slopeAt(nx, nz) <= 0.7) {
+    const p = { x: nx, z: nz };
+    if (colliders) resolveCollisions(p, colliders, 0.4);
+    if (!worldService.isWater(p.x, p.z)) {
+      t.x = p.x; t.z = p.z;
+      t.yaw = Math.atan2(dx, -dz);
+      handle?.setSpeed(step / Math.max(dt, 1e-6));
+    } else {
+      handle?.setSpeed(0);
+    }
   } else {
     handle?.setSpeed(0);
-  } // else: stand at the shore rather than wade in — avoids walking into water per task spec
+  } // else: stand rather than wade in or climb — avoids water/cliff walking per task spec
   t.y = worldService.heightAt(t.x, t.z);
   return false;
 }

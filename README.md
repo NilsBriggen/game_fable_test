@@ -1,76 +1,35 @@
 # Eidgenossen
 
-A browser RPG set in the Old Swiss Confederacy, 1291–1315: free-roam exploration of the Vierwaldstättersee region
-(Uri, Schwyz, Unterwalden, the Habsburg towns) and turn-based party combat with halberds, pikes, crossbows and
-the Gewalthaufen. No magic, no monsters. Historical beats are played, not narrated: the Bundesbrief of 1291,
-Gessler's hat, the Hohle Gasse, the Marchenstreit, Morgarten.
+A single-player browser RPG set in the Old Swiss Confederacy, 1291–1315. Explore the Vierwaldstättersee region, meet its inhabitants and play a branching campaign through Morgarten, with turn-based party combat using mundane weapons, formations and morale. Historical events and founding legends are explicitly distinguished. No magic or default monster enemies.
 
-Three.js r170, TypeScript, Vite. No backend; saves in IndexedDB.
+Three.js r170, strict TypeScript, Vite 6, vanilla DOM UI. No backend; browser-local saves.
 
 ## Run
 
-```
-npm install
+```sh
+npm ci
 npm run dev          # http://127.0.0.1:5173
 npm run build        # typecheck + production bundle
-npm test             # vitest (rules, ECS, save, quest, content validation)
-node tools/harness/run.mjs --scenario altdorf-square-noon     # headless screenshot + draw calls + console errors
-node tools/harness/playthrough.mjs --pick first               # headless Act 1 playthrough with per-beat screenshots
+npm test
+node tools/check-imports.mjs
 ```
 
-The harness uses the bundled Chromium under software rendering in CI-like containers; frame times there are an
-upper bound, draw calls / triangles / errors are the hard numbers.
+WASD/arrows to move, Shift to sprint, left Alt/Control to walk, Space to jump, click the canvas for mouse-look, E to interact. See in-game menus for party, quests, inventory, map and saves.
 
-## Layout
+## Development and current state
 
-| Path | What |
-|---|---|
-| `ARCHITECTURE.md` | Module boundaries, data model, service interfaces, units, budgets, agent ownership |
-| `LORE.md` | Historical grounding: timeline, factions, regions, characters, quest spine; every entry marked historical / legend / invented |
-| `STATUS.json` | Per-module critic scores, fix rounds, open issues, escalations |
-| `tools/critic/` | Critic rubric and score sheets per wave |
-| `src/core` | ECS, RNG, clock, DSL, content registry, service interfaces (integrator-owned) |
-| `src/world` | Terrain from the real geography, sky, water, vegetation, model library |
-| `src/exploration` | Player, camera, POIs, NPCs and schedules, interaction |
-| `src/combat` | Turn-based rules engine, AI, encounter renderer |
-| `src/party` | Skills (learn by use), perks, items, equipment |
-| `src/quest` | Quests, dialogue, reputation, cutscenes |
-| `src/save` | IndexedDB persistence, migrations |
-| `src/ui` | DOM HUD and menus |
-| `src/content` | Data: gazetteer, regions, POIs, NPCs, items, abilities, encounters, quests, dialogues |
+Start with [AGENTS.md](AGENTS.md): implementation map, lifecycle, module boundaries, commands, testing/harness processes and concrete open findings. [ARCHITECTURE.md](ARCHITECTURE.md) records design decisions; [LORE.md](LORE.md) is the historical canon. [STATUS.json](STATUS.json) and [critic reports](tools/critic/README.md) contain dated evidence, not a blanket current pass certificate.
 
-## Assets and provenance
+The 2026-09-05 documentation audit passed 39 test files / 534 tests, production build and import gate. It did not rerun browser captures or assign visual scores. Existing reports and their limitations—including assisted story progression, outstanding live-service wiring issues and unverified hardware performance—are documented in AGENTS §10.
 
-Code and content are original. Every external art file is listed with its source URL, author, licence as found
-and committed size (the owner's rule: any source is fine, but everything is listed):
+```sh
+node tools/harness/run.mjs --scenario altdorf-square-noon --out tools/harness/out/local-altdorf
+npm run harness:build -- --scenario altdorf-square-noon --out tools/harness/out/local-preview
+node tools/harness/playthrough.mjs --pick first --out tools/harness/out/local-story
+```
 
-- `public/assets/CREDITS-models.md` — buildings and props (OpenGameArt Medieval Village MegaKit, KayKit)
-- `public/assets/CREDITS-world.md` — terrain textures, vegetation, sky (Poly Haven)
-- `public/assets/CREDITS-characters.md` — Mixamo character bodies and animation clips (Hugging Face mirrors
-  `GbotHQ/mixamo-characters`, `Leeoo/mixamo-rigs-clips`; Adobe Mixamo terms) and the Poly Haven maps of the
-  procedural fallback body
-- `tools/assets/*-manifest.json` — the machine-readable manifests; `node tools/assets/fetch.mjs`,
-  `fetch-world.mjs` and `fetch-characters.mjs` reproduce `public/assets` and rewrite the credits files
+The harness starts its own server and defaults to software-rendered Chromium. A numeric pass does not certify frame rate, screenshot quality or historical compliance.
 
-Asset tooling (no Blender, no native binaries — the bundled headless Chromium does the work):
+## Assets
 
-- `tools/assets/fbx2glb.mjs` — FBX (embedded textures) → GLB, textures downscaled, cm → m
-- `tools/assets/glbsheet.mjs` — renders a GLB, optionally driven by a Mixamo clip, to a PNG evidence sheet
-- `tools/harness/shrink.mjs`, `tools/harness/montage.mjs` — delivery JPEGs and side-by-side sheets from harness PNGs
-
-Invented names, places and plots (as opposed to attested history or founding legend) are registered in `LORE.md` §10.
-
-## Status
-
-See `STATUS.json` and `tools/critic/*.md`. Scores are critic-assigned against Skyrim (exploration), Baldur's Gate 3
-(combat) and Kingdom Come: Deliverance (tone), on harness evidence, pass bar 8/10.
-
-At the last check: `npx tsc --noEmit`, `node tools/check-imports.mjs` and the full `npx vitest run` (35 files,
-498 tests) are green and `npx vite build` produces the bundle. The Act 1 playthrough (Rütlischwur → Morgarten)
-completes end to end through `tools/harness/playthrough.mjs` with zero console errors. Draw calls and triangles
-sit inside the harness budgets on every capture, and the JS heap is 129 MB after GC at Altdorf now that villages are
-built on approach (it was ~875 MB of merged village geometry).
-
-Known gaps, in the order a player would notice them: men share one downloaded body (dyes, hair and stature vary
-it), the child, monk and mounted knight are still procedural, Habsburg livery is a red tint rather than
-red-white-red, and the world critic's last score was 6/10 with its fix list applied but not re-scored.
+Imported and procedural assets coexist. Sources, authors and licences are recorded in [model credits](public/assets/CREDITS-models.md), [world credits](public/assets/CREDITS-world.md) and [character credits](public/assets/CREDITS-characters.md), with reproducible manifests/tooling under `tools/assets/`. Preserve licence notices; not all assets are CC0.

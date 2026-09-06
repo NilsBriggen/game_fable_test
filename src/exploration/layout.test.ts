@@ -18,7 +18,8 @@ describe('generateLayout — model counts per kind', () => {
     expect(c['house.blockbau']).toBeLessThanOrEqual(14);
     expect(c['well']).toBe(1);
     expect((c['church'] ?? 0) + (c['chapel'] ?? 0)).toBe(1);
-    expect(c['cross']).toBe(1);
+    // Phase 2 B2: the village approach cross may be the shrine variant (seed-dependent).
+    expect((c['cross'] ?? 0) + (c['cross.shrine'] ?? 0)).toBe(1);
   });
 
   it('village population count scales the house count within [6,14]', () => {
@@ -68,16 +69,75 @@ describe('generateLayout — model counts per kind', () => {
     expect(c['cross']).toBe(1);
   });
 
-  it('bridge: a single bridge.stone at the given yaw', () => {
+  it('bridge: a bridge.stone + shrine-cross + signpost dressing (4.6, existing kit)', () => {
     const out = generateLayout({ id: 'poi.teufelsbruecke', kind: 'bridge', x: 0, z: 0, yaw: 1.2 }, FLAT_DRY);
-    expect(out).toHaveLength(1);
-    expect(out[0].modelId).toBe('bridge.stone');
+    const c = counts(out);
+    expect(c['bridge.stone']).toBe(1);
+    expect(c['cross.shrine']).toBe(1);
+    expect(c['signpost']).toBe(1);
+    const bridge = out.find((m) => m.modelId === 'bridge.stone')!;
+    expect(bridge.yaw).toBeCloseTo(1.2 + Math.PI / 2);
+  });
+
+  it('camp: fire + two tents + woodpile dressing (4.6, existing kit)', () => {
+    const out = generateLayout({ id: 'poi.testcamp', kind: 'camp', x: 0, z: 0 }, FLAT_DRY);
+    const c = counts(out);
+    expect(c['campfire']).toBe(1);
+    expect(c['tent']).toBe(2);
+    expect(c['woodpile']).toBe(1);
+  });
+
+  it('wall: 3 letzi segments + cross + signpost dressing (4.6, existing kit)', () => {
+    const out = generateLayout({ id: 'poi.testwall', kind: 'wall', x: 0, z: 0 }, FLAT_DRY);
+    const c = counts(out);
+    expect(c['letzi.wall']).toBe(3);
+    expect(c['cross']).toBe(1);
+    expect(c['signpost']).toBe(1);
+  });
+
+  it('ruin: wall + cart + 4 rocks dressing (4.6, existing kit)', () => {
+    const out = generateLayout({ id: 'poi.testruin', kind: 'ruin', x: 0, z: 0 }, FLAT_DRY);
+    const c = counts(out);
+    expect(c['castle.wall']).toBe(1);
+    expect(c['cart']).toBe(1);
+    expect(c['rock.small']).toBe(4);
+  });
+
+  it('mill/hut singles: anchor + woodpile + trough (4.6, existing kit)', () => {
+    const mill = counts(generateLayout({ id: 'poi.testmill', kind: 'mill', x: 0, z: 0 }, FLAT_DRY));
+    expect(mill['mill']).toBe(1);
+    expect(mill['woodpile']).toBe(1);
+    expect(mill['trough']).toBe(1);
+    const hut = counts(generateLayout({ id: 'poi.testhut', kind: 'hut', x: 0, z: 0 }, FLAT_DRY));
+    expect(hut['house.blockbau']).toBe(1);
+    expect(hut['woodpile']).toBe(1);
+    expect(hut['trough']).toBe(1);
+  });
+
+  it('cross/church/chapel singles: anchor + shrine-cross votive + fence (4.6, existing kit)', () => {
+    for (const [kind, anchor] of [['cross', 'cross'], ['church', 'church'], ['chapel', 'chapel']] as const) {
+      const c = counts(generateLayout({ id: `poi.test-${kind}`, kind, x: 0, z: 0 }, FLAT_DRY));
+      expect(c[anchor]).toBe(1);
+      expect(c['cross.shrine']).toBe(1);
+      expect(c['fence']).toBe(1);
+    }
+  });
+
+  it('4.6 dressing never places on water and never interpenetrates (half-water probe)', () => {
+    const halfWater: HeightProbe = { heightAt: () => 0, isWater: (_x, z) => z > 10 };
+    for (const kind of ['bridge', 'camp', 'wall', 'ruin', 'mill', 'hut', 'cross', 'church', 'chapel'] as const) {
+      const out = generateLayout({ id: `poi.dress-${kind}`, kind, x: 0, z: 0 }, halfWater);
+      expect(out.length).toBeGreaterThan(0);
+      for (const m of out) expect(m.z, `${kind}:${m.modelId}`).toBeLessThanOrEqual(10);
+    }
   });
 
   it('port: boats scaled by boatman+fisher population, plus a small quay building', () => {
     const c = counts(generateLayout({ id: 'poi.brunnen', kind: 'port', x: 0, z: 0, population: { boatman: 2, fisher: 2 } }, FLAT_DRY));
-    expect(c['boat']).toBe(5); // clamped to [2,5]
-    expect(c['house.blockbau']).toBe(1);
+    // Phase 2 B2: the last boat on a busy quay (≥3) is the decked cargo Nauen.
+    expect((c['boat'] ?? 0) + (c['boat.cargo'] ?? 0)).toBe(5); // clamped to [2,5]
+    expect(c['boat.cargo']).toBe(1);
+    expect((c['house.blockbau'] ?? 0) + (c['hut.fisher'] ?? 0)).toBe(1);
   });
 
   it('landmark/viewpoint/battlefield/meadow: no built layout', () => {

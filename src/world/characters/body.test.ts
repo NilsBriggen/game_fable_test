@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { SkinBuilder } from './skinBuilder';
-import { LOOKS, LOOK_VARIANTS, isUniform, lookFor, varyLook } from './looks';
+import { LOOKS, LOOK_VARIANTS, frameFor, isUniform, lookFor, varyLook } from './looks';
 import { TARGET, buildLookGeometry } from './body';
 import type { Bind } from './body';
 import { Quaternion } from 'three';
@@ -102,20 +102,46 @@ describe('character body budgets', () => {
     expect(bad, `${bad}/${count} finger normals point inward`).toBeLessThanOrEqual(count * 0.05);
   });
 
-  it('varies civilians in cloth, headwear and face but keeps a livery uniform', () => {
-    const cloths = new Set<number>(), heads = new Set<string>(), noses = new Set<number>();
+  it('varies civilians in cloth, headwear, face and frame but keeps a livery uniform', () => {
+    const cloths = new Set<number>(), heads = new Set<string>(), noses = new Set<number>(), frames = new Set<string>();
     for (let v = 0; v < LOOK_VARIANTS; v++) {
       const l = varyLook(lookFor('peasant'), v);
-      cloths.add(l.cloth); heads.add(l.head); noses.add(l.face.nose);
+      cloths.add(l.cloth); heads.add(l.head); noses.add(l.face.nose); frames.add(l.frame!);
     }
     expect(cloths.size).toBeGreaterThan(3);
     expect(heads.size).toBeGreaterThan(2);
     expect(noses.size).toBeGreaterThan(3);
+    expect(frames.size).toBeGreaterThan(2);   // lean / medium / sturdy silhouettes in one crowd
+    expect(frameFor(1)).toBe('lean');
+    expect(frameFor(3)).toBe('sturdy');
     const foot = lookFor('habsburg-footman');
     expect(isUniform(foot)).toBe(true);
     const liveries = new Set<number>();
     for (let v = 0; v < LOOK_VARIANTS; v++) liveries.add(varyLook(foot, v).cloth);
     expect(liveries.size).toBe(1);
+    // uniforms, women and children keep the medium frame
+    for (let v = 0; v < LOOK_VARIANTS; v++) {
+      expect(varyLook(foot, v).frame).toBe('medium');
+      expect(varyLook(lookFor('woman-peasant'), v).frame).toBe('medium');
+      expect(varyLook(lookFor('child'), v).frame).toBe('medium');
+    }
+  });
+
+  it('keeps every frame within the triangle budget and on its feet', () => {
+    for (const frame of ['lean', 'medium', 'sturdy', 'stout'] as const) {
+      const look = { ...varyLook(lookFor('peasant'), 0), frame };
+      for (const lod of [0, 1] as const) {
+        const g = buildLookGeometry(look, (n) => index.get(n) ?? 0, bind, false, lod);
+        const cap = lod === 0 ? 3500 : 900;
+        expect(g.triangles, `${frame} lod${lod}: ${g.triangles} tris`).toBeLessThanOrEqual(cap);
+        expect([g.cloth, g.hide, g.metal, g.mail].filter((x) => x !== null).length).toBeLessThanOrEqual(4);
+        const p = g.hide!.getAttribute('position');
+        let minY = Infinity, maxY = -Infinity;
+        for (let i = 0; i < p.count; i++) { minY = Math.min(minY, p.getY(i)); maxY = Math.max(maxY, p.getY(i)); }
+        expect(minY).toBeGreaterThan(-0.02);
+        expect(maxY).toBeGreaterThan(1.68);
+      }
+    }
   });
 
   it('dresses women and children differently from men', () => {

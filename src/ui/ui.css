@@ -8,8 +8,18 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 #ui .eid-passthrough { pointer-events: none; }
 #ui .eid-passthrough > * { pointer-events: auto; }
 
-/* the combat module's own debug overlay is superseded by our HUD; hidden here per BUILDER_RULES.md
-   (the integrator should remove src/combat/render.ts's installDebugOverlay() once this lands). */
+/* the combat module's own debug overlay is superseded by our HUD. It is opt-in only now
+   (CombatRenderer installs it solely for `?combatdebug=1`; no CSS hides it). A6 checked callers:
+   installDebugOverlay/updateDebugOverlay are live debug code, NOT dead — left in place. */
+
+/* keyboard focus: visible ring on every interactive control (A6 cheap look win) */
+.eid-btn:focus-visible, .cbt-ability-btn:focus-visible, .cbt-stance-btn:focus-visible,
+.eid-tab:focus-visible, .item-row:focus-visible, .creation-chip:focus-visible,
+.formation-opt:focus-visible, .equip-slot:focus-visible, .attr-btn:focus-visible,
+.save-slot:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
 
 :root {
   --parchment: #ece0c4;
@@ -258,7 +268,8 @@ button, input, select { font-family: inherit; }
 .cbt-ability-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .cbt-ability-btn .hk { position: absolute; top: 2px; left: 3px; font-size: 9px; color: var(--ink-soft); }
 .cbt-ability-tip { position: absolute; bottom: 56px; left: 50%; transform: translateX(-50%); width: 240px; padding: 8px 10px; font-size: 12px; display: none; }
-.cbt-ability-btn:hover .cbt-ability-tip, .cbt-ability-tip.show { display: block; }
+.cbt-ability-btn:hover .cbt-ability-tip, .cbt-ability-btn:focus-within .cbt-ability-tip, .cbt-ability-tip.show { display: block; }
+.cbt-ability-tip .kb-note { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
 .cbt-end-turn { position: absolute; bottom: 14px; right: 14px; }
 .cbt-flee { position: absolute; bottom: 14px; right: 190px; }
 
@@ -273,6 +284,14 @@ button, input, select { font-family: inherit; }
 .cbt-reaction-modal { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); width: 380px; padding: 16px 18px; z-index: 90; }
 .cbt-reaction-modal .q { font-size: 14px; margin-bottom: 12px; }
 .cbt-reaction-modal .row { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* 4.5 first-turn hint card: bottom-center above the ability bar (never overlapping the
+   top-left objectives panel or the top-center initiative strip). Capped height with scroll
+   so it can never extend past the viewport on short screens. */
+.cbt-hint-card { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); width: min(420px, 90vw); max-height: 46vh; overflow-y: auto; padding: 10px 14px; font-size: 12px; z-index: 60; }
+.cbt-hint-card .t { font-weight: bold; font-size: 13px; margin-bottom: 4px; }
+.cbt-hint-card .row { margin-bottom: 2px; line-height: 1.35; }
+.cbt-hint-card .eid-btn { margin-top: 8px; }
 
 .cbt-result { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(10,8,5,0.55); z-index: 95; }
 .cbt-result-panel { width: min(520px, 90vw); padding: 24px 28px; text-align: center; }
@@ -367,3 +386,63 @@ button, input, select { font-family: inherit; }
 .cbt-target-card { position: fixed; z-index: 45; min-width: 170px; font-size: 12px; pointer-events: none; }
 .gameover-root { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); z-index: 90; }
 .gameover-root .eid-panel { text-align: center; padding: 24px 32px; }
+
+/* 1280x720 overflow guards (A6): keep combat panels + the inventory modal inside a short
+   viewport without redesign — capped heights, internal scroll, narrower side rails. */
+@media (max-height: 760px) {
+  .cbt-log { height: 140px; width: 240px; top: 56px; right: 10px; }
+  .cbt-objectives { width: 220px; top: 56px; left: 10px; max-height: 40vh; overflow-y: auto; }
+  .cbt-unit-card { width: 240px; left: 10px; bottom: 10px; max-height: 52vh; overflow-y: auto; }
+  .cbt-abilities { bottom: 10px; }
+  .cbt-initiative { max-width: 60vw; overflow-x: auto; }
+  .cbt-result-panel { max-height: 88vh; overflow-y: auto; }
+  .inv-modal { max-height: 94vh; }
+  .inv-body { max-height: calc(94vh - 120px); }
+  .inv-body .menu-main, .inv-body .menu-side { max-height: calc(94vh - 140px); }
+}
+@media (max-width: 1300px) {
+  .cbt-log { width: 240px; }
+  .cbt-objectives { width: 220px; }
+  .cbt-unit-card { width: 240px; }
+  .hud-compass { width: min(480px, 44vw); }
+}
+
+/* ---------------- 4.1 UI motion: panel enter + painted portraits ---------------- */
+/* Enter animations are pure CSS `animation`, so they replay whenever a panel flips
+   from display:none to visible (or is freshly inserted) — no JS hook needed, which
+   keeps them working for the combat panels owned by combatUi.ts. Dialogue exit is
+   driven by dialogueUi.ts adding .dlg-anim-exit before hiding. */
+
+.dlg-letterbox { transition: height 0.18s ease; }
+
+.dlg-panel { transition: opacity 0.18s ease, transform 0.18s ease; }
+.dlg-panel.dlg-anim-enter, .dlg-panel.dlg-anim-exit { opacity: 0; transform: translateY(10px); }
+
+/* Painted portrait sits on top of the svg silhouette fallback; if the file 404s the
+   img removes itself (see dialogueUi.ts) and the silhouette shows through. */
+.dlg-portrait { position: relative; }
+.dlg-portrait-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+
+@keyframes eid-rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes eid-rise-in-x { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes eid-rise-in-c { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+@keyframes eid-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Plain panels (no centering transform to preserve). */
+.cbt-unit-card, .cbt-objectives, .cbt-log, .cbt-target-card, .cbt-end-turn, .cbt-flee { animation: eid-rise-in 0.18s ease; }
+/* Hint card is centered like the ability bar (translateX(-50%) must survive the animation). */
+.cbt-hint-card { animation: eid-rise-in-x 0.18s ease; }
+/* Horizontally centered panels (translateX(-50%) must survive the animation). */
+.cbt-deploy-banner, .cbt-initiative, .cbt-abilities { animation: eid-rise-in-x 0.18s ease; }
+/* Fully centered reaction modal. */
+.cbt-reaction-modal { animation: eid-rise-in-c 0.2s ease; }
+/* Result backdrop fades while the result card rises. */
+.cbt-result { animation: eid-fade-in 0.2s ease; }
+.cbt-result-panel { animation: eid-rise-in 0.2s ease; }
+
+/* prefers-reduced-motion kill-switch: disables every transition/animation added
+   above AND the pre-existing micro-transitions (buttons, bars, toasts, cutscene,
+   loader). JS exit paths use timeout fallbacks, so they still complete. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

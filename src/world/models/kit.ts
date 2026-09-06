@@ -325,7 +325,7 @@ export class Build {
 // ---------------- shared tones ----------------
 
 export const SHINGLE_TONE = 0x9c9488;
-export const SHINGLE_DARK = 0x6f6a60;
+export const SHINGLE_DARK = 0x625e55;
 export const LOG_TONE = 0x9c8156;
 export const PLANK_TONE = 0x8d7247;
 export const PLANK_DARK = 0x5d4a2e;

@@ -395,6 +395,8 @@ export interface SerializedCombat {
   turnIndex: number;
   order: EntityId[];
   rngState: number[];
+  /** 4.4: difficulty the encounter is tuned to (tolerant-optional: absent → 'normal', no migration). */
+  difficulty?: 'story' | 'normal' | 'hard';
   units: unknown[];
   features: unknown[];
   objectivesState: unknown;
@@ -445,6 +447,8 @@ export interface SaveFile {
   weather?: string;
   season?: string;
   thumbnailDataUrl?: string;
+  /** 4.4: difficulty the save was written under (tolerant-optional: absent → 'normal' on load, no migration). */
+  difficulty?: 'story' | 'normal' | 'hard';
 }
 
 export const SAVE_SCHEMA_VERSION = 1;

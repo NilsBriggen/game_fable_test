@@ -390,6 +390,50 @@ export function assertSaveShape(save: unknown): asserts save is SaveFile {
   if (typeof s.playerId !== 'number') throw new Error('Invalid save: missing numeric playerId');
   if (!Array.isArray(s.party)) throw new Error('Invalid save: party is not an array');
   if (!s.quests || typeof s.quests !== 'object') throw new Error('Invalid save: quests is not an object');
+  // Optional-shape checks (tolerant: absent optionals pass; present-but-malformed rejects).
+  if (s.discovered !== undefined && !Array.isArray(s.discovered)) throw new Error('Invalid save: discovered is not an array');
+  if (s.flags !== undefined && (typeof s.flags !== 'object' || s.flags === null || Array.isArray(s.flags))) {
+    throw new Error('Invalid save: flags is not an object');
+  }
+  if (s.journal !== undefined && !Array.isArray(s.journal)) throw new Error('Invalid save: journal is not an array');
+  if (
+    s.playtimeSec !== undefined &&
+    (typeof s.playtimeSec !== 'number' || !Number.isFinite(s.playtimeSec) || s.playtimeSec < 0)
+  ) {
+    throw new Error('Invalid save: playtimeSec must be a finite number >= 0');
+  }
+  // Current schema stores location as a display string; accept that, plus a coordinate
+  // object { x, z } or null for forward-tolerance — anything else is malformed.
+  if (s.location !== undefined && s.location !== null) {
+    const loc = s.location;
+    if (typeof loc === 'string') {
+      // ok: current SaveFile.location
+    } else if (typeof loc === 'object' && !Array.isArray(loc)) {
+      const o = loc as Record<string, unknown>;
+      if (typeof o.x !== 'number' || !Number.isFinite(o.x) || typeof o.z !== 'number' || !Number.isFinite(o.z)) {
+        throw new Error('Invalid save: location object must have finite x/z');
+      }
+    } else {
+      throw new Error('Invalid save: location must be a string, an object with finite x/z, or null');
+    }
+  }
+  if (s.weather !== undefined && typeof s.weather !== 'string') throw new Error('Invalid save: weather must be a string when present');
+  if (s.season !== undefined && typeof s.season !== 'string') throw new Error('Invalid save: season must be a string when present');
+  if (s.difficulty !== undefined && typeof s.difficulty !== 'string') {
+    throw new Error('Invalid save: difficulty must be a string when present');
+  }
+  if (s.thumbnailDataUrl !== undefined && typeof s.thumbnailDataUrl !== 'string') {
+    throw new Error('Invalid save: thumbnailDataUrl must be a string when present');
+  }
+  // SerializedCombat currently carries no `phase` field; require an object and only check
+  // `phase` when present so both current saves and future phased saves pass.
+  if (s.combat !== undefined && s.combat !== null) {
+    if (typeof s.combat !== 'object' || Array.isArray(s.combat)) throw new Error('Invalid save: combat is not an object');
+    const c = s.combat as Record<string, unknown>;
+    if (c.phase !== undefined && typeof c.phase !== 'string') {
+      throw new Error('Invalid save: combat.phase must be a string when present');
+    }
+  }
   for (const e of world.entities as unknown[]) {
     const ent = e as { id?: unknown; components?: unknown };
     if (!ent || typeof ent.id !== 'number' || !ent.components || typeof ent.components !== 'object') throw new Error('Invalid save: malformed entity');

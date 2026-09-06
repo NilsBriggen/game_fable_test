@@ -22,6 +22,13 @@ export interface Face {
   hairLen: number;  // 0 cropped … 1 chin-length bob
 }
 
+/** Procedural body frame (body.ts `buildLookGeometry`): torso/limb girth multipliers around the medium
+ *  build. Phase 2 B1 variety pass — the downloaded-crowd gap (one shared male civilian body) is closed
+ *  procedurally: Ely (14.8 k, sci-fi trooper) and Kachujin (12.6 k, anime outfit) were converted, rendered
+ *  with glbsheet and rejected as modern (see characters-manifest.json `notShipped`), so men differ by dye,
+ *  headgear AND frame instead of by downloaded body. */
+export type Frame = 'medium' | 'lean' | 'sturdy' | 'stout';
+
 export interface Look {
   cloth: number; trim: number; skin: number; hair: number;
   /** hem height in metres: 0.62 knee tunic, 0.10 long gown/habit */
@@ -43,6 +50,8 @@ export interface Look {
   offHand?: ShieldKind;
   mounted?: boolean;
   pouch?: boolean;
+  /** procedural body frame (B1 variety pass): torso/limb girth around the medium build */
+  frame?: Frame;
   face: Face;
 }
 
@@ -118,7 +127,11 @@ export function varyLook(look: Look, v: number): Look {
   const hair = grey ? (v % 2 ? HAIR_GREY : 0xb8b2a8) : HAIR_COLOURS[(v * 7 + 2) % HAIR_COLOURS.length];
   const beardVar: Beard[] = ['short', 'none', 'full', 'short', 'none', 'full'];
   const beard: Beard = look.female || look.child ? 'none' : grey ? 'grey' : (look.beard === 'none' || look.beard === undefined) ? (v % 3 === 2 ? 'short' : 'none') : beardVar[v];
-  if (isUniform(look)) return { ...look, skin, hair, beard, face };
+  // B1 variety pass: a seeded body frame per variant (lean / medium / sturdy / stout, children exempt —
+  // `look.scale` already sizes them and frameFor never emits stout for a child). Uniformed troops keep one
+  // livery AND one frame: a line of spearmen in different girths reads as a rabble, not a levy.
+  const frame: Frame = look.frame ?? (isUniform(look) || look.child || look.female ? 'medium' : frameFor(v));
+  if (isUniform(look)) return { ...look, skin, hair, beard, face, frame };
   const heads: HeadWear[] = look.female ? ['headcloth', 'headcloth', 'coif', 'headcloth', 'none', 'headcloth']
     : look.head === 'tonsure' ? ['tonsure', 'tonsure', 'tonsure', 'tonsure', 'tonsure', 'tonsure']
       : look.head === 'eisenhut' ? ['eisenhut', 'eisenhut', 'eisenhut', 'eisenhut', 'eisenhut', 'eisenhut']
@@ -131,8 +144,15 @@ export function varyLook(look: Look, v: number): Look {
     cloth: shade(look.cloth, k, warm),
     trim: shade(look.trim, k, warm),
     head: v === 0 ? look.head : heads[v],
-    beard, skin, hair, face,
+    beard, skin, hair, face, frame,
   };
+}
+
+/** Variant index → body frame: 1 lean, 2 medium, 1 sturdy, 1 stout across the six civilian variants,
+ *  so a crowd of one archetype is never one silhouette. Uniforms, women and children stay medium. */
+export function frameFor(v: number): Frame {
+  const frames: Frame[] = ['medium', 'lean', 'medium', 'sturdy', 'stout', 'medium'];
+  return frames[((v % frames.length) + frames.length) % frames.length];
 }
 
 /** Archetype → look, tolerating both `peasant` and `char.peasant`, plus the loose ids combat coins. */

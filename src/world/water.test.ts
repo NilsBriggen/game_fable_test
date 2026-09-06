@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { LAKES } from '@content/gazetteer';
-import { earClip, signedArea } from './water';
+import { earClip, signedArea, waterBodyMix, waterFresnelFactor, waterSunLobeFactor, waterSunSpecFactor } from './water';
 import { wobbleShore } from './geodata';
 import { pointInPolygon } from '@core/math';
 
@@ -87,5 +87,51 @@ describe('lake triangulation', () => {
         expect(pointInPolygon(cx, cz, poly)).toBe(true);
       }
     }
+  });
+});
+
+describe('water look factors (Wave 3 flat-cyan fix)', () => {
+  it('ramps the body mix deep->shallow monotonically', () => {
+    const depths = [0, 0.015, 0.05, 0.1, 0.2, 0.3, 0.5, 1];
+    let prev = -Infinity;
+    for (const d of depths) {
+      const m = waterBodyMix(d);
+      expect(m).toBeGreaterThanOrEqual(0);
+      expect(m).toBeLessThanOrEqual(1);
+      expect(m).toBeGreaterThanOrEqual(prev);
+      prev = m;
+    }
+    expect(waterBodyMix(0)).toBe(0);
+    expect(waterBodyMix(1)).toBe(1);
+  });
+
+  it('keeps the Fresnel factor in 0..1 and finite at grazing angles', () => {
+    for (const ndv of [0, 0.001, 0.05, 0.5, 0.999, 1, -1, 2, NaN, Infinity]) {
+      for (const depth of [0, 0.01, 0.02, 0.5, NaN]) {
+        const f = waterFresnelFactor(ndv, depth);
+        expect(Number.isFinite(f)).toBe(true);
+        expect(f).toBeGreaterThanOrEqual(0);
+        expect(f).toBeLessThanOrEqual(1);
+      }
+    }
+    // Grazing must reflect more sky than straight-down open water.
+    expect(waterFresnelFactor(0, 0.5)).toBeGreaterThan(waterFresnelFactor(1, 0.5));
+    // Foam suppresses the mirror but never goes negative or NaN.
+    expect(waterFresnelFactor(0, 0)).toBeLessThan(waterFresnelFactor(0, 0.5));
+  });
+
+  it('keeps the sun lobe and glitter factors in 0..1 with no NaN', () => {
+    for (const cosRH of [0, 0.25, 0.5, 0.9, 0.999, 1, -0.5, 2, NaN, Infinity, -Infinity]) {
+      for (const fn of [waterSunLobeFactor, waterSunSpecFactor]) {
+        const v = fn(cosRH);
+        expect(Number.isFinite(v)).toBe(true);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    }
+    expect(waterSunLobeFactor(1)).toBe(1);
+    expect(waterSunSpecFactor(1)).toBe(1);
+    expect(waterSunLobeFactor(0)).toBe(0);
+    expect(waterSunSpecFactor(0)).toBe(0);
   });
 });

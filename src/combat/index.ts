@@ -2,19 +2,31 @@
  * Combat module entry point. ARCHITECTURE.md §5.3, §4. Registers a full `CombatService`.
  */
 import type { GameContext } from '@core/context';
+import { isDifficulty } from '@core/context';
 import type { CombatService } from '@core/services';
 import { CombatEngineImpl, type CombatHost } from './engine';
 import { CombatRenderer, registerCombatModels } from './render';
 
 export async function register(ctx: GameContext): Promise<void> {
+  // Phase 2 A1.1/A1.2: quest service and combat RNG stream are captured lazily, not at registration.
+  // Combat registers before quest (main.ts boot order), and ctx.reseed() replaces the RngStreams
+  // container on every new game — so anything captured here would be undefined/stale. The engine reads
+  // both through these getters at encounter time instead.
+  // 4.4 difficulty wiring (minimal path): the same lazy-getter pattern feeds ctx.settings.difficulty
+  // into the combat host. The engine snapshots it once per start() (tolerant: unknown → 'normal'), so a
+  // mid-fight panel change never retunes the running encounter; mid-combat saves round-trip it via
+  // serialize()/restore(), and full saves record it in save metadata (src/save/snapshot.ts).
+  // Combat feel reads ctx.settings.reducedMotion tolerantly via optional access in render.ts — no
+  // engine plumbing needed for it (setting + panel control only, this task).
   const host: CombatHost = {
     world: ctx.world,
     content: ctx.content,
     // PartyService is a structural superset of PartyServiceLike (see engine.ts) — passed straight through.
     party: ctx.services.get('party'),
-    rng: ctx.rng.combat,
+    get rng() { return ctx.rng.combat; },
     worldService: ctx.services.tryGet('world'),
-    questService: ctx.services.tryGet('quest'),
+    get questService() { return ctx.services.tryGet('quest') as CombatHost['questService']; },
+    get difficulty() { return isDifficulty(ctx.settings.difficulty) ? ctx.settings.difficulty : 'normal'; },
     events: { emit: (event, ...args) => ctx.events.emit(event as never, ...(args as never[])) },
   };
   const engine = new CombatEngineImpl(host);
@@ -92,7 +104,15 @@ export async function register(ctx: GameContext): Promise<void> {
     cellToWorld: (cell) => engine.cellToWorld(cell),
     on: (event, cb) => engine.on(event, cb),
     serialize: () => engine.serialize(),
-    restore: (s) => engine.restore(s),
+    // Phase 2 A1.4: restore() turns the fill light on (same rig as start's wrapper) so a mid-combat
+    // save reloaded at night/rain renders legibly. The matching setCombatFill(false) happens when the
+    // fight actually ends — 'end' fires after restore+resume play out — via the listener below, so the
+    // light is not dropped while the restored fight is still being fought. (start()'s finally still
+    // covers the non-restored path.)
+    restore: async (s) => {
+      ctx.services.tryGet('world')?.setCombatFill(true);
+      await engine.restore(s);
+    },
     stepAi: () => engine.stepAi(),
     runScript: (cmds) => engine.runScript(cmds),
   };
@@ -106,6 +126,11 @@ export async function register(ctx: GameContext): Promise<void> {
   engine.on('state', () => frameCamera());
   // the engine keeps its last state after 'end' (the UI's result card reads it); the 3D grid, unit
   // figures and floating numbers must not linger into exploration
-  engine.on('end', () => renderer.clearAfterEnd());
+  engine.on('end', () => {
+    renderer.clearAfterEnd();
+    // matches the restore() path above: a restored mid-combat save turned the fill light on, and the
+    // fight is now over — drop it (start()'s own finally covers the non-restored path).
+    ctx.services.tryGet('world')?.setCombatFill(false);
+  });
   ctx.services.register('combat', service);
 }

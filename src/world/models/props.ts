@@ -10,7 +10,7 @@
 import { Group, Object3D } from 'three';
 import { Rng } from '@core/rng';
 import {
-  Build, DRY_TONE, IRON_TONE, LOG_TONE, PLANK_DARK, PLANK_TONE, SHINGLE_TONE, STONE_TONE, THATCH_TONE,
+  Build, DRY_TONE, IRON_TONE, LOG_TONE, MASONRY_TONE, PLANK_DARK, PLANK_TONE, SHINGLE_TONE, STONE_TONE, THATCH_TONE,
   TIMBER_DARK, WEIGHT_TONE, doorway, gableRoof, mixTone, pyramidRoof, type XYZ,
 } from './kit';
 
@@ -98,6 +98,172 @@ export function troughInto(b: Build, x: number, y: number, z: number, yaw = 0, l
 }
 
 // ---------------- standalone props ----------------
+
+/**
+ * Wayside cross, slimmer votive variant (Bildstock form): a taller post on a field-stone footing,
+ * a boarded shrine niche with a painted votive panel, and a steep little shingle gable over it.
+ * Only the shared batches (logs/planks/shingle/drystone/iron) — no new material.
+ */
+export function shrineCross(rng: Rng): Object3D {
+  const b = new Build();
+  // footing buried for downhill spawns; visible plinth of field stones
+  b.box('drystone', mixTone(DRY_TONE, 0x000000, 0.15), [0.7, 2.0, 0.7], [0, -1.0, 0]);
+  b.box('drystone', DRY_TONE, [0.7, 0.5, 0.7], [0, 0.25, 0]);
+  b.blob('drystone', mixTone(DRY_TONE, 0xffffff, 0.1), 0.3, [0.2, 0.55, 0.15], 4, 0.6, 5);
+  // post and cross-arm, slimmer than the cairn cross (0.13 vs 0.17)
+  b.box('logs', 0x6f5636, [0.13, 2.5, 0.13], [0, 1.7, 0]);
+  b.box('logs', 0x6f5636, [0.85, 0.12, 0.11], [0, 2.55, 0]);
+  // boarded shrine niche: back board, side cheeks, votive panel, iron crosslet on top
+  b.box('planks', 0x4d3c23, [0.5, 0.62, 0.06], [0, 2.05, -0.02]);
+  for (const s of [-1, 1]) b.box('planks', PLANK_DARK, [0.07, 0.62, 0.3], [s * 0.28, 2.05, 0.1]);
+  b.box('planks', mixTone(PLANK_TONE, 0xffffff, 0.2), [0.34, 0.44, 0.03], [0, 2.05, 0.05]);   // votive panel
+  b.box('iron', mixTone(IRON_TONE, 0x6a5a3a, 0.4), [0.03, 0.22, 0.03], [0, 2.28, 0.1]);
+  b.box('iron', mixTone(IRON_TONE, 0x6a5a3a, 0.4), [0.14, 0.03, 0.03], [0, 2.32, 0.1]);
+  // steep little shingle gable over the niche (slabs: no hidden faces, same batch as every roof)
+  for (const s of [-1, 1]) b.slab('shingle', SHINGLE_TONE, [0.4, 0.05, 0.5], [s * 0.1, 2.52, 0.1], [0, 0, -s * 0.7]);
+  void rng;
+  return b.emit('cross.shrine');
+}
+
+/**
+ * Hayrick variant: the tripod Heinzen (Dreibock) — three leaning poles lashed at the crown with
+ * the hay draped over them, for steep meadows where no long Histe fits. Shared logs/thatch only.
+ */
+export function hayTripod(rng: Rng): Object3D {
+  const b = new Build();
+  const h = 2.6;
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + rng.next() * 0.3;
+    const fx = Math.cos(a) * 0.85, fz = Math.sin(a) * 0.85;
+    // leaning pole: foot at (fx, 0, fz), crown near (0, h, 0)
+    const mx = fx / 2, mz = fz / 2, my = h / 2;
+    const tilt = Math.atan2(Math.hypot(fx, fz), h);
+    const inv = 1 / Math.hypot(fx, fz);
+    b.cyl('logs', 0x7d6540, 0.05, 0.07, Math.hypot(Math.hypot(fx, fz), h), [mx, my, mz],
+      [(fz * inv) * tilt, 0, -(fx * inv) * tilt], 6);
+    b.blob('drystone', DRY_TONE, 0.13, [fx, 0.05, fz], 50 + i, 0.5, 5);
+  }
+  b.cyl('iron', mixTone(IRON_TONE, 0x6b5638, 0.6), 0.03, 0.03, 0.22, [0, h - 0.05, 0], undefined, 5);  // lashing
+  // hay draped over the crown in three blobs + a cap
+  b.blob('thatch', THATCH_TONE, 0.55, [0, h - 0.55, 0], 7, 0.85, 6);
+  b.blob('thatch', mixTone(THATCH_TONE, 0x000000, 0.12), 0.42, [0.3, h - 0.9, 0.15], 8, 0.7, 6);
+  b.blob('thatch', mixTone(THATCH_TONE, 0xffffff, 0.08), 0.4, [-0.28, h - 0.85, -0.12], 9, 0.7, 6);
+  void rng;
+  return b.emit('hayrick.tripod');
+}
+
+/**
+ * Palisade gate: two gate posts with braced lintel + a plank leaf standing ajar, sized to close
+ * one 8 m palisade segment (fort.ts `palisade`). Logs/planks/iron/drystone only.
+ */
+export function palisadeGate(rng: Rng): Object3D {
+  const b = new Build();
+  const w = 3.2, h = 2.8;
+  for (const s of [-1, 1]) {
+    const x = s * (w / 2 + 0.15);
+    b.cyl('logs', 0x6f5636, 0.14, 0.17, h + 0.4, [x, (h + 0.4) / 2 - 0.4, 0], undefined, 7);
+    b.cyl('logs', 0x7d6540, 0.02, 0.14, 0.34, [x, h + 0.17, 0], undefined, 7);   // sharpened cap
+    b.box('drystone', DRY_TONE, [0.5, 0.35, 0.5], [x, 0.12, 0]);                  // stone shoe at grade
+    b.box('logs', mixTone(0x8a7048, 0x000000, 0.25), [0.14, 1.6, 0.14], [x, 0.8, 0.75], [0.7, 0, 0]);  // shore
+  }
+  // buried footing strip so the gate never shows daylight on a slope
+  b.box('drystone', mixTone(DRY_TONE, 0x000000, 0.25), [w + 0.8, 2.0, 0.5], [0, -1.0, 0]);
+  // lintel with braces + iron strap hinges on the leaf side
+  b.box('logs', TIMBER_DARK, [w + 0.7, 0.18, 0.18], [0, h - 0.15, 0]);
+  for (const s of [-1, 1]) b.box('logs', TIMBER_DARK, [0.85, 0.12, 0.12], [s * (w / 2 - 0.3), h - 0.55, 0], [0, 0, s * 0.6]);
+  // plank leaf, ajar ~25°, boards + ledges + diagonal brace
+  const yaw = 0.45;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const at = (dx: number, dy: number, dz: number): XYZ => [dx * c - dz * s, dy, dx * s + dz * c];
+  const boards = 7;
+  for (let i = 0; i < boards; i++) {
+    const dx = -w / 2 + ((i + 0.5) / boards) * w;
+    b.box('planks', i % 2 ? 0x5a4629 : 0x4d3c23, [w / boards - 0.025, h - 0.5, 0.06], at(dx, (h - 0.5) / 2 + 0.1, 0), [0, yaw, 0]);
+  }
+  for (const yy of [0.55, h - 0.85]) b.box('planks', TIMBER_DARK, [w - 0.1, 0.14, 0.05], at(0, yy, 0.06), [0, yaw, 0]);
+  b.box('planks', TIMBER_DARK, [w - 0.2, 0.12, 0.05], at(0, (h - 0.3) / 2, 0.06), [0, yaw, 0.7]);
+  for (const yy of [0.55, h - 0.85]) b.box('iron', IRON_TONE, [0.3, 0.06, 0.03], at(-w / 2 + 0.1, yy, 0.1), [0, yaw, 0]);
+  void rng;
+  return b.emit('palisade.gate');
+}
+
+/**
+ * Fisher's hut variant: a one-room Blockbau hut (small) with a thatched catslide roof, a plank
+ * door, a shuttered window and a fish-drying rack beside it. Reuses kit.ts sub-assemblies only.
+ */
+export function fisherHut(rng: Rng): Object3D {
+  const b = new Build();
+  const w = 3.6, d = 4.2, wallH = 2.1, ridge = 1.3, plinth = 0.35;
+  const logTone = [LOG_TONE, 0x8c7350][Math.floor(rng.next() * 2)];
+  b.box('drystone', DRY_TONE, [w + 0.4, plinth, d + 0.4], [0, plinth / 2, 0]);
+  b.box('drystone', mixTone(DRY_TONE, 0x000000, 0.2), [w, 2.0, d], [0, -1.0, 0]);   // buried footing
+  // log walls: 8 courses, alternating overlap at the corners (same convention as kit.ts logWalls)
+  const courses = 8, ch = wallH / courses, r = ch * 0.56, ext = 0.22;
+  for (let i = 0; i < courses; i++) {
+    const tone = i % 2 === 0 ? logTone : mixTone(logTone, 0x6f5a3a, 0.4);
+    for (const s of [-1, 1]) b.cyl('logs', tone, r, r * 0.96, w + ext * 2, [0, plinth + ch * (i + 0.5), s * (d / 2 - r * 0.4)], [0, 0, Math.PI / 2], 6);
+  }
+  b.box('planks', 0x3d3020, [w - 0.14, wallH, d - 0.14], [0, plinth + wallH / 2, 0]);  // chinked interior plane
+  // door in the +z gable, one shuttered window in the -z gable
+  doorway(b, 0, plinth, d / 2 + 0.1, 0.9, 1.7, 'z');
+  for (const s of [-1, 1]) b.box('planks', 0x6b5638, [0.28, 1.0, 0.05], [s * 0.5, plinth + 1.25, -d / 2 - 0.06]);
+  b.box('planks', 0x14110c, [0.72, 0.85, 0.1], [0, plinth + 1.25, -d / 2 - 0.08]);
+  gableRoof(b, w, d, ridge, plinth + wallH, { mat: 'thatch', overhang: 0.6, weights: false, purlins: true, barge: false });
+  // fish-drying rack: two posts, a crossbar, hanging lines with split fish (cloth-toned blobs)
+  const rx = w / 2 + 1.1;
+  for (const s of [-1, 1]) {
+    b.cyl('logs', 0x7d6540, 0.06, 0.08, 1.9, [rx, 0.95, s * 0.9], undefined, 6);
+    b.blob('drystone', DRY_TONE, 0.14, [rx, 0.05, s * 0.9], 70 + (s > 0 ? 1 : 0), 0.5, 5);
+  }
+  b.cyl('logs', 0x6f5636, 0.045, 0.045, 1.9, [rx, 1.82, 0], [Math.PI / 2, 0, 0], 5);
+  for (let i = 0; i < 4; i++) {
+    const z = -0.7 + i * 0.45;
+    b.cyl('iron', mixTone(IRON_TONE, 0x6b5638, 0.6), 0.008, 0.008, 0.35, [rx, 1.62, z], undefined, 4);
+    b.box('planks', mixTone(PLANK_TONE, 0xffffff, 0.25), [0.06, 0.3, 0.12], [rx, 1.4, z]);
+  }
+  void rng;
+  return b.emit('hut.fisher');
+}
+
+/**
+ * Nauen (lake cargo boat): a broader, decked sibling of the Weidling `boat` — same strake-built
+ * hull grammar (planks/iron/logs only), wider beam, a small foredeck and a stern steering oar.
+ * Origin at the waterline like `boat` (layout floats both on the lake), not on the ground.
+ */
+export function cargoBoat(rng: Rng): Object3D {
+  const len = 9.5, w = 3.0;
+  const b = new Build();
+  const strakes = 4;
+  for (let s = 0; s < strakes; s++) {
+    const y = 0.16 + s * 0.2;
+    const t = s / strakes;
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 8; i++) {
+        const u = (i + 0.5) / 8;
+        const x = -len / 2 + u * len;
+        const taper = 1 - Math.pow(Math.abs(u - 0.5) * 2, 2.0) * 0.82;
+        const z = side * (w / 2) * taper * (0.78 + t * 0.26);
+        const nz = side * (w / 2) * (1 - Math.pow(Math.abs((i + 1.5) / 8 - 0.5) * 2, 2.0) * 0.82) * (0.78 + t * 0.26);
+        const sheer = Math.pow(Math.abs(u - 0.5) * 2, 2.2) * 0.35;
+        b.box('planks', s % 2 ? 0x7a6440 : PLANK_TONE, [len / 8 + 0.06, 0.23, 0.1], [x, y + sheer, (z + nz) / 2],
+          [0, Math.atan2(nz - z, len / 8), 0]);
+      }
+    }
+  }
+  b.box('planks', 0x6a5535, [len * 0.88, 0.1, w * 0.66], [0, 0.12, 0]);              // bottom
+  b.box('planks', PLANK_DARK, [len * 0.3, 0.09, w * 0.7], [-len * 0.28, 0.78, 0]);   // foredeck
+  for (let i = 0; i < 2; i++) b.box('planks', PLANK_DARK, [0.5, 0.09, w * 0.82], [(i - 0.5) * 2.2 + 0.6, 0.72, 0]);  // thwarts
+  // gunwale capping + stem/stern posts
+  for (const side of [-1, 1]) b.box('logs', TIMBER_DARK, [len * 0.94, 0.09, 0.12], [0, 1.02, side * w * 0.42]);
+  for (const e of [-1, 1]) b.box('planks', PLANK_DARK, [0.5, 0.55, 0.14], [e * (len / 2 - 0.2), 0.55, 0]);
+  // cargo: two covered loads under a cloth tilt + steering oar at the stern
+  b.box('planks', 0x7a6240, [1.6, 0.5, 1.2], [0.4, 0.5, 0]);
+  b.box('cloth', 0x9a8f74, [1.8, 0.28, 1.4], [0.4, 0.85, 0]);
+  b.cyl('logs', 0x7d6540, 0.045, 0.045, 3.2, [-len / 2 + 0.4, 1.1, -0.6], [0.5, 0, 1.1], 6);   // steering oar
+  b.cyl('logs', 0x7d6540, 0.05, 0.05, 3.4, [1.4, 0.95, 0.5], [0.2, 0.3, 1.45], 6);     // punt pole
+  void rng;
+  return b.emit('boat.cargo');
+}
 
 export function crossModel(rng: Rng): Object3D {
   const b = new Build();

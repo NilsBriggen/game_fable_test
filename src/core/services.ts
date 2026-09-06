@@ -16,13 +16,15 @@ export type Weather = 'clear' | 'overcast' | 'rain' | 'snow' | 'fog';
 export interface TransformLike { x: number; y: number; z: number; yaw?: number; scale?: number }
 export interface InstanceHandle { id: number; dispose(): void; setVisible(v: boolean): void }
 
-export type CharacterAnim = 'idle' | 'walk' | 'run' | 'attack' | 'hit' | 'down' | 'dead' | 'brace' | 'shoot' | 'reload' | 'talk' | 'cheer' | 'flee';
+export type CharacterAnim = 'idle' | 'walk' | 'run' | 'attack' | 'hit' | 'down' | 'dead' | 'brace' | 'shoot' | 'reload' | 'talk' | 'cheer' | 'flee' | 'sit' | 'work' | 'limp';
 export interface CharacterHandle {
   object: Object3D;
   /** crossfade to an animation; loop for idle/walk/run, one-shot otherwise (resolves when finished) */
   play(anim: CharacterAnim, opts?: { loop?: boolean; speed?: number; fade?: number }): Promise<void>;
   /** drive the walk cycle from actual velocity (m/s); 0 = idle */
   setSpeed(mps: number): void;
+  /** the animation currently held (locomotion or last one-shot) — lets owners avoid restarting a loop */
+  currentAnimName(): CharacterAnim;
   update(dt: number): void;
   setVisible(v: boolean): void;
   /** true if a rigged asset is used (false = procedural fallback) */
@@ -55,8 +57,10 @@ export interface WorldService {
   spawnModel(modelId: string, opts?: { variant?: string; scale?: number; /** stable per-entity look (character variants) */ seed?: number }): Object3D;
   /**
    * Animated character from the asset library (rigged GLB when available, procedural fallback otherwise).
-   * Callers own the returned object; call `update(dt)` each frame and `dispose()` when done.
-   * Optional until the character-art pipeline lands; consumers fall back to `spawnModel('char.<archetype>')`.
+   * Callers own the returned object; call `dispose()` when done. Per-frame animation is driven by the
+   * world's own ticker (updateCharacters) — callers must NOT call `update(dt)` themselves (double-tick
+   * would run the mixer twice and double the mounted straddle offset). Optional until the
+   * character-art pipeline lands; consumers fall back to `spawnModel('char.<archetype>')`.
    */
   spawnCharacter?(archetype: string, opts?: { variant?: string; mounted?: boolean; seed?: number }): CharacterHandle;
   /** other modules register their own procedural model factories (e.g. exploration registers 'char.*') */
@@ -68,10 +72,12 @@ export interface WorldService {
   getScene(): Scene;
   getCamera(): PerspectiveCamera;
   /** debug/harness: chunk counts */
-  stats(): { chunksLoaded: number; chunksPending: number; instances: number };
+  stats(): { chunksLoaded: number; chunksPending: number; instances: number; retainedMb: number; degraded: boolean };
   worldToMapUv(x: number, z: number): [number, number];
   /** 512×512 top-down map image (data url) for the UI map; cached */
   mapImage(): Promise<string>;
+  /** drop the cached map image so the next mapImage() re-bakes (4.6 fog reveal on discovery) */
+  invalidateMapCache?(): void;
 }
 
 export interface CameraRig {
@@ -79,8 +85,10 @@ export interface CameraRig {
   setMode(mode: 'follow' | 'free' | 'combat' | 'cutscene'): void;
   getMode(): string;
   setFree(pos: [number, number, number], lookAt: [number, number, number]): void;
-  /** combat: orbit around a point */
-  focus(x: number, y: number, z: number, opts?: { distance?: number; pitch?: number; yaw?: number; instant?: boolean }): void;
+  /** combat: orbit around a point. duration>0 tweens to the focus (ease-out cubic default); shake adds capped trauma decay. */
+  focus(x: number, y: number, z: number, opts?: { distance?: number; pitch?: number; yaw?: number; instant?: boolean; duration?: number; ease?: (t: number) => number }): void;
+  /** trauma-style hit shake, 0..1 added, decays in update(); no-op safe headless. */
+  shake(amount: number): void;
   update(dt: number): void;
 }
 
@@ -346,7 +354,7 @@ export interface PartyService {
 // ---------------- Quest ----------------
 
 export interface JournalEntry { time: number; questId?: string; text: string }
-export interface DialogueOutcome { ended: boolean; lastNode: string; effectsRun: number }
+export interface DialogueOutcome { ended: boolean; cancelled: boolean; lastNode: string; effectsRun: number }
 
 export interface QuestEvents extends Record<string, unknown[]> {
   'quest-started': [questId: string];
@@ -387,6 +395,9 @@ export interface QuestService {
   activeQuests(): { id: string; title: string; stage: string; objective: string; marker?: { x: number; z: number } }[];
   chapter(): string;
   setChapter(chapter: string): Promise<void>;
+  /** Phase 2 A1.3: clear all per-playthrough quest state (machine, flags, reputation, journal) for a
+   *  same-page new game. Called via the 'new-game' event before setChapter/start. */
+  resetForNewGame(): void;
   /** persistence */
   serialize(): Pick<import('./schemas').SaveFile, 'quests' | 'reputation' | 'flags' | 'journal' | 'chapter'>;
   restore(s: Pick<import('./schemas').SaveFile, 'quests' | 'reputation' | 'flags' | 'journal' | 'chapter'>): void;
@@ -413,6 +424,9 @@ export interface DialogueNodeView {
   speakerPortrait?: string;
   text: string;
   choices: { text: string; enabled: boolean; hint?: string; checkOdds?: number }[];
+  /** Pre-generated voice line id (§1.7): string-catalog id (`dlg.<root>.node.<node>` or `cs.<id>.shot.<n>.caption`).
+   *  The UI plays `assets/voices/<locale>/<slug(voiceId)>.opus` and stops it on hide/pick; unset = silent. */
+  voiceId?: string;
 }
 
 export interface HudState {
@@ -432,9 +446,20 @@ export interface UiService {
   openMenu(menu: MenuId, data?: unknown): void;
   closeMenu(): void;
   currentMenu(): MenuId | null;
-  dialogue: { show(node: DialogueNodeView): Promise<number>; hide(): void };
+  dialogue: { show(node: DialogueNodeView): Promise<number>; hide(): void; wasDismissed?(): boolean };
   combat: { show(state: CombatStateView): void; update(state: CombatStateView): void; hide(): void; onCommand(cb: (cmd: CombatCommand) => void): void };
   cutscene: { letterbox(on: boolean): void; caption(text: string, seconds: number): Promise<void>; fade(to: 'black' | 'clear', ms: number): Promise<void>; title(text: string, sub?: string, seconds?: number): Promise<void> };
+  /** the audio engine (src/ui/audio.ts) — present in production, absent in headless fakes.
+   *  Procedural SFX/music bus always available; file upgrades (voices §1.7, Flow music §2.2) are
+   *  optional and fall back silently (missing file / disabled / no-WebAudio = text/procedural remains). */
+  audio?: {
+    playMusic(id: string): void; stopMusic(): void; currentMusic(): string | null;
+    playMusicTrack(bed: string): Promise<boolean>; currentTrack(): string | null;
+    playVoice(locale: string, slug: string): void; stopVoice(): void; voicePlaying(): boolean;
+    setVoicesEnabled(on: boolean): void; barkBlip(): void; playStinger(name: string): void;
+    setAmbience(id: string): void; fanfare(): void; lament(): void;
+    clash(): void; twang(): void; step(): void; splash(): void; hit(): void; click(): void;
+  };
   prompt(text: string | null): void;
   loading(on: boolean, text?: string): void;
   /** quick confirm dialog */

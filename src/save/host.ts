@@ -9,6 +9,7 @@ import type { RngStreams } from '@core/rng';
 import type { GameClock } from '@core/clock';
 import type { EventBus, GameEvents } from '@core/events';
 import type { ServiceRegistry } from '@core/services';
+import type { Settings } from '@core/context';
 
 /** Just enough of `Graphics` to grab a thumbnail; keeps this module decoupled from three.js. */
 export interface GfxLike {
@@ -29,6 +30,10 @@ export interface SaveHost {
   playtimeSec: number;
   reseed(seed: number): void;
   resetWorld(): void;
+  /** live player settings; save/load reads (snapshot) and writes (difficulty restore) through it */
+  settings?: Settings;
+  /** persists settings when present (GameContext.applySettings covers this live; tests may omit) */
+  applySettings?(patch: Partial<Settings>): void;
   /** absent in headless/test hosts; thumbnail capture is skipped when missing */
   gfx?: GfxLike;
 }

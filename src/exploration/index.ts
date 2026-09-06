@@ -52,7 +52,7 @@ class ExplorationServiceImpl implements ExplorationService {
       const t = ctx.world.get(id, Transform);
       return t ? { x: t.x, y: t.y, z: t.z, yaw: t.yaw } : null;
     });
-    this.controller = new PlayerController(ctx.canvas, this.cameraRig);
+    this.controller = new PlayerController(ctx.canvas, this.cameraRig, () => ctx.settings.invertY);
     this.poiSystem = new PoiSystem(ctx.world, ctx.content, ctx.services, this.bus);
     this.interactSystem = new InteractSystem(ctx.world, ctx.content, ctx.services, this.bus);
     this.npcSystem = new NpcSystem(ctx.world, ctx.content, ctx.services.get('party'), world, roots.dynamic, (encId, at) => {
@@ -62,6 +62,14 @@ class ExplorationServiceImpl implements ExplorationService {
       const base = ctx.content.encounters.get(encId);
       const encounterOverride = base ? { ...base, location: { x: at.x, z: at.z, yaw: 0 } } : undefined;
       ctx.services.tryGet('combat')?.start(encId, { encounterOverride }).catch((err) => console.error('[exploration] patrol combat.start failed', err));
+    });
+    // Ambient barks ride the HUD toast lane (one line per interval, never modal) — same lane the quest
+    // module uses for reputation notices, so exactly one toast producer owns the visual style.
+    // The bark earcon (§2.2 SFX tail) plays under the toast; NpcSystem already rate-limits to one
+    // bark per BARK_INTERVAL, so no extra throttle is needed here.
+    this.npcSystem.setBarkSink((msg) => {
+      ctx.services.tryGet('ui')?.toast(msg, 'info');
+      try { (ctx.services.tryGet('ui') as unknown as { audio?: { barkBlip(): void } } | undefined)?.audio?.barkBlip(); } catch { /* audio must never break exploration */ }
     });
 
     ctx.events.on('state-changed', (from, to) => {
@@ -274,6 +282,7 @@ class ExplorationServiceImpl implements ExplorationService {
     const t = playerId !== null ? this.ctx.world.get(playerId, Transform) : undefined;
     const hour = this.ctx.clock.hour;
     this.npcSystem.setHostileHabsburg(this.ctx.services.tryGet('quest')?.isHostile('habsburg') ?? false);
+    this.npcSystem.gameState = this.ctx.state.state;
     this.npcSystem.update(dt, t ? { x: t.x, z: t.z } : null, hour);
     this.poiSystem.update(t ?? null);
 

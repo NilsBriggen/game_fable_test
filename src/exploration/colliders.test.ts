@@ -6,12 +6,14 @@ describe('buildColliders', () => {
   it('produces one collider per solid model, skipping walk-through props', () => {
     const layout: PlacedModel[] = [
       { modelId: 'house.blockbau', x: 10, z: 0 },
-      { modelId: 'fence', x: 0, z: 0 },
+      { modelId: 'tent', x: 0, z: 0 },
+      { modelId: 'fence', x: 2, z: 0 },
       { modelId: 'bridge.wood', x: 5, z: 5 },
       { modelId: 'castle.keep', x: -10, z: 0 },
     ];
     const colliders = buildColliders(layout);
-    expect(colliders).toHaveLength(2);
+    // blockbau + keep + newly-solid tent/fence; the walkable bridge stays out
+    expect(colliders).toHaveLength(4);
     expect(colliders.find((c) => c.x === 10)?.radius).toBeGreaterThan(0);
   });
 });

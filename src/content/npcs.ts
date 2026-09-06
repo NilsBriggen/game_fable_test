@@ -166,6 +166,8 @@ const historicalCast: NpcDef[] = [
     skills: { sword: 25, leadership: 20, trade: 20 },
     equipment: { mainHand: 'item.schwert', body: 'item.mail-shirt', head: 'item.eisenhut' },
     modelId: 'char.habsburg-sergeant', dialogueRoot: 'dlg.beringer-von-landenberg',
+    // §3.8 painted portrait (AI-painted candidate, fallback silhouette when the file is absent).
+    portrait: 'candidate-bearded-man',
     chapters: ['ch1-1307'],
     schedule: [
       { hour: 8, poi: 'poi.landenberg', activity: 'work' },
@@ -281,6 +283,8 @@ const inventedCore: NpcDef[] = [
     skills: { herbalism: 40, dagger: 20, speech: 15 },
     equipment: { mainHand: 'item.schweizerdolch' },
     modelId: 'char.woman-peasant', dialogueRoot: 'dlg.mechthild-schorno',
+    // §3.8 painted portrait (AI-painted candidate, fallback silhouette when the file is absent).
+    portrait: 'candidate-woman',
     chapters: ALL_CHAPTERS,
     schedule: [
       { hour: 6, poi: 'poi.steinen', activity: 'work' },

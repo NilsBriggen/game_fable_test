@@ -19,10 +19,12 @@ import type {
 import { Character, Name, Renderable } from '@core/components';
 import { EventBus, type Unsubscribe } from '@core/events';
 import { Rng, rollDice } from '@core/rng';
+import type { Difficulty } from '@core/context';
+import { isDifficulty } from '@core/context';
 import { modifier } from '@core/math';
 import { buildGrid, cellDistance, cellIndex, cellToWorldXZ, inBounds, GridInfo } from './rules/grid';
 import { dijkstra, reachableCells, reconstructPath, pathCost, Occupant } from './rules/path';
-import { rollAttack, estimateHitChance, AttackInputs } from './rules/attack';
+import { rollAttack, estimateHitChance, damageScaleFor, moraleDcShiftFor, AttackInputs } from './rules/attack';
 import { moraleCheck, moraleDc } from './rules/morale';
 import { formationBonus, isFlanked, FormationUnit } from './rules/formation';
 import { addStatus, hasStatus, isPolearm, removeStatus, type PendingReactionItem, type Unit, type WeaponInfo } from './types';
@@ -45,13 +47,19 @@ export interface CombatHost {
   world: World;
   content: ContentRegistry;
   party: PartyServiceLike;
-  rng: Rng;
+  /** Live combat RNG stream — read per encounter, never cached, since reseed() replaces the container. */
+  readonly rng: Rng;
   worldService?: WorldService;
   events?: { emit(event: string, ...args: unknown[]): void };
   // Cross-module request (requests/quest-2.md §2, LORE §6 step 11): read-only access to the quest module's
   // global flags, e.g. `hunenberg-warning`. Structural (not the full `QuestService`) so combat doesn't need
-  // to know about quests beyond this one read.
-  questService?: { getFlag(k: string): unknown };
+  // to know about quests beyond this one read. Looked up lazily (see index.ts): available at encounter
+  // time even though combat registers before quest.
+  readonly questService?: { getFlag(k: string): unknown };
+  // 4.4 difficulty: read lazily per encounter (see index.ts — same staleness reason as rng/questService
+  // above). The engine snapshots it at `start()` into `this.difficulty` so a mid-fight settings change
+  // does not retune an already-running encounter; `serialize()` round-trips it for mid-combat saves.
+  readonly difficulty?: Difficulty;
 }
 
 const DOCTRINE_BY_ARCHETYPE: Record<string, string> = {
@@ -109,6 +117,11 @@ export class CombatEngineImpl implements CombatService {
   private stalemateRounds = 0;
   /** issue 8: at most one morale check per unit per *reason* per round (reset each `startRound`). */
   private moraleCheckedThisRound = new Map<EntityId, Set<string>>();
+  // 4.4 difficulty, snapshotted at start() from the host's lazy getter (never the host object itself:
+  // the getter reads live ctx.settings; the snapshot freezes the encounter's tuning). Exposed read-only
+  // for ai.ts (discipline knobs) and the unit tests; the CombatService surface intentionally does not
+  // carry it (core-owned interface).
+  difficulty: Difficulty = 'normal';
 
   constructor(private host: CombatHost) {}
 
@@ -163,6 +176,9 @@ export class CombatEngineImpl implements CombatService {
     }
     this.resetState();
     this.enc = enc;
+    // 4.4: snapshot difficulty from the host's lazy getter (unknown → 'normal', never crash). A
+    // mid-fight settings change must not retune the running encounter; restore() carries it instead.
+    this.difficulty = isDifficulty(this.host.difficulty) ? this.host.difficulty : 'normal';
     // issue: `enc.ambush` (schema field) was ignored — an explicit opts.ambush still wins, but the encounter's
     // own authored ambush now applies when the caller doesn't override it.
     this.ambush = opts?.ambush ?? enc.ambush;
@@ -225,6 +241,7 @@ export class CombatEngineImpl implements CombatService {
     this.resultResolve = null; this.forceAiAll = false; this.reactionQueue = [];
     this.scriptedRoundFired.clear(); this.ended = false; this.outcome = null;
     this.stalemateFingerprint = ''; this.stalemateRounds = 0; this.moraleCheckedThisRound.clear();
+    this.difficulty = 'normal';
   }
 
   isActive(): boolean {
@@ -1576,6 +1593,17 @@ export class CombatEngineImpl implements CombatService {
     };
     const roll = rollAttack(inputs, this.host.rng);
     if (roll.fumble) addStatus(attacker, 'fumbled', 1); // issue 8: Burden on the next attack
+    // 4.4: difficulty scales ENEMY-originated damage only (Story ×0.75, Hard ×1.25; Normal identity).
+    // Applied deterministically after the roll consumes its RNG — no re-rolls, no extra draws, so the
+    // stream is identical on every mode. Rounds like soak math does (floor), never below 0.
+    if (roll.hit && roll.damage > 0) {
+      const scaled = Math.max(0, Math.floor(roll.damage * damageScaleFor(this.difficulty, attacker.side)));
+      if (scaled !== roll.damage) {
+        const before = roll.damage;
+        roll.damage = scaled;
+        roll.breakdown.push(`difficulty (${this.difficulty}): ${before} → ${scaled}`);
+      }
+    }
 
     // The rest of attack resolution (log, damage, effects, charge follow-up) is deferred behind Shield Block
     // below when the defender is a human waiting to be asked — everything from here on reads `roll.damage`,
@@ -1692,9 +1720,13 @@ export class CombatEngineImpl implements CombatService {
 
   private rollMorale(u: Unit, dc: number, reason: string): void {
     if (u.dead || u.down) return;
+    // 4.4: difficulty shifts PLAYER-side morale DCs only (Story −2, Hard +2; Normal identity).
+    // ENEMY units always roll the authored DC — difficulty softens what hits the player, not what
+    // rallies the column. Deterministic per seed: no extra RNG draws.
+    const shifted = dc + moraleDcShiftFor(this.difficulty, u.side);
     const result = moraleCheck({
       presenceMod: modifier(u.attributes.presence), leadershipLevel: u.leadershipLevel,
-      formationBonus: u.formation.defenseBonus, moraleBonusPerk: u.perkMods['morale'] ?? 0, dc,
+      formationBonus: u.formation.defenseBonus, moraleBonusPerk: u.perkMods['morale'] ?? 0, dc: shifted,
       // issue 5: War Cry grants Edge on the next morale check, same as standing in a Haufen.
       edge: u.formation.inHaufen || hasStatus(u, 'war-cry'),
     }, this.host.rng);
@@ -1788,6 +1820,7 @@ export class CombatEngineImpl implements CombatService {
       turnIndex: this.turnIndex,
       order: this.order,
       rngState: this.host.rng.getState(),
+      difficulty: this.difficulty,
       units: [...this.units.values()].map((u) => ({ ...u, status: u.status.map((s) => ({ ...s })), attackBonus: { ...u.attackBonus }, soak: { ...u.soak }, ap: { ...u.ap } })),
       features: [...this.featureUses.entries()],
       objectivesState: { objectives: this.objectives.map((o) => ({ done: o.done, progress: o.progress })), phase: this.phase, ended: this.ended, outcome: this.outcome, deployZone: this.deployZone, grid: this.grid, cells: this.cells, activeUnitId: this.activeUnitId },
@@ -1813,6 +1846,9 @@ export class CombatEngineImpl implements CombatService {
     if (!enc) throw new Error(`combat: restore: unknown encounter ${s.encounterId}`);
     this.resetState();
     this.enc = enc;
+    // 4.4: difficulty round-trips through the mid-combat snapshot (tolerant: absent/unknown → 'normal',
+    // so old saves and hand-built fixtures load without a migration).
+    this.difficulty = isDifficulty((s as { difficulty?: unknown }).difficulty) ? (s as { difficulty: Difficulty }).difficulty : 'normal';
     const scriptedSpawnEnemyCount = (enc.scripted ?? []).reduce((n, e) => n + e.actions.reduce((m, a) => m + ('spawn' in a && a.spawn.side === 'enemy' ? (a.spawn.count ?? 1) : 0), 0), 0);
     this.totalEnemyEverCount = enc.units.filter((u) => u.side === 'enemy').reduce((n, u) => n + (u.count ?? 1), 0) + scriptedSpawnEnemyCount;
     const os = s.objectivesState as { objectives: { done: boolean; progress?: string }[]; phase: CombatStateView['phase']; ended: boolean; outcome: 'win' | 'lose' | 'fled' | null; deployZone: DeployZone; grid: GridInfo; cells: CellView[]; activeUnitId: EntityId | null };

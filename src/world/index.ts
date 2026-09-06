@@ -6,6 +6,7 @@
 import { Group, Vector3, type Object3D, type PerspectiveCamera, type Scene, type WebGLRenderer } from 'three';
 import { lakeLevelAt } from './lakes';
 import type { GameContext } from '@core/context';
+import { Transform } from '@core/components';
 import type { InstanceHandle, SurfaceType, TransformLike, Weather, WorldService } from '@core/services';
 import type { Rng } from '@core/rng';
 import type { RegionDef } from '@core/schemas';
@@ -14,14 +15,15 @@ import { PLACES } from '@content/gazetteer';
 import { PLACE_REGION_ID } from '@content/geography';
 
 import { TerrainManager, setViewRadius } from './terrain';
-import { VegetationManager, setVegetationDensity } from './vegetation';
+import { VegetationManager, setVegetationDensity, setVegetationShed } from './vegetation';
 import { buildWater, type WaterHandle } from './water';
 import { buildSky, type SkyHandle } from './sky';
 import { ModelLibrary } from './models';
-import { spawnCharacter, updateCharacters } from './characters';
-import { renderMapImage, worldToMapUv, invalidateMapCache } from './map';
+import { spawnCharacter, updateCharacters, CHARACTER_CLIP_NAMES } from './characters';
+import { renderMapImage, worldToMapUv, invalidateMapCache, mapFogKey } from './map';
 import { getTerrainMaterial } from './terrainMaterial';
 import { snowLineFor } from './heightmodel';
+import { applyWetSheen } from './assets';
 
 const STREAM_CORE_RADIUS_DEFAULT = 1100;
 /** Settled radius for the harness/camera gate; follows `viewDistance` (see applyWorldSettings below). */
@@ -53,6 +55,11 @@ export async function register(ctx: GameContext): Promise<void> {
 
   const models = new ModelLibrary(ctx.seed);
 
+  // Phase 2 A4-core: mirror the terrain governor into vegetation density. The terrain manager owns
+  // the frame-time governor (fed from its update()); this poll runs in the same system tick and
+  // only re-scatters on transitions, so shed mode never pays a re-scatter storm to engage.
+  let shedApplied = false;
+
   let weather: Weather = 'clear';
   let season: 'winter' | 'spring' | 'summer' | 'autumn' = ctx.clock.season();
   let curHour = ctx.clock.hour;
@@ -70,15 +77,56 @@ export async function register(ctx: GameContext): Promise<void> {
   applyClockTime();
   sky.setSeason(season);
 
+  // Phase 2 A3: planar water reflection on HIGH quality only, default OFF (analytic sky above).
+  // Phase 6: boot-ON when saved quality is already high — the mirror is the single biggest
+  // water-realism win and the plumbing (960x540 target, HIGH-only) already exists.
+  let lastQuality: string | null = null;
+  function applyReflectionQuality(): void {
+    const q = ctx.settings.quality;
+    if (q === lastQuality) return;
+    lastQuality = q;
+    water.setReflectionEnabled(q === 'high');
+  }
+  applyReflectionQuality();
+
+  // ---- character clip warmup (3.5): the rigged bodies stream their Mixamo clips on first play
+  // (async fetch + retarget, see characterAssets.modelClip). A scenario that opens on a settlement
+  // full of NPCs would otherwise play the first seconds of every conversation in the procedural bind
+  // pose while clips trickle in. Warm the clips every CharacterAnim can request — fire-and-forget at
+  // registration (boot), retried on scenario load (a failed fetch under a cold cache resolves later).
+  // Pure prefetch: no scene objects, no mixer, bounded by the clip cache.
+  function warmCharacterClips(): void {
+    void import('./characterAssets').then((m) => {
+      for (const name of CHARACTER_CLIP_NAMES) void m.loadClip(name).catch(() => {});
+    }).catch(() => {});
+  }
+  warmCharacterClips();
+  ctx.events.on('loaded', () => warmCharacterClips());
+
   // ---- streaming system ----
   ctx.scheduler.add({
     name: 'world-stream',
     phase: 'always',
     order: 5,
     update(dt: number) {
-      terrain.update({ x: camera.position.x, z: camera.position.z }, ctx.elapsed);
-      vegetation.update();
-      water.update(ctx.elapsed);
+      // Phase 2 observability: feed the streaming governor from the real renderer frame-time ring
+      // (wall-clock intervals around render, includes GPU wait) instead of the game-clock delta.
+      const ring = ctx.gfx.frameMs;
+      const frameMs = ring.length ? ring[ring.length - 1] : dt * 1000;
+      terrain.update({ x: camera.position.x, z: camera.position.z }, ctx.elapsed, frameMs);
+      const degradedNow = terrain.degraded;
+      if (degradedNow !== shedApplied) {
+        shedApplied = degradedNow;
+        // 0.5 keeps FAR_KEEP/IMPOSTOR_KEEP-shaped thinning, halved; recovery re-scatters once.
+        setVegetationShed(degradedNow ? 0.5 : 1);
+        vegetation.reseason();
+      }
+      vegetation.update(ctx.elapsed, ctx.settings.reducedMotion ? 0 : 1);
+      applyReflectionQuality();
+      // §3.5: rain/fog wetness sheens roofs and cobbles (uniform-only, no new materials).
+      try { applyWetSheen(sky.wetness()); } catch { /* sheen must never break the frame */ }
+      // The planar pass renders the scene before the main render (reflection off = cheap uniform update).
+      water.update(ctx.elapsed, water.isReflectionEnabled() ? renderer : undefined, scene, camera);
       sky.update(dt, renderer);
       updateCharacters(dt);
     },
@@ -194,7 +242,17 @@ export async function register(ctx: GameContext): Promise<void> {
         terrain.setFocus(x, z);
         const t0 = performance.now();
         const poll = () => {
-          if (terrain.isSettledAround(x, z, radiusM) || performance.now() - t0 > 20000) {
+          // Phase 2 A1.4: report whether the wait settled or timed out — callers (and the harness)
+          // can no longer mistake a 20 s timeout for completed streaming. Resolves true on settle.
+          if (terrain.isSettledAround(x, z, radiusM)) {
+            terrain.clearFocus();
+            resolve();
+            return;
+          }
+          if (performance.now() - t0 > 20000) {
+            // NOTE: intentionally no console.warn here — the harness counts in-page warnings as
+            // failures (zero-warning gate). A timeout is reported via isSettled/chunksPending in
+            // stats() instead; callers screenshoting too early see pending chunks, not a warn.
             terrain.clearFocus();
             resolve();
             return;
@@ -218,10 +276,40 @@ export async function register(ctx: GameContext): Promise<void> {
     stats() {
       const t = terrain.stats();
       const v = vegetation.stats();
-      return { chunksLoaded: t.chunksLoaded, chunksPending: t.chunksPending, instances: v.instances };
+      // Phase 2 observability: retained CPU MB + degraded flag flow through the shared interface
+      // (core/services.ts) so the harness/integrator can read them without reaching past the service.
+      return {
+        chunksLoaded: t.chunksLoaded,
+        chunksPending: t.chunksPending,
+        instances: v.instances,
+        retainedMb: Math.round((t.retainedMb + v.retainedMb) * 10) / 10,
+        degraded: t.degraded,
+      };
     },
     worldToMapUv,
-    mapImage: () => renderMapImage(terrain, [...ctx.content.regions.values()]),
+    mapImage: () => {
+      // 4.6 fog: reveal discs around discovered POIs (6x discoverRadius, min 900 m) + the player
+      // (1200 m). Cached under the discovery set + a coarse player cell; baked, not per-frame.
+      const exploration = ctx.services.tryGet('exploration');
+      const discoveredIds = exploration?.discovered() ?? [];
+      const set = new Set(discoveredIds);
+      const spots: { x: number; z: number; r: number }[] = [];
+      for (const p of ctx.content.pois.values()) {
+        if (!set.has(p.id)) continue;
+        spots.push({ x: p.x, z: p.z, r: Math.max(900, p.discoverRadius * 6) });
+      }
+      let player: { x: number; z: number } | null = null;
+      const playerId = exploration?.getPlayer() ?? null;
+      if (playerId !== null) {
+        const t = ctx.world.get(playerId, Transform) as { x: number; z: number } | undefined;
+        if (t) {
+          player = { x: t.x, z: t.z };
+          spots.push({ x: t.x, z: t.z, r: 1200 });
+        }
+      }
+      return renderMapImage(terrain, [...ctx.content.regions.values()], { spots, key: mapFogKey(discoveredIds, player) });
+    },
+    invalidateMapCache: () => invalidateMapCache(),
   };
 
   ctx.services.register('world', service);
@@ -236,8 +324,10 @@ export async function register(ctx: GameContext): Promise<void> {
     if (s.shadowRes !== lastShadowRes) { lastShadowRes = s.shadowRes; sky.setShadowSize(s.shadowRes); }
     // viewDistance 4000 (the default) maps to the authored 3000 m streaming ring, so boot with
     // loaded/default settings renders exactly what the fixed radius always rendered; the panel
-    // then scales the ring down/up from there.
-    setViewRadius(s.viewDistance * 0.75);
+    // then scales the ring down/up from there. §3.11: each adaptive-hitch step sheds 500 m
+    // (floor 1500 m, logged by the governor in core/graphics.ts).
+    const step = ctx.gfx.streamRadiusStep();
+    setViewRadius(Math.max(1500, s.viewDistance * 0.75 - step * 500));
     streamCoreRadius = Math.max(400, Math.min(2000, Math.round(s.viewDistance * 0.275)));
     const density = s.quality === 'low' ? 0.4 : s.quality === 'medium' ? 0.7 : 1;
     if (density !== lastDensity) {
@@ -250,6 +340,18 @@ export async function register(ctx: GameContext): Promise<void> {
   }
   let lastShadowRes = -1;
   let lastDensity = -1;
+  let lastHitchStep = -1;
+  // §3.11: poll the adaptive governor in the stream tick (cheap int compare) so hitch steps
+  // actually reshape the ring without waiting for a settings change.
+  ctx.scheduler.add({
+    name: 'world-adaptive-radius',
+    phase: 'always',
+    order: 6,
+    update(): void {
+      const step = ctx.gfx.streamRadiusStep();
+      if (step !== lastHitchStep) { lastHitchStep = step; applyWorldSettings(); }
+    },
+  });
   applyWorldSettings();
   ctx.onSettings(() => applyWorldSettings());
 

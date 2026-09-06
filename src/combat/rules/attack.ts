@@ -5,7 +5,30 @@
 import type { Rng } from '@core/rng';
 import { rollDice } from '@core/rng';
 import type { DamageType } from '@core/dsl';
+import type { Difficulty } from '@core/context';
 import type { AttackRoll } from '@core/services';
+
+export type { Difficulty };
+
+/**
+ * 4.4 difficulty scalars (Normal = 1.0 identity). Story softens enemy damage; Hard sharpens it.
+ * Applied to ENEMY-originated damage only — the engine passes `attacker.side` through
+ * `damageScaleFor`; player damage is untouched on every mode. Pure constants, no RNG.
+ */
+export function damageScaleFor(difficulty: Difficulty | undefined, attackerSide: 'player' | 'enemy' | 'neutral'): number {
+  if (attackerSide !== 'enemy') return 1;
+  if (difficulty === 'story') return 0.75;
+  if (difficulty === 'hard') return 1.25;
+  return 1;
+}
+
+/** 4.4: player-side morale checks are easier on Story (DC −2) and harder on Hard (DC +2). */
+export function moraleDcShiftFor(difficulty: Difficulty | undefined, unitSide: 'player' | 'enemy' | 'neutral'): number {
+  if (unitSide !== 'player') return 0;
+  if (difficulty === 'story') return -2;
+  if (difficulty === 'hard') return 2;
+  return 0;
+}
 
 export interface D20Result {
   rolls: [number, number?];

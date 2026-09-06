@@ -9,7 +9,18 @@ export const muster1315: QuestDef = {
     {
       id: 'travel-sattel', journal: 'A year of readiness begins. The letzi at Sattel needs raising before the work becomes impossible in the snow.',
       marker: 'poi.sattel-letzi', objectiveText: 'Make for the letzi at Sattel.',
-      advanceWhen: [{ cond: { nearPoi: ['poi.sattel-letzi', 80] }, to: 'letzi-craft' }],
+      advanceWhen: [
+        { cond: { all: [{ nearPoi: ['poi.sattel-letzi', 80] }, { flag: 'morgarten.retry' }] }, to: 'sattel-retry' },
+        { cond: { nearPoi: ['poi.sattel-letzi', 80] }, to: 'letzi-craft' },
+      ],
+    },
+    {
+      // 3.1: retry-only beat. Unreachable on the first pass (`morgarten.retry` is unset);
+      // on the retry the silent start suppresses this journal line and the handler's
+      // summary line covers it. Fires on arrival (advanceWhen), not at quest start.
+      id: 'sattel-retry', journal: 'Carried off once at Morgarten, you gather what is left and ready the muster again.',
+      marker: 'poi.sattel-letzi', objectiveText: 'Speak with the survivors at Sattel.',
+      onEnter: [{ dialogue: 'dlg.muster-retry' }],
     },
     {
       id: 'letzi-craft', journal: 'The letzi wall at Sattel must be raised before the snow makes the work impossible.',
@@ -43,11 +54,12 @@ export const muster1315: QuestDef = {
       // recorded before that stage's own onEnter runs (see quests.ts enterStage), so setting the date
       // there would be too late. Setting it here means the clock is already 15 Nov by the time it matters.
       onEnter: [
+        { setFlag: ['morgarten.retry', false] },
         { setTime: [1315, 11, 15, 6] },
         { quest: ['complete', 'quest.muster-1315'] },
         { quest: ['start', 'quest.morgarten'] },
       ],
     },
   ],
-  onStart: [{ toast: 'Quest started: Das Jahr der Rüstung' }],
+  onStart: [{ toast: 'Quest started: Das Jahr der Rüstung' }, { music: 'music.explore' }],
 };

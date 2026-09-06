@@ -17,6 +17,6 @@ export const brunnen1315: QuestDef = {
       onEnter: [{ cutscene: 'cs.pakt-von-brunnen' }],
     },
   ],
-  onStart: [{ toast: 'Quest started: Der Pakt von Brunnen' }],
-  onComplete: [{ toast: 'Act One is complete.' }],
+  onStart: [{ toast: 'Quest started: Der Pakt von Brunnen' }, { music: 'music.title' }],
+  onComplete: [{ toast: 'Act One is complete.' }, { music: 'music.title' }],
 };

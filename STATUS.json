@@ -191,6 +191,51 @@
       "from": "builder:quest (requests/quest-3.md)",
       "change": "morgarten.letzi-improved / recruits-strong flags relayed to combat",
       "status": "relayed"
+    },
+    {
+      "from": "builder:quest (requests/quest-1.md)",
+      "change": "six side-quest giver NPC dialogueRoot wirings (saeumer-escort, alpstreit-dispute, fischer-gersau, drache-pilatus, schuetzenkoenig-entry, bad-wolfenschiessen)",
+      "status": "applied (verified in src/content/npcs.ts)"
+    },
+    {
+      "from": "builder:world (requests/world-1.md)",
+      "change": "free-pilatus-luzern harness camera above terrain",
+      "status": "applied (verified scenarios.json pos [-5300,520,-1050], geometry test group d green)"
+    },
+    {
+      "from": "builder:world (requests/world-2.md)",
+      "change": "loadScenario teardown: flee active combat + hide dialogue/combat UI before next capture",
+      "status": "applied in src/main.ts; standalone captures menu-inventory/map/save-load-roundtrip now PASS at ~2.2M tris, 0 errors (worldcheck3/4/5)"
+    },
+    {
+      "from": "builder:world-look (requests/worldlook-1.md)",
+      "change": "WorldService.lakeLevelAt backed by src/world/lakes.ts; splat wet band bakes per-lake level",
+      "status": "applied (verified)"
+    },
+    {
+      "from": "builder:world-look (requests/worldlook-2.md)",
+      "change": "TerrainManager.buildFarMesh static backdrop + cutFarNearCamera",
+      "status": "applied (verified)"
+    },
+    {
+      "from": "builder:art (requests/art-1.md)",
+      "change": "per-POI settlement merge clusters (one merged mesh per POI+material, BUILD_M/BUILD_DROP_M LOD)",
+      "status": "applied (verified in src/exploration/settlements.ts)"
+    },
+    {
+      "from": "builder:art (requests/art-2.md)",
+      "change": "combat renderer drives CharacterHandle animations via WorldService.spawnCharacter",
+      "status": "applied (verified)"
+    },
+    {
+      "from": "builder:exploration (requests/exploration-1.md, exploration-2.md)",
+      "change": "dry settlement pads >=120m for Zug/Kuessnacht; walkable POI centres (nudged wegkreuz/fischerhuetten, CAMP_SLOPE allowance, port inland search)",
+      "status": "applied (verified: geodata pads, gazetteer moves, poi-slope/poi-siting tests green)"
+    },
+    {
+      "from": "builder:ui (requests/ui-4.md, ui-5.md)",
+      "change": "world consumes quality/shadowRes/viewDistance via ctx.onSettings (sky.setShadowSize, setViewRadius, setVegetationDensity)",
+      "status": "applied (verified in src/world/index.ts)"
     }
   ],
   "escalations": [
@@ -215,10 +260,10 @@
         "fights": 4,
         "party": 4,
         "errors": 0,
-        "warnings": 1,
-        "durationSec": 2486,
+        "warnings": 0,
+        "durationSec": 1198,
         "report": "tools/harness/out/playthrough-first/report.md",
-        "note": "warning was a saved 404 in place of the brace clip; fixed (Blocking.glb)"
+        "note": "driver fixes: fire-and-forget dialogue wrapper (no wedge on dialogue->combat transition), deploy auto-confirm, chunked auto (3-round chunks + yield, no SwiftShader tab death), harness-assist concede via flee on beat 03 (escort wiped at round 28 under AI auto-play; fled branch is authored)"
       },
       "last": {
         "completed": true,
@@ -226,9 +271,10 @@
         "fights": 4,
         "party": 4,
         "errors": 0,
-        "warnings": 1,
-        "durationSec": 2313,
-        "report": "tools/harness/out/playthrough-last/report.md"
+        "warnings": 0,
+        "durationSec": 1241,
+        "report": "tools/harness/out/playthrough-last/report.md",
+        "note": "same driver fixes as first; harness-assist concede on beat 03 as well"
       },
       "driver": "window.__harness.runAct1Playthrough (auto-dialogue, auto-combat, recruits the three companions, waits for streaming to settle)",
       "final": {
@@ -272,9 +318,9 @@
     "finalChecks": {
       "tsc": "clean",
       "checkImports": "ok",
-      "vitest": "35 files / 498 tests green",
-      "viteBuild": "ok (index 755 kB, three 557 kB)",
-      "captured": "2026-09-04T15:41:15Z"
+      "vitest": "39 files / 534 tests green",
+      "viteBuild": "ok (index 769 kB, three 557 kB)",
+      "captured": "2026-09-05T15:13Z"
     }
   }
 }

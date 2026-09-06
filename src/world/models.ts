@@ -29,8 +29,9 @@ import {
   bridgeStone, bridgeWood, castleKeep, castleTower, castleWall, letziWall, palisade, ruinWall,
 } from './models/fort';
 import {
-  boat, campfire, cart, crossModel, fenceModel, gallowsPole, hayrack, placeholder, rockModel,
-  shieldModel, signpost, stump, tent, trough, weaponModel, well, woodpile,
+  boat, campfire, cargoBoat, cart, crossModel, fenceModel, fisherHut, gallowsPole, hayrack, hayTripod,
+  palisadeGate, placeholder, rockModel,
+  shieldModel, shrineCross, signpost, stump, tent, trough, weaponModel, well, woodpile,
 } from './models/props';
 
 export { propMat } from './models/kit';
@@ -80,6 +81,15 @@ export class ModelLibrary {
     this.register('woodpile', (o) => woodpile(o.rng));
     this.register('trough', (o) => trough(o.rng));
     this.register('market.stall', (o) => marketStall(o.rng));
+    // Phase 2 B2 Alpine prop variants: shrine cross, tripod hayrick, palisade gate, fisher hut, cargo boat.
+    // Procedural-only (kit.ts shared batches, no new materials): exploration's per-POI merge still sees
+    // one mesh per shared material, so no new draw calls. Layout wires one usage each (layoutVillage /
+    // layoutAlp / layoutWall / layoutPort); registered here so they spawn through the normal path.
+    this.register('cross.shrine', (o) => shrineCross(o.rng));
+    this.register('hayrick.tripod', (o) => hayTripod(o.rng));
+    this.register('palisade.gate', (o) => palisadeGate(o.rng));
+    this.register('hut.fisher', (o) => fisherHut(o.rng));
+    this.register('boat.cargo', (o) => cargoBoat(o.rng));
     this.register('gallows.pole', (o) => gallowsPole(o.rng));
     this.register('campfire', (o) => campfire(o.rng));
     this.register('tent', (o) => tent(o.rng));

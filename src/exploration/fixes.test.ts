@@ -40,7 +40,7 @@ function makeNpcSystem(c = content()) {
       return id;
     },
   } as unknown as PartyService;
-  const ws = { heightAt: () => 0, isWater: () => false, hasModel: () => true, spawnModel: () => new Object3D() } as unknown as WorldService;
+  const ws = { heightAt: () => 0, isWater: () => false, slopeAt: () => 0, lakeLevelAt: () => 0, hasModel: () => true, spawnModel: () => new Object3D() } as unknown as WorldService;
   const dyn = new Object3D();
   const startEncounter = vi.fn();
   return { world, c, sys: new NpcSystem(world, c, party, ws, dyn, startEncounter), dyn, startEncounter };
@@ -115,6 +115,33 @@ describe('NPC system fixes', () => {
     sys.update(0.1, { x: t.x + 1, z: t.z + 1 }, 12);
     sys.update(0.1, { x: t.x + 1, z: t.z + 1 }, 12);
     expect(startEncounter).toHaveBeenCalledWith('enc.habsburg-patrol', expect.objectContaining({ x: expect.any(Number) }));
+  });
+  it('barks: silent with no sink, deterministic per npc+hour, never from sleepers or party', () => {
+    const { world, sys } = makeNpcSystem();
+    sys.populate('prologue-1291');
+    const altdorf = { x: 574, z: 2051 };
+    for (let i = 0; i < 400; i++) sys.update(1, altdorf, 12); // settle near NPCs at midday
+    // no sink wired: updates with bark intervals elapsed must not throw or emit anywhere
+    for (let i = 0; i < 60; i++) sys.update(1, altdorf, 12);
+    let marketNpc = -1;
+    world.each(Npc, (id, n) => { if (marketNpc < 0 && !n.frozen && n.activity === 'market') marketNpc = id; });
+    if (marketNpc > 0) {
+      const first = sys.barkFor(marketNpc, 12);
+      const again = sys.barkFor(marketNpc, 12);
+      expect(first).toBeTruthy();
+      expect(again).toBe(first); // stable within the hour
+    }
+    // sleepers never bark, even with an activity that would otherwise match
+    let sleeper = -1;
+    world.each(Npc, (id, n) => { if (sleeper < 0 && !n.frozen) { n.activity = 'sleep'; sleeper = id; } });
+    if (sleeper > 0) expect(sys.barkFor(sleeper, 12)).toBeNull();
+    // the sink path emits at most one line per interval tick through update()
+    const emitted: string[] = [];
+    sys.setBarkSink((m) => emitted.push(m));
+    for (let i = 0; i < 46; i++) sys.update(1, altdorf, 12);
+    expect(emitted.length).toBeLessThanOrEqual(2); // one bark per 45 s interval; 46 ticks span ~2 windows
+    for (let i = 0; i < 90; i++) sys.update(1, altdorf, 12);
+    expect(emitted.length).toBeLessThanOrEqual(4); // rate holds over longer runs: ~1 per interval, never a burst
   });
 });
 

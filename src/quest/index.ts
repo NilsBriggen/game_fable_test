@@ -7,6 +7,7 @@ import type { GameContext } from '@core/context';
 import { EventBus, type Unsubscribe } from '@core/events';
 import { gameTimeFor } from '@core/clock';
 import { hashString } from '@core/rng';
+import { strings } from '@core/i18n';
 import type { EntityId } from '@core/ecs';
 import { Name, Npc, Player, Transform } from '@core/components';
 import type { Effect, FactionId, QuestCondition, SkillId } from '@core/dsl';
@@ -54,6 +55,8 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
    *  content effect, which cannot itself carry options) should be silent-journalled. Round 3 #3: the
    *  Morgarten retry needs this for `quest.morgarten` itself, not just the muster hub that restarts it. */
   private pendingSilentStart = new Set<string>();
+  /** POI ids already celebrated with the §2.2 discovery stinger (one chime per POI per session). */
+  private celebratedDiscovery = new Set<string>();
 
   constructor(private readonly ctx: GameContext) {
     const deps: QuestMachineDeps = {
@@ -72,6 +75,9 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
       // muster hub's own `{quest:['start','quest.morgarten']}` effect silently no-ops.
       this.machine.reset('quest.morgarten');
       this.machine.reset('quest.muster-1315');
+      // 3.1 retry beat: marks this muster pass as the second one so `travel-sattel`
+      // routes through the `sattel-retry` stage once. Cleared in the hub's `ready` stage.
+      this.setFlag('morgarten.retry', true);
       // Round 3 #3: quest.morgarten's own restart (triggered later, from the retried muster hub's
       // 'ready' stage via a plain content effect) must be silent too, or its travel-morgarten/battle
       // stages journal a second time verbatim.
@@ -243,7 +249,20 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
     if (ui) ui.toast(msg, 'quest'); else console.info(`[toast] ${msg}`);
   }
   addJournalEntry(text: string, questId?: string): void { this.machine.addJournal(text, questId); }
-  discoverPoi(poiId: string): void { this.ctx.services.tryGet('exploration')?.discover(poiId); }
+  discoverPoi(poiId: string): void {
+    const first = !this.celebratedDiscovery.has(poiId);
+    if (first) this.celebratedDiscovery.add(poiId);
+    this.ctx.services.tryGet('exploration')?.discover(poiId);
+    // Discovery chime: the committed `discover` one-shot when present, bark blip otherwise.
+    // The set-guard keeps fast-travel/discover-spam from chiming repeatedly.
+    if (first) {
+      try {
+        const audio = (this.ctx.services.tryGet('ui') as unknown as { audio?: { barkBlip(): void; playStinger(name: string): void } } | undefined)?.audio;
+        audio?.playStinger('discover');
+        audio?.barkBlip();
+      } catch { /* audio must never break quest flow */ }
+    }
+  }
   npcMove(npcId: string, poiId: string): void {
     const entity = this.findNpcEntity(npcId);
     const pos = this.ctx.services.tryGet('exploration')?.poiPosition(poiId);
@@ -262,7 +281,22 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   }
   async runDialogueById(id: string, questId?: string): Promise<void> { await this.runDialogue(id, undefined, questId); }
   restParty(hours: number): void { this.ctx.services.tryGet('party')?.rest(hours); }
-  setMusic(id: string): void { console.info(`[music] ${id}`); }
+  setMusic(id: string): void {
+    // 3.4 + Flow §2.2: the {music} DSL effect prefers a committed file track and falls back to the
+    // procedural bed. Quest ids use the music.* namespace (e.g. 'music.tavern'); the bus takes the bed
+    // name after the dot. Unknown beds stop the music rather than throwing. No UI service yet = no-op.
+    // Headless fakes may only implement playMusic (no playMusicTrack) — fall back to it directly.
+    const uiAudio = (this.ctx.services.tryGet('ui') as unknown as {
+      audio?: { playMusicTrack?(bed: string): Promise<boolean>; playMusic(id: string): void };
+    } | undefined)?.audio;
+    if (uiAudio) {
+      const bed = id.startsWith('music.') ? id.slice('music.'.length) : id;
+      try {
+        if (typeof uiAudio.playMusicTrack === 'function') void uiAudio.playMusicTrack(bed);
+        else uiAudio.playMusic(bed);
+      } catch { /* audio must never break quest flow */ }
+    }
+  }
   endAct(id: string): void {
     this.setFlag(`act-complete:${id}`, true);
     this.machine.addJournal(`Here ends the tale, for now, of the ${id === 'act1' ? 'first years of the Eidgenossen' : id}.`);
@@ -271,6 +305,9 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
 
   // ---------------------------------------------------------------- DialogueRuntime extras
   getDialogueDef(id: string) { return this.ctx.content.dialogues.get(id); }
+  // 4.3 i18n: display-time lookup backed by the shared catalog (locale from settings, en fallback).
+  // The catalog's en table is filled at content load (register(), below); overlays load from JSON.
+  t(id: string): string { return strings.t(id); }
   npcDisplayName(id: string): string | undefined { return this.ctx.content.npcs.get(id)?.name; }
   npcPortrait(id: string): string | undefined { return this.ctx.content.npcs.get(id)?.portrait; }
   entityDisplayName(entity: EntityId): string | undefined { return this.ctx.world.get(entity, Name)?.display; }
@@ -381,6 +418,21 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
   addJournal(text: string, questId?: string): void { this.machine.addJournal(text, questId); }
   activeQuests() { return this.machine.activeQuests(); }
   chapter(): string { return this.chapterId; }
+  /** Phase 2 A1.3: full per-playthrough reset for same-page new games. resetWorld() clears the ECS,
+   *  but quest flags/reputation/journal/machine survive it — a second newGame() after progress would
+   *  otherwise inherit a finished quest graph. Subscribed to 'new-game' (emitted by main.ts newGame()
+   *  before setChapter/start), so no caller changes are needed. */
+  resetForNewGame(): void {
+    this.machine.restore({});
+    this.repMap = new Map();
+    this.flags = new Map();
+    this.pendingSilentStart.clear();
+    this.celebratedDiscovery.clear();
+    this.deferredEffects = [];
+    this.sceneDepth = 0;
+    this.chapterId = 'prologue-1291';
+    this.chapterSet = false;
+  }
   async setChapter(chapter: string): Promise<void> {
     // Critic wave3-quest.md #9: main.ts's newGame() calls setChapter('prologue-1291') and then
     // exploration.populate(chapter) itself — a second setChapter with the same chapter (or any
@@ -424,11 +476,77 @@ export class QuestServiceImpl implements QuestService, Runtime, DialogueRuntime,
 export async function register(ctx: GameContext): Promise<void> {
   const svc = new QuestServiceImpl(ctx);
   ctx.services.register('quest', svc);
+  // 4.3 i18n: fill the shared catalog's en table from loaded content (extraction source of truth at
+  // runtime), then overlay any delivered translation JSON and select the settings locale. Overlays are
+  // fetched, not bundled — a missing file is a silent en fallback, never a boot failure.
+  fillEnCatalog(ctx);
+  // 4.3: test harnesses build a GameContext-shaped partial without settings — default to en there.
+  const locale = ctx.settings?.language ?? 'en';
+  strings.setLocale(locale);
+  void loadLocaleOverlay(locale);
+  ctx.onSettings?.((s) => {
+    strings.setLocale(s.language);
+    void loadLocaleOverlay(s.language);
+  });
   ctx.scheduler.add({ name: 'quest-advance', phase: 'always', order: 500, update: (dt: number) => svc.tick(dt) });
+  // Phase 2 A1.3: 'new-game' fires in main.ts newGame() before setChapter/start — reset first.
+  ctx.events.on('new-game', () => svc.resetForNewGame());
   const exploration = ctx.services.tryGet('exploration');
   exploration?.on('poi-discovered', () => svc.machine.checkAdvance(svc));
   exploration?.on('fast-travel', () => svc.machine.checkAdvance(svc));
   exploration?.on('region-entered', () => svc.machine.checkAdvance(svc));
   ctx.events.on('time-changed', () => svc.machine.checkAdvance(svc));
   ctx.events.on('chapter-changed', () => svc.machine.checkAdvance(svc));
+}
+
+/**
+ * 4.3 i18n: runtime mirror of the extraction script (`tools/i18n/extract.test.ts`) — the same walk,
+ * same IDs. The snapshot JSON is the translators' contract; this fill is the game's. A drift test
+ * (`src/quest/i18n.test.ts`) asserts they agree, so content edits can't silently desync the catalog
+ * from the snapshot.
+ */
+export function fillEnCatalog(ctx: GameContext): void {
+  const table: Record<string, string> = {};
+  const put = (id: string, v: unknown): void => {
+    if (typeof v === 'string' && v.length) table[id] = v;
+  };
+  const toasts = (effects: { toast?: string }[] | undefined): string[] =>
+    Array.isArray(effects) ? effects.filter((e) => typeof e?.toast === 'string' && e.toast.length).map((e) => e.toast as string) : [];
+  for (const q of ctx.content.quests.values()) {
+    const qid = q.id.replace(/^quest\./, '');
+    put(`quest.${qid}.title`, q.title);
+    put(`quest.${qid}.description`, q.description);
+    for (const s of q.stages) {
+      put(`quest.${qid}.stage.${s.id}.journal`, s.journal);
+      put(`quest.${qid}.stage.${s.id}.objective`, s.objectiveText);
+      toasts(s.onEnter as { toast?: string }[]).forEach((t, i) => put(`quest.${qid}.stage.${s.id}.toast.${i}`, t));
+    }
+    toasts(q.onStart as { toast?: string }[]).forEach((t, i) => put(`quest.${qid}.onStart.${i}`, t));
+    toasts(q.onComplete as { toast?: string }[]).forEach((t, i) => put(`quest.${qid}.onComplete.${i}`, t));
+    toasts(q.onFail as { toast?: string }[]).forEach((t, i) => put(`quest.${qid}.onFail.${i}`, t));
+  }
+  for (const d of ctx.content.dialogues.values()) {
+    const did = d.id.replace(/^dlg\./, '');
+    for (const [nid, n] of Object.entries(d.nodes)) {
+      put(`dlg.${did}.node.${nid}.text`, n.text);
+      (n.variants ?? []).forEach((v, i) => put(`dlg.${did}.node.${nid}.variant.${i}`, v.text));
+      (n.choices ?? []).forEach((ch, i) => put(`dlg.${did}.node.${nid}.choice.${i}`, ch.text));
+    }
+  }
+  for (const cs of ctx.content.cutscenes.values()) {
+    const cid = cs.id.replace(/^cs\./, '');
+    cs.steps.forEach((step, i) => put(`cs.${cid}.shot.${i}.caption`, step.caption));
+  }
+  strings.loadEn(table);
+}
+
+/** Fetch a delivered translation overlay (`tools/i18n/strings.<locale>.json` served from base). */
+async function loadLocaleOverlay(locale: string): Promise<void> {
+  if (locale === 'en') return;
+  try {
+    const res = await fetch(`tools/i18n/strings.${locale}.json`);
+    if (!res.ok) return;
+    const table = (await res.json()) as Record<string, string>;
+    strings.setOverlay(locale as 'de' | 'gsw', table);
+  } catch { /* missing/unparseable overlay = silent en fallback */ }
 }

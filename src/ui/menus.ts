@@ -5,6 +5,8 @@
  * given (already cleared by the caller) and reads/writes services directly (`ctx.services`).
  */
 import type { GameContext } from '@core/context';
+import { ensureAutoSettings } from '@core/context';
+import { LOCALES } from '@core/i18n';
 import type { MenuId, DerivedStats } from '@core/services';
 import type { Attributes, Canton, EquipSlot, ItemInstance, PoiKind } from '@core/schemas';
 import { Character, Skills, Perks, Equipment, Inventory, Name, Player, Transform, Container } from '@core/components';
@@ -450,12 +452,19 @@ export function renderMap(api: MenuApi): void {
   modal(api, '', 'Map of the Waldstätte', [el('div', { class: 'menu-main', style: 'padding:0;height:78vh' }, [wrap])], true);
 
   if (!world) { wrap.appendChild(el('div', {}, ['Map unavailable.'])); return; }
+  // 4.6 fog: DOM markers stay discovery-gated (undiscovered POIs/regions/quest targets never render
+  // as labels), matching the baked fog wash on the image. Region labels render only when a POI in
+  // that region is discovered — otherwise the fog wash would carry a free geography lesson.
   world.mapImage().then((url) => {
     const img = el('img', { class: 'map-img', src: url });
     wrap.appendChild(img);
 
-    const regionLabels = el('div', {}, []);
+    const discoveredRegion = new Set<string>();
+    for (const poi of ctx.content.pois.values()) {
+      if (exploration?.isDiscovered(poi.id)) discoveredRegion.add(poi.region);
+    }
     for (const r of ctx.content.regions.values()) {
+      if (!discoveredRegion.has(r.id)) continue;
       const cx = r.bounds.reduce((s, p) => s + p[0], 0) / r.bounds.length;
       const cz = r.bounds.reduce((s, p) => s + p[1], 0) / r.bounds.length;
       const [u, v] = world.worldToMapUv(cx, cz);
@@ -477,6 +486,8 @@ export function renderMap(api: MenuApi): void {
       if (!q.marker) continue;
       const pos = typeof q.marker === 'string' ? ctx.content.pois.get(q.marker) : q.marker;
       if (!pos) continue;
+      // Undiscovered quest targets stay hidden: a marker POI renders only once discovered.
+      if (typeof q.marker === 'string' && !exploration?.isDiscovered(q.marker)) continue;
       const [u, v] = world.worldToMapUv((pos as { x: number }).x, (pos as { z: number }).z);
       wrap.appendChild(el('div', { class: 'map-marker quest', style: `left:${u * 100}%;top:${v * 100}%` }, [el('span', { html: ICONS.flag }), el('span', { class: 'lbl' }, ['Quest'])]));
     }
@@ -588,11 +599,56 @@ export function renderSettings(api: MenuApi): void {
   const viewDist = el('input', { type: 'range', min: '500', max: '8000', step: '100', value: `${s.viewDistance}`, onchange: (e: Event) => { ctx.applySettings({ viewDistance: Number((e.target as HTMLInputElement).value) }); } });
   const invertY = el('input', { type: 'checkbox', checked: s.invertY, onchange: (e: Event) => { ctx.applySettings({ invertY: (e.target as HTMLInputElement).checked }); } });
   const volume = el('input', { type: 'range', min: '0', max: '1', step: '0.05', value: `${s.masterVolume}`, onchange: (e: Event) => { ctx.applySettings({ masterVolume: Number((e.target as HTMLInputElement).value) }); } });
+  // 4.3 i18n: locale switcher — persists via applySettings, quest module re-overlays on change.
+  const language = el('select', { onchange: (e: Event) => { ctx.applySettings({ language: (e.target as HTMLSelectElement).value as typeof s.language }); } },
+    LOCALES.map((l) => el('option', { value: l.id, selected: s.language === l.id }, [l.label])));
+  // 4.4 difficulty + 4.2 groundwork (settings + panel controls only — no CSS/visual application here;
+  // another agent owns ui.css). // i18n-delta: ui.settings.difficulty, ui.settings.difficulty.story,
+  // ui.settings.difficulty.normal, ui.settings.difficulty.hard, ui.settings.fontScale,
+  // ui.settings.reducedMotion, ui.settings.highContrast
+  const difficulty = el('select', { onchange: (e: Event) => { ctx.applySettings({ difficulty: (e.target as HTMLSelectElement).value as typeof s.difficulty }); } },
+    (['story', 'normal', 'hard'] as const).map((v) => el('option', { value: v, selected: s.difficulty === v }, [v === 'story' ? 'Story' : v === 'hard' ? 'Hard' : 'Normal'])));
+  const fontScale = el('input', { type: 'range', min: '0.85', max: '1.3', step: '0.05', value: `${s.fontScale}`, onchange: (e: Event) => { ctx.applySettings({ fontScale: Number((e.target as HTMLInputElement).value) }); } });
+  const reducedMotion = el('input', { type: 'checkbox', checked: s.reducedMotion, onchange: (e: Event) => { ctx.applySettings({ reducedMotion: (e.target as HTMLInputElement).checked }); } });
+  const highContrast = el('input', { type: 'checkbox', checked: s.highContrast, onchange: (e: Event) => { ctx.applySettings({ highContrast: (e.target as HTMLInputElement).checked }); } });
+  // 5.5: showFps exists in Settings but had no UI row.
+  const showFps = el('input', { type: 'checkbox', checked: s.showFps, onchange: (e: Event) => { ctx.applySettings({ showFps: (e.target as HTMLInputElement).checked }); } });
+  // §1.7 voices toggle: same checkbox pattern — disabled = silent, text remains.
+  const voices = el('input', { type: 'checkbox', checked: s.voicesEnabled, onchange: (e: Event) => { ctx.applySettings({ voicesEnabled: (e.target as HTMLInputElement).checked }); } });
+  // 5.5: auto-detect + re-render the panel so picked values are visible.
+  const autoBtn = el('button', {
+    class: 'eid-btn', onclick: () => { ensureAutoSettings(ctx); clear(api.root); renderSettings(api); },
+  }, ['Auto-detect']);
+  // 5.4: local-only crash log viewer (window.__game.crashLog backend). Copy/export for bug reports; never uploads.
+  // typeof-guard: renderSettings also runs in Node tests where window is undefined.
+  const crashApi = typeof window !== 'undefined'
+    ? (window as unknown as { __game?: { crashLog?: { list(): { t: number; message: string; state?: string }[]; clear(): void; exportJson(): string } } }).__game?.crashLog
+    : undefined;
+  const crashCount = el('span', {}, [crashApi ? `${crashApi.list().length} entries (local only)` : 'unavailable']);
+  const crashBtns = el('div', { style: 'display:flex;gap:8px' }, [
+    el('button', { class: 'eid-btn', onclick: () => { crashApi?.clear(); clear(api.root); renderSettings(api); } }, ['Clear']),
+    el('button', {
+      class: 'eid-btn', onclick: () => {
+        if (!crashApi) return;
+        const blob = new Blob([crashApi.exportJson()], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'eidgenossen-crash-log.json'; a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      },
+    }, ['Export']),
+  ]);
 
   modal(api, '', 'Settings', [
     el('div', { class: 'menu-main' }, [
       row('Quality preset', quality), row('Shadow resolution', shadow), row('Render scale', renderScale),
       row('View distance', viewDist), row('Invert Y', invertY), row('Master volume', volume),
+      row('Voices', voices),
+      row('Show FPS', showFps),
+      row('Language', language),
+      row('Difficulty', difficulty), row('Font scale', fontScale),
+      row('Reduced motion', reducedMotion), row('High contrast', highContrast),
+      autoBtn,
+      row('Crash log', crashCount), crashBtns,
       el('div', { class: 'settings-note' }, [
         'Quality, shadows and view distance shape the camp and the field; the world picks up shadow size and streaming radius (see requests/ui-5.md).',
       ]),

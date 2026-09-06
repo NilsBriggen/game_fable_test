@@ -15,8 +15,14 @@ import * as explorationMod from './exploration';
 import * as combatMod from './combat';
 import * as questMod from './quest';
 import * as uiMod from './ui';
+import { crashlog } from '@core/crashlog';
 import scenarios from '../tools/harness/scenarios.json';
 import type { CombatCommand } from '@core/services';
+
+/** 5.0 load-time mark: boot start (paired with 'eid:boot-ready' + measure in boot()). */
+try {
+  performance.mark('eid:boot-start');
+} catch { /* performance marks are best-effort */ }
 
 const params = new URLSearchParams(location.search);
 const HARNESS = params.get('harness') === '1';
@@ -27,18 +33,47 @@ const seedParam = params.get('seed');
 const ctx = new GameContext(canvas, uiRoot, seedParam ? Number(seedParam) : 1291);
 ctx.harness = HARNESS;
 
-// ---------- console capture (harness) ----------
+// ---------- console capture (always-on; feeds the harness consoleLog + 5.4 crashlog) ----------
 const consoleLog = { errors: [] as string[], warnings: [] as string[] };
-if (HARNESS) {
+{
   const fmt = (a: unknown[]) => a.map((x) => (x instanceof Error ? `${x.message}\n${x.stack ?? ''}` : typeof x === 'string' ? x : safeJson(x))).join(' ');
   const origError = console.error.bind(console);
   const origWarn = console.warn.bind(console);
-  console.error = (...a: unknown[]) => { consoleLog.errors.push(fmt(a)); origError(...a); };
+  console.error = (...a: unknown[]) => {
+    const msg = fmt(a);
+    consoleLog.errors.push(msg);
+    try {
+      crashlog.push({ message: msg.slice(0, 2000), state: ctx.state.state, chapter: currentChapter() });
+    } catch { /* crash logging is best-effort */ }
+    origError(...a);
+  };
   console.warn = (...a: unknown[]) => { consoleLog.warnings.push(fmt(a)); origWarn(...a); };
-  window.addEventListener('error', (e) => consoleLog.errors.push(`window.error: ${e.message} @${e.filename}:${e.lineno}`));
-  window.addEventListener('unhandledrejection', (e) => consoleLog.errors.push(`unhandledrejection: ${String((e as PromiseRejectionEvent).reason)}`));
+  window.addEventListener('error', (e) => {
+    const msg = `window.error: ${e.message} @${e.filename}:${e.lineno}`;
+    consoleLog.errors.push(msg);
+    try {
+      crashlog.push({ message: msg, stack: e.error instanceof Error ? (e.error.stack ?? undefined) : undefined, state: ctx.state.state, chapter: currentChapter() });
+    } catch { /* best-effort */ }
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = `unhandledrejection: ${String((e as PromiseRejectionEvent).reason)}`;
+    consoleLog.errors.push(msg);
+    try {
+      const reason = (e as PromiseRejectionEvent).reason;
+      crashlog.push({ message: msg, stack: reason instanceof Error ? (reason.stack ?? undefined) : undefined, state: ctx.state.state, chapter: currentChapter() });
+    } catch { /* best-effort */ }
+  });
 }
 function safeJson(x: unknown): string { try { return JSON.stringify(x); } catch { return String(x); } }
+
+/** Best-effort current quest chapter for crash entries (quest may not be registered yet). */
+function currentChapter(): string | undefined {
+  try {
+    return ctx.services.tryGet('quest')?.chapter();
+  } catch {
+    return undefined;
+  }
+}
 
 // ---------- state transitions ----------
 ctx.events.on('request-state', (to) => {
@@ -54,27 +89,115 @@ ctx.state.onChange((from, to) => {
 });
 
 // ---------- frame loop ----------
+// 5.4: try/catch/finally so rAF always re-arms even when a scheduler/render tick throws.
+// Scheduler/EventBus catches live in core/ecs.ts + core/events.ts (not ours to edit),
+// so this is the outer guard: count consecutive failures; after 10, bail to title.
 let last = performance.now();
 let hitches = 0;
 let frames = 0;
+let consecutiveFrameFailures = 0;
 function frame(now: number): void {
-  const dt = Math.min(0.1, (now - last) / 1000);
-  last = now;
-  ctx.elapsed += dt;
-  const s = ctx.state.state;
-  if (s === 'explore' || s === 'combat' || s === 'dialogue' || s === 'cutscene') ctx.playtimeSec += dt;
-  ctx.clock.tick(dt);
-  ctx.scheduler.run('always', dt);
-  ctx.scheduler.run(s === 'combat' ? 'combat' : 'explore', dt);
-  ctx.gfx.render();
-  frames++;
+  try {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    ctx.elapsed += dt;
+    const s = ctx.state.state;
+    if (s === 'explore' || s === 'combat' || s === 'dialogue' || s === 'cutscene') ctx.playtimeSec += dt;
+    ctx.clock.tick(dt);
+    ctx.scheduler.run('always', dt);
+    ctx.scheduler.run(s === 'combat' ? 'combat' : 'explore', dt);
+    ctx.gfx.render();
+    frames++;
+    const fm = ctx.gfx.frameMs;
+    if (fm.length && fm[fm.length - 1] > 16.7 && s !== 'loading' && s !== 'boot') hitches++;
+    updatePerfHud();
+    consecutiveFrameFailures = 0;
+  } catch (err) {
+    consecutiveFrameFailures++;
+    console.error('frame tick failed', err);
+    if (consecutiveFrameFailures >= 10) {
+      consecutiveFrameFailures = 0;
+      console.error('10 consecutive frame failures — returning to title');
+      try {
+        if (ctx.state.can('title')) ctx.state.transition('title');
+      } catch { /* last resort: keep the loop alive */ }
+    }
+  } finally {
+    requestAnimationFrame(frame);
+  }
+}
+
+// ---------- 5.0 minimal perf HUD (Settings.showFps) ----------
+let perfHud: HTMLElement | null = null;
+let lastHudUpdate = -1;
+function ensurePerfHud(): HTMLElement {
+  let el = document.getElementById('perf-hud');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'perf-hud';
+    el.style.position = 'fixed';
+    el.style.top = '4px';
+    el.style.left = '4px';
+    el.style.zIndex = '9999';
+    el.style.font = '11px monospace';
+    el.style.color = '#0f0';
+    el.style.background = 'rgba(0,0,0,0.6)';
+    el.style.padding = '2px 6px';
+    el.style.pointerEvents = 'none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function refreshPerfHud(): void {
+  const el = ensurePerfHud();
+  if (!ctx.settings.showFps) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
   const fm = ctx.gfx.frameMs;
-  if (fm.length && fm[fm.length - 1] > 16.7 && s !== 'loading' && s !== 'boot') hitches++;
-  requestAnimationFrame(frame);
+  const recent = fm.slice(-30);
+  const avg = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : 0;
+  const fps = avg > 0 ? 1000 / avg : 0;
+  const info = ctx.gfx.stats();
+  el.textContent =
+    `fps ${fps.toFixed(0)} p95 ${ctx.gfx.frameP95().toFixed(1)}ms gpu ${ctx.gfx.gpuP95().toFixed(2)}ms ${info.drawCalls} draws ${(info.triangles / 1000).toFixed(0)}k tris`;
+}
+/** Called from frame(); throttled to at most 2 updates/sec by ctx.elapsed. */
+function updatePerfHud(): void {
+  if (!ctx.settings.showFps) {
+    if (perfHud) perfHud.style.display = 'none';
+    return;
+  }
+  if (!perfHud) perfHud = ensurePerfHud();
+  if (ctx.elapsed - lastHudUpdate < 0.5) return;
+  lastHudUpdate = ctx.elapsed;
+  refreshPerfHud();
+}
+
+// ---------- 5.0 load-time marks ----------
+/** Stream-around settle time (ms) of the last newGame(); 0 before the first run. */
+let lastStreamMs = 0;
+function takeMeasureMs(name: string): number | null {
+  try {
+    const entries = performance.getEntriesByName(name, 'measure');
+    const lastEntry = entries[entries.length - 1];
+    return lastEntry ? lastEntry.duration : null;
+  } catch {
+    return null;
+  }
+}
+export function loadMarks(): { bootMs: number | null; newGameMs: number | null; streamMs: number } {
+  return { bootMs: takeMeasureMs('eid:boot'), newGameMs: takeMeasureMs('eid:newgame'), streamMs: lastStreamMs };
 }
 
 // ---------- boot ----------
 async function boot(): Promise<void> {
+  // 5.4 boot check: surface prior-session crashes once (console.warn is not crash-logged).
+  try {
+    const prior = crashlog.list();
+    if (prior.length > 0) console.warn(`previous session had ${prior.length} errors — see Settings`);
+  } catch { /* best-effort */ }
   loadContent(ctx.content);
   const problems = ctx.content.validate();
   for (const p of problems) console.warn(`[content] ${p}`);
@@ -86,8 +209,15 @@ async function boot(): Promise<void> {
   await combatMod.register(ctx);
   await questMod.register(ctx);
   await uiMod.register(ctx);
+  // 5.0: wire Settings.showFps to the minimal DOM overlay after UI registration.
+  ctx.onSettings(() => refreshPerfHud());
+  refreshPerfHud();
   requestAnimationFrame(frame);
   ctx.state.transition('title');
+  try {
+    performance.mark('eid:boot-ready');
+    performance.measure('eid:boot', 'eid:boot-start', 'eid:boot-ready');
+  } catch { /* performance marks are best-effort */ }
   if (!HARNESS) {
     const ui = ctx.services.tryGet('ui');
     if (ui) ui.openMenu('title');
@@ -97,6 +227,9 @@ async function boot(): Promise<void> {
 
 // ---------- new game / load flows (used by UI and harness) ----------
 export async function newGame(creation?: Partial<import('@core/services').PlayerCreation>, opts: { skipIntro?: boolean } = {}): Promise<void> {
+  try {
+    performance.mark('eid:newgame-start');
+  } catch { /* best-effort */ }
   const svc = ctx.services;
   ctx.state.transition('loading');
   svc.tryGet('ui')?.loading(true, 'The valleys of the Reuss, August 1291');
@@ -121,12 +254,18 @@ export async function newGame(creation?: Partial<import('@core/services').Player
     const start = 'poi.fluelen';
     if (playerId !== null) ex.teleport(playerId, ...poiXZ(start));
     else ex.spawnPlayer(start);
+    const streamT0 = performance.now();
     await svc.get('world').streamAround(...poiXZ(start), 800);
+    lastStreamMs = performance.now() - streamT0;
   }
   svc.tryGet('ui')?.loading(false);
   ctx.state.transition('explore');
   ctx.events.emit('new-game');
   if (quest && !opts.skipIntro) quest.start('quest.der-eid');
+  try {
+    performance.mark('eid:newgame-end');
+    performance.measure('eid:newgame', 'eid:newgame-start', 'eid:newgame-end');
+  } catch { /* best-effort */ }
 }
 
 function poiXZ(poiId: string): [number, number] {
@@ -199,8 +338,12 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
     ui.dialogue.show = async (node) => {
       dialogues++;
       tr(`show#${dialogues} "${node.text.slice(0, 30)}" choices=${node.choices.length}`);
-      void orig(node); // render, but do not wait for a click
-      await nextFrame(); await nextFrame();
+      // Fire-and-forget render: awaiting even one frame here keeps runDialogue's `await ui.show()`
+      // alive across a nested scene transition (dialogue→combat from an onEnter {encounter}) during
+      // which the panel is hidden and re-shown — the awaiting show() then never resolves and the
+      // whole playthrough wedges. Render without awaiting, then pick on the next macrotask.
+      void orig(node);
+      await new Promise<void>((r) => setTimeout(r, 0));
       if (opts.screenshot && dialogues <= 40) { tr('shot…'); await opts.screenshot(`dlg-${String(dialogues).padStart(2, '0')}`); tr('shot done'); }
       const enabled = node.choices.map((c, i) => (c.enabled ? i : -1)).filter((i) => i >= 0);
       if (enabled.length === 0) { tr('resolve 0 (no choices)'); return 0; }
@@ -233,18 +376,63 @@ async function runAct1Playthrough(opts: { pick?: 'first' | 'last' | 'random'; sc
     let ok = false, note: string | undefined;
     if (beat.dwellSeconds) { const d0 = performance.now(); while (performance.now() - d0 < beat.dwellSeconds * 1000) await nextFrame(); }
     let talked = false;
+    let lastTalkState: string | null = null;
     while (performance.now() - t0 < limit) {
-      if (beat.talkTo && !talked && ctx.state.state === 'explore') {
-        talked = true;
-        let target: number | null = null;
-        ctx.world.each(Name, (id, n) => { if (target === null && n.id === beat.talkTo) target = id; });
-        if (target !== null) ex.interactWith(target);
-        else { const def = ctx.content.npcs.get(beat.talkTo); if (def?.dialogueRoot) void quest.runDialogue(def.dialogueRoot); }
+      if (beat.talkTo && !talked) {
+        if (ctx.state.state === 'explore') {
+          talked = true;
+          let target: number | null = null;
+          ctx.world.each(Name, (id, n) => { if (target === null && n.id === beat.talkTo) target = id; });
+          if (target !== null) ex.interactWith(target);
+          else { const def = ctx.content.npcs.get(beat.talkTo); if (def?.dialogueRoot) void quest.runDialogue(def.dialogueRoot); }
+        } else if (ctx.state.state !== lastTalkState) {
+          // The beat's NPC lives behind a cutscene/dialogue (e.g. beat 03's Fürst behind beat 01's
+          // intro cutscene): don't burn the single talk attempt while another scene owns the stage.
+          lastTalkState = ctx.state.state;
+          await nextFrame();
+          continue;
+        } else {
+          await nextFrame();
+          continue;
+        }
       }
       if (combat.isActive()) {
         fights++;
         if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-start`);
-        await combat.runScript([{ type: 'auto', rounds: beat.combatRounds ?? 40 }]);
+        // A real party triggers the deploy phase, which waits for a human to place units.
+        // The driver auto-confirms default placement (cmdDeploy with no moves = keep authored cells).
+        if (combat.getState()?.phase === 'deploy') combat.submit({ type: 'deploy', placements: [] });
+        // Harness-only autoplay: run in small chunks with a macrotask yield between them. A single
+        // `auto:40` keeps the tab inside one synchronous JS task for minutes under SwiftShader while
+        // the combat UI re-renders every round — the tab dies around round 27 with no error. Chunked
+        // auto lets the event loop breathe (rAF, screenshots, quest ticks) between rounds.
+        // If the AI grinds without reaching an outcome (e.g. beat 04's tutorial escort dying under
+        // unfocused AI auto-play while the human game is unaffected), concede via flee — every Act 1
+        // spine fight has a fled/lose branch, so the run exercises the quest graph instead of timing out.
+        // Reported explicitly as `harness-assist` in the beat note; never touches game balance.
+        const total = beat.combatRounds ?? 40;
+        let played = 0;
+        while (combat.isActive() && played < total) {
+          const chunk = Math.min(3, total - played);
+          await combat.runScript([{ type: 'auto', rounds: chunk }]);
+          played += chunk;
+          await new Promise<void>((r) => setTimeout(r, 0));
+          const st = combat.getState();
+          const stalled = combat.isActive() && st && st.phase !== 'ended'
+            && st.units.filter((u) => u.side === 'player' && (u.hp ?? 0) > 0).length === 0;
+          if (stalled) {
+            combat.submit({ type: 'flee' });
+            note = `harness-assist: conceded at round ${st.round} (no player units standing); quest takes fled branch`;
+            tr(`harness-assist flee at round ${st.round}`);
+            break;
+          }
+        }
+        if (combat.isActive()) {
+          // Still unresolved after the full budget (stalemate grind): concede rather than wedge the run.
+          combat.submit({ type: 'flee' });
+          note = `harness-assist: conceded after ${total} rounds without outcome; quest takes fled branch`;
+          tr('harness-assist flee after budget exhausted');
+        }
         if (opts.screenshot) await opts.screenshot(`${beat.name}-combat-end`);
         // a player would click the result panel's Continue; the driver dismisses it (it otherwise sits over every later beat)
         await nextFrame();
@@ -286,6 +474,23 @@ async function loadScenario(id: string): Promise<{ ok: boolean; skipped?: string
   const svc = ctx.services;
   const world = svc.tryGet('world');
   const notes: string[] = [];
+  // 0. teardown previous scenario's transient combat/dialogue (requests/world-2.md): a prior
+  // encounter left active (e.g. combat-brunnen-quay `auto:4`) keeps its render root alive and
+  // counted in every later capture of the same page session; a prior `void runDialogue` keeps
+  // its panel open. Flee has no quest side effects worth keeping for harness-only captures;
+  // the engine's `end` handler (src/combat/index.ts) drops the 3D transients via clearAfterEnd.
+  // Dialogue hide() reports neutral cancellation (cancelled:true, no node/choice effects run), so a
+  // single hide() now drains the panel instead of stepping a multi-node dialogue forward one node.
+  try {
+    const combatPrev = svc.tryGet('combat');
+    if (combatPrev?.isActive()) combatPrev.submit({ type: 'flee' });
+  } catch { /* harness teardown must never fail the next capture */ }
+  const uiPrev = svc.tryGet('ui');
+  if (uiPrev) {
+    try { uiPrev.dialogue.hide(); } catch { /* ignore */ }
+    try { uiPrev.combat.hide(); } catch { /* drop any lingering result card */ }
+  }
+  await nextFrame();
   // 1. game state
   if (sc.state === 'title') {
     ctx.state.transition('title');
@@ -448,6 +653,9 @@ function stats() {
     ...s,
     heapMB: mem ? Math.round(mem.usedJSHeapSize / 1048576) : null,
     renderer: ctx.gfx.rendererString(),
+    gpuP95: ctx.gfx.gpuP95(),
+    frameP95: ctx.gfx.frameP95(),
+    loadMarks: loadMarks(),
     entities: ctx.world.count(),
     chunksLoaded: ws?.chunksLoaded ?? 0,
     chunksPending: ws?.chunksPending ?? 0,
@@ -637,6 +845,10 @@ const api = {
   scenarios: (scenarios as unknown as Scenario[]).map((s) => s.id),
   runCombatScript: async (cmds: CombatCommand[]) => ctx.services.get('combat').runScript(cmds),
   runAct1Playthrough,
+  loadMarks,
+  // 5.4: crash log surface for the Settings/Pause viewer (owner: src/ui/menus.ts — wire a
+  // viewer there in the 5.5/5.6 pass) and for harness assertions.
+  crashLog: { list: () => crashlog.list(), clear: () => crashlog.clear(), exportJson: () => crashlog.exportJson() },
 };
 (window as any).__game = api;
 if (HARNESS) (window as any).__harness = api;

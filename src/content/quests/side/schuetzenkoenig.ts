@@ -7,9 +7,10 @@ export const schuetzenkoenig: QuestDef = {
   description: 'A crossbow contest by the Altdorf lime tree, eighty paces — the same distance as the legend.',
   stages: [
     {
-      id: 'entry', journal: 'Burkhard Wyrsch invites you to enter the Altdorf shooting contest.',
+      id: 'offer', journal: 'Burkhard Wyrsch invites you to enter the Altdorf shooting contest.',
       marker: 'poi.altdorf', objectiveText: 'Enter the contest.',
       onEnter: [{ dialogue: 'dlg.schuetzenkoenig-entry' }],
+      advanceWhen: [{ cond: { nearPoi: ['poi.altdorf', 160] }, to: 'contest' }],
     },
     {
       id: 'contest', journal: 'The mark stands eighty paces off, ringed in chalk.',
@@ -17,7 +18,7 @@ export const schuetzenkoenig: QuestDef = {
       onEnter: [{ dialogue: 'dlg.schuetzenkoenig-contest' }],
     },
     {
-      id: 'prize', journal: 'The contest is decided.',
+      id: 'prize', journal: 'The contest is decided — the board shows the heats, and your bolt among them.',
       onEnter: [{ quest: ['complete', 'quest.schuetzenkoenig'] }],
     },
   ],

@@ -26,7 +26,7 @@ export const marchenstreit: QuestDef = {
       // `conflicted` variant already assumes he is present for it. Critic wave3-quest.md #6/§6 step 10:
       // restraint decides whether he stays — a brutal raid he did not choose costs the party his company.
       // `removeCompanion` on someone who was never a member is a safe no-op, so this is unconditional.
-      onEnter: [{ removeCompanion: 'npc.bruder-anselm' }, { encounter: 'enc.einsiedeln-gate' }, { rep: ['einsiedeln', -20] }],
+      onEnter: [{ removeCompanion: 'npc.bruder-anselm' }, { setVar: ['quest.marchenstreit', 'negotiated', false] }, { encounter: 'enc.einsiedeln-gate' }, { rep: ['einsiedeln', -20] }, { journal: 'The abbey was plundered before dawn and its monks dragged to Schwyz. The March is grazed again — and the bishop\'s ban followed within weeks.' }],
       advanceWhen: [
         { cond: { var: ['quest.marchenstreit', 'combat.outcome', 'win'] }, to: 'aftermath' },
         { cond: { var: ['quest.marchenstreit', 'combat.outcome', 'fled'] }, to: 'aftermath' },
@@ -46,5 +46,5 @@ export const marchenstreit: QuestDef = {
       ],
     },
   ],
-  onStart: [{ toast: 'Quest started: Marchenstreit' }],
+  onStart: [{ toast: 'Quest started: Marchenstreit' }, { music: 'music.explore' }],
 };

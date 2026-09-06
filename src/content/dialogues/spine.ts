@@ -116,6 +116,7 @@ export const spineDialogues: DialogueDef[] = [
         choices: [
           { text: 'Walk in among the labourers.', check: { skill: 'stealth', dc: 13, fail: 'noticed' }, next: 'inside' },
           { text: 'Talk your way past the gate guard instead.', check: { skill: 'speech', dc: 13, fail: 'noticed' }, next: 'inside' },
+          { text: 'Scout the gate from the treeline first, then decide.', next: 'inside' },
         ],
       },
       inside: { speaker: 'narrator', text: 'Once inside, the half-finished walls give you every advantage — the garrison surrenders the half-built keep without much of a fight once they see how many of "the labourers" have thrown down their sacks for weapons.', effects: [{ rep: ['uri', 8] }, { giveItem: ['item.pfennig-purse', 1] }, { quest: ['advance', 'quest.burgenbruch', 'aftermath'] }], end: true },
@@ -127,7 +128,10 @@ export const spineDialogues: DialogueDef[] = [
     nodes: {
       wall: {
         speaker: 'narrator', text: 'Under Rotzberg\'s wall at night, a rope drops from a high window — a servant girl\'s doing, so the story goes, for love of one of the men below. Climbing it in the dark, in silence, is another matter entirely.',
-        choices: [{ text: 'Climb.', check: { skill: 'athletics', dc: 14, fail: 'slip' }, next: 'top' }],
+        choices: [
+          { text: 'Climb.', check: { skill: 'athletics', dc: 14, fail: 'slip' }, next: 'top' },
+          { text: 'Wait for the changing of the watch below the wall.', next: 'top' },
+        ],
       },
       top: { speaker: 'narrator', text: 'You are over the wall and among the sleeping garrison before a single man wakes. Rotzberg falls before dawn, as the tellers of Sarnen have it.', effects: [{ rep: ['unterwalden', 8] }, { quest: ['advance', 'quest.burgenbruch', 'aftermath'] }], end: true },
       slip: { speaker: 'narrator', text: 'Your boot scrapes stone loud enough to wake a light sleeper below — the fight that follows is short but not silent. Rotzberg falls all the same, by morning.', effects: [{ rep: ['unterwalden', 4] }, { quest: ['advance', 'quest.burgenbruch', 'aftermath'] }], end: true },
@@ -138,7 +142,10 @@ export const spineDialogues: DialogueDef[] = [
     nodes: {
       gift: {
         speaker: 'narrator', text: "New Year's morning: Sarnen's men form a procession up to Landenberg's hill bearing gift baskets for the bailiff — hams, cheeses, and, hidden under the linen, halberds broken down to fit.",
-        choices: [{ text: 'Carry a basket in and keep your face pleasant.', check: { skill: 'speech', dc: 13, fail: 'suspicious' }, next: 'inside' }],
+        choices: [
+          { text: 'Carry a basket in and keep your face pleasant.', check: { skill: 'speech', dc: 13, fail: 'suspicious' }, next: 'inside' },
+          { text: 'Hang back with the last baskets and slip in unnoticed.', next: 'inside' },
+        ],
       },
       inside: { speaker: 'narrator', text: 'Landenberg accepts his gifts with a bailiff\'s customary graciousness, never once suspecting the linen. When the baskets open, the hill is yours before he finds his sword.', effects: [{ rep: ['unterwalden', 8] }, { quest: ['advance', 'quest.burgenbruch', 'aftermath'] }], end: true },
       suspicious: { speaker: 'narrator', text: 'A guard eyes your basket a moment too long — but the halberds are already coming out from under the linen by the time he decides to say something.', effects: [{ rep: ['unterwalden', 4] }, { quest: ['advance', 'quest.burgenbruch', 'aftermath'] }], end: true },
@@ -166,7 +173,10 @@ export const spineDialogues: DialogueDef[] = [
     nodes: {
       work: {
         speaker: 'narrator', text: 'The letzi wall at Sattel wants raising before the snow makes the work impossible — stone and timber both, and not enough hands who know how to lay either properly.',
-        choices: [{ text: 'Set to work on the wall.', check: { skill: 'craft', dc: 14, fail: 'letzi-weak' }, next: 'letzi-strong' }],
+        choices: [
+          { text: 'Set to work on the wall.', check: { skill: 'craft', dc: 14, fail: 'letzi-weak' }, next: 'letzi-strong' },
+          { text: 'Organise the work-gangs and carry stone yourself.', next: 'letzi-weak' },
+        ],
       },
       'letzi-strong': { speaker: 'narrator', text: 'By the time the first snow falls, the letzi stands higher and thicker than anyone hoped, a full extra course of stone and timber run the length of the Schornen valley floor — a real wall, not a gesture of one.', effects: [{ setVar: ['quest.muster-1315', 'letzi', 'strong'] }, { setFlag: ['morgarten.letzi-improved', true] }, { quest: ['advance', 'quest.muster-1315', 'recruit'] }], end: true },
       'letzi-weak': { speaker: 'narrator', text: 'The wall goes up, serviceable if unlovely — it will hold, though it will not impress anyone who has seen a proper fortification.', effects: [{ setVar: ['quest.muster-1315', 'letzi', 'weak'] }, { quest: ['advance', 'quest.muster-1315', 'recruit'] }], end: true },
@@ -177,10 +187,26 @@ export const spineDialogues: DialogueDef[] = [
     nodes: {
       call: {
         speaker: 'narrator', text: 'Every valley must send men, and every man sent must be fed, armed, and, ideally, willing. Walking the Landsgemeinde meadows to talk farmers into halberds is its own kind of work.',
-        choices: [{ text: 'Make the rounds and recruit.', check: { skill: 'leadership', dc: 14, fail: 'recruit-thin' }, next: 'recruit-strong' }],
+        choices: [
+          { text: 'Make the rounds and recruit.', check: { skill: 'leadership', dc: 14, fail: 'recruit-thin' }, next: 'recruit-strong' },
+          { text: 'Send word by the Landsgemeinde messengers instead.', next: 'recruit-thin' },
+        ],
       },
-      'recruit-strong': { speaker: 'narrator', text: 'More men answer the call than the Ammann dared hope — the Schwyz contingent alone swells past what the old counts allowed for, a full two files of spears more than the last levy raised.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'strong'] }, { setFlag: ['morgarten.recruits-strong', true] }, { quest: ['advance', 'quest.muster-1315', 'travel-zug'] }], end: true },
-      'recruit-thin': { speaker: 'narrator', text: 'You get enough men to matter, though not so many that anyone feels easy about the odds. It will have to do.', effects: [{ setVar: ['quest.muster-1315', 'recruits', 'thin'] }, { quest: ['advance', 'quest.muster-1315', 'travel-zug'] }], end: true },
+      'recruit-strong': {
+        speaker: 'narrator', text: 'More men answer the call than the Ammann dared hope — the Schwyz contingent alone swells past what the old counts allowed for, a full two files of spears more than the last levy raised.',
+        variants: [
+          { condition: { var: ['quest.marchenstreit', 'restraint', false] }, text: 'More men answer than the Ammann dared hope — though some hedge when Einsiedeln is named, and you hear "plunder" muttered when your back is turned. Two full files of spears more than the last levy, all the same.' },
+          { condition: { var: ['quest.marchenstreit', 'restraint', true] }, text: 'More men answer than the Ammann dared hope. Word went round that you held for talk at Einsiedeln, and the hesitant ones come easier for it — a full two files of spears more than the last levy.' },
+        ],
+        effects: [{ setVar: ['quest.muster-1315', 'recruits', 'strong'] }, { setFlag: ['morgarten.recruits-strong', true] }, { quest: ['advance', 'quest.muster-1315', 'travel-zug'] }], end: true,
+      },
+      'recruit-thin': {
+        speaker: 'narrator', text: 'You get enough men to matter, though not so many that anyone feels easy about the odds. It will have to do.',
+        variants: [
+          { condition: { var: ['quest.marchenstreit', 'restraint', false] }, text: 'You get enough men to matter — fewer than hoped. More than one farmer looks at his boots when Einsiedeln is named. It will have to do.' },
+        ],
+        effects: [{ setVar: ['quest.muster-1315', 'recruits', 'thin'] }, { quest: ['advance', 'quest.muster-1315', 'travel-zug'] }], end: true,
+      },
     },
   },
   {
@@ -188,7 +214,10 @@ export const spineDialogues: DialogueDef[] = [
     nodes: {
       scout: {
         speaker: 'narrator', text: "Zug's streets are thick with Habsburg banners and unfamiliar accents — Duke Leopold's column musters here before it moves, tent-rows enough to count from the hillside if a man is patient and unseen.",
-        choices: [{ text: 'Scout the camp.', check: { skill: 'stealth', dc: 15, fail: 'scout-caught' }, next: 'scout-clean' }],
+        choices: [
+          { text: 'Scout the camp.', check: { skill: 'stealth', dc: 15, fail: 'scout-caught' }, next: 'scout-clean' },
+          { text: 'Count the tents from the hillside road without going in.', next: 'scout-caught' },
+        ],
       },
       'scout-clean': {
         speaker: 'narrator', text: 'From the hillside above the camp you count it properly and slip out again unseen: knights foremost, then rank on rank of footmen and crossbowmen, then a baggage train long enough that its tail is still making camp when its head has already struck tents — by your best count, some two thousand men, and no mistaking the size of it.',
@@ -208,6 +237,17 @@ export const spineDialogues: DialogueDef[] = [
         ],
         end: true,
       },
+    },
+  },
+  {
+    id: 'dlg.muster-retry', historical: 'invented', note: 'Retry beat for the Morgarten second pass (quest.morgarten carried-off handler); survivors regrouping at Sattel. LORE.md §6/§10.',
+    root: 'return',
+    nodes: {
+      return: {
+        speaker: 'narrator', text: 'Back at Sattel with what the slope spared you. The letzi still stands — half-built, snow-dusted — and the men who lived are stacking stone again without being told.',
+        choices: [{ text: 'Take up the work again.', next: 'vow' }],
+      },
+      vow: { speaker: 'narrator', text: '"This time," somebody says, not loud, "we hold." Nobody argues.', effects: [{ quest: ['advance', 'quest.muster-1315', 'letzi-craft'] }], end: true },
     },
   },
 ];

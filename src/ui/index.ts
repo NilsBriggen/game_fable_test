@@ -3,21 +3,42 @@
  * lives under src/ui/**. Vanilla TS, no framework, per BUILDER_RULES.md.
  */
 import type { GameContext } from '@core/context';
+import { Transform } from '@core/components';
 import type { CombatCommand, HudState, MenuId, UiService } from '@core/services';
 import { el, clear } from './dom';
 import { createHud, createLoading, showConfirm } from './hud';
 import { createDialogueUi } from './dialogueUi';
 import { createCutsceneUi } from './cutsceneUi';
 import { createCombatUi } from './combatUi';
+import { createAudio } from './audio';
 import { renderMenu, applyUiSettingsSideEffects, type MenuApi } from './menus';
 
 export async function register(ctx: GameContext): Promise<void> {
   const mount = ctx.uiRoot;
   clear(mount);
 
+  // ---------------- audio (engine + file upgrades: voices §1.7, Flow music §2.2) ----------------
+  // Created before the service object below: quest.setMusic drives service.audio, and the quest
+  // module looks the UI service up lazily — but the combat/ambience wiring further down must use
+  // this same instance.
+  const audio = createAudio();
+  audio.setVolume(ctx.settings.masterVolume);
+  audio.setVoicesEnabled(ctx.settings.voicesEnabled);
+  ctx.onSettings((s) => { audio.setVolume(s.masterVolume); audio.setVoicesEnabled(s.voicesEnabled); });
+  // Voice sink shared by dialogue + cutscene overlays: slug convention matches the fetcher
+  // (lowercase, non-alnum → '-'); missing file / disabled = silent, text remains.
+  // Voice locales are en + de only: gsw text falls back to the High German voice files.
+  const voiceSink = {
+    play: (id: string) => {
+      const lang = ctx.settings.language === 'gsw' ? 'de' : ctx.settings.language;
+      audio.playVoice(lang, id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''));
+    },
+    stop: () => { audio.stopVoice(); },
+  };
+
   const hud = createHud(ctx, mount);
-  const dialogueUi = createDialogueUi(mount, () => currentMenu !== null);
-  const cutsceneUi = createCutsceneUi(mount);
+  const dialogueUi = createDialogueUi(mount, () => currentMenu !== null, voiceSink);
+  const cutsceneUi = createCutsceneUi(mount, voiceSink);
   const combatUi = createCombatUi(ctx, mount);
   const loading = createLoading(mount);
   const menuRoot = el('div', { id: 'menu-root' });
@@ -74,6 +95,11 @@ export async function register(ctx: GameContext): Promise<void> {
     }
   }
 
+  // ---------------- audio (engine + file upgrades: voices §1.7, Flow music §2.2) ----------------
+  // Created before the service object below: quest.setMusic drives service.audio, and the quest
+  // module looks the UI service up lazily — but the combat/ambience wiring further down must use
+  // this same instance. (voiceSink lives with the overlay construction above.)
+
   const service: UiService = {
     showHud(on: boolean): void {
       hud.setVisible(on);
@@ -96,6 +122,7 @@ export async function register(ctx: GameContext): Promise<void> {
     dialogue: dialogueUi,
     combat: combatUi,
     cutscene: cutsceneUi,
+    audio,
     prompt(text) {
       hud.prompt(text);
     },
@@ -108,10 +135,40 @@ export async function register(ctx: GameContext): Promise<void> {
   };
   ctx.services.register('ui', service);
 
-  // Settings the UI module can apply without touching src/world: pixel ratio, camera far,
-  // shadow enable flag — applied once at boot and on every later change.
-  applyUiSettingsSideEffects(ctx);
-  ctx.onSettings(() => applyUiSettingsSideEffects(ctx));
+  // ---------------- audio wiring (unlock, clicks, ambience, combat) ----------------
+  // Autoplay-safe: create/resume the context on the first real user gesture.
+  const unlockAudio = (): void => {
+    audio.unlock();
+    window.removeEventListener('pointerdown', unlockAudio);
+    window.removeEventListener('keydown', unlockAudio);
+  };
+  window.addEventListener('pointerdown', unlockAudio);
+  window.addEventListener('keydown', unlockAudio);
+  // UI feedback: click on button presses; combat damage thuds via the combat event stream.
+  // (Single delegated listener on mount — menuRoot lives inside mount, so one is enough.)
+  mount.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement | null)?.closest('button')) audio.click();
+  });
+  // Region ambience follows the game state: title air, explore by nearest POI kind, combat beds.
+  // polled cheaply (0.5 s) — region/POI lookups are map gets, no allocation beyond the closure.
+  const regionAmbience = window.setInterval(() => {
+    try {
+      const st = ctx.state.state;
+      if (st === 'title' || st === 'creation' || st === 'boot') { audio.setAmbience('none'); return; }
+      if (st === 'combat') return; // combat wiring below owns the bed during fights
+      const ex = ctx.services.tryGet('exploration');
+      const pid = ex?.getPlayer() ?? null;
+      if (pid === null) { audio.setAmbience('none'); return; }
+      const t = ctx.world.get(pid, Transform);
+      const poi = t ? ex?.nearestPoi(t.x, t.z) : null;
+      const kind = poi?.kind;
+      if (kind === 'port' || kind === 'landmark' || poi?.id === 'poi.ruetli') audio.setAmbience('lake');
+      else if (kind === 'monastery' || kind === 'church') audio.setAmbience('church');
+      else if (kind === 'alp' || kind === 'wall' || kind === 'battlefield') audio.setAmbience('mountain');
+      else audio.setAmbience('village');
+    } catch { /* ambience must never break the frame */ }
+  }, 500);
+  void regionAmbience;
 
   // ---------------- combat wiring: drive combatUi from CombatService's own event stream ----------------
   // "Wiring" (task spec): poll combat.getState() via combat.on('state')/on('event'); combatUi's own
@@ -122,10 +179,34 @@ export async function register(ctx: GameContext): Promise<void> {
     let shown = false;
     combat.on('state', (view) => {
       if (!view) { if (shown) { shown = false; combatUi.hide(); } return; }
-      if (!shown) { shown = true; combatUi.show(view); } else { combatUi.update(view); }
+      if (!shown) { shown = true; combatUi.show(view); void audio.playMusicTrack('battle'); } else { combatUi.update(view); }
     });
-    combat.on('end', () => { shown = false; combatUi.hideAfterResult(); });
+    combat.on('end', () => { shown = false; combatUi.hideAfterResult(); audio.stopMusic(); });
+    // 3.4 audio: procedural hit thud + clash on presented combat damage/attacks, twang on shots,
+    // fanfare/lament on the result card (rest/travel stay silent).
+    combat.on('event', (rec) => {
+      if (rec.kind === 'damage') {
+        const amount = typeof rec.data?.amount === 'number' ? (rec.data.amount as number) : 0;
+        if (amount > 0) audio.hit();
+        else audio.clash(); // blocked/parried attacks still ring
+      } else if (rec.kind === 'attack') {
+        const weapon = String((rec.data as { weapon?: unknown } | undefined)?.weapon ?? '');
+        if (/bow|crossbow|bolzen/i.test(weapon)) audio.twang();
+        else audio.clash();
+      } else if (rec.kind === 'end') {
+        const outcome = (rec.data as { outcome?: string } | undefined)?.outcome;
+        if (outcome === 'win') { audio.fanfare(); }
+        else if (outcome === 'lose') { audio.lament(); }
+      }
+    });
   }
+  // 3.4: quest fanfare/lament on completion/failure (the combat result card already covers fights).
+  // Quest events live on the quest service's own bus (QuestEvents), not the global GameEvents bus.
+  // The committed one-shot stingers layer over the procedural fanfare/lament (both play when files
+  // exist; procedural alone when they don't — never silence-by-error).
+  const quest = ctx.services.tryGet('quest');
+  quest?.on('quest-completed', () => { audio.playStinger('quest-done'); audio.fanfare(); });
+  quest?.on('quest-failed', () => { audio.playStinger('quest-fail'); audio.lament(); });
 
   // ---------------- keyboard ----------------
   function isTyping(): boolean {

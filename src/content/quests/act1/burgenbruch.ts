@@ -56,5 +56,5 @@ export const burgenbruch: QuestDef = {
       ],
     },
   ],
-  onStart: [{ toast: 'Quest started: Burgenbruch' }],
+  onStart: [{ toast: 'Quest started: Burgenbruch' }, { music: 'music.explore' }],
 };

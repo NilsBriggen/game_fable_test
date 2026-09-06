@@ -11,7 +11,7 @@ import { Transform } from '@core/components';
 import type { SaveHost } from './host';
 import type { SaveStore } from './db';
 import { assertSaveShape, createSaveStore, decodeSave, encodeSave, metaFromSave } from './db';
-import { applyWorldState, buildSnapshot } from './snapshot';
+import { applyWorldState, applyDifficulty, buildSnapshot } from './snapshot';
 import { migrateToCurrent } from './migrations';
 
 const AUTOSAVE_INTERVAL_SEC = 10 * 60;
@@ -81,6 +81,11 @@ export class SaveServiceImpl implements SaveService {
       // world is touched even if a later step in applyWorldState throws partway through.
       worldTouched = true;
       applyWorldState(host, save);
+      // 4.4: restore the save's difficulty metadata into live settings (tolerant: absent → 'normal').
+      // Prefer ctx.applySettings (persists to localStorage + fans out to subscribers) when the host is
+      // a full GameContext; the pure helper covers headless/test hosts without it.
+      if (typeof host.applySettings === 'function') host.applySettings({ difficulty: applyDifficulty(host, save) });
+      else applyDifficulty(host, save);
 
       const quest = host.services.tryGet('quest');
       const exploration = host.services.tryGet('exploration');

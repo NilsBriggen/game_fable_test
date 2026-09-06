@@ -13,7 +13,7 @@
  * InstancedMesh pools in vegetation.ts hold the geometry by reference and are built long before any
  * fetch resolves.
  */
-import { BufferGeometry, Float32BufferAttribute, LinearSRGBColorSpace, MeshStandardMaterial, RepeatWrapping, SRGBColorSpace, TextureLoader, Uint16BufferAttribute, Uint32BufferAttribute } from 'three';
+import { BufferGeometry, Float32BufferAttribute, MeshStandardMaterial, NoColorSpace, RepeatWrapping, SRGBColorSpace, TextureLoader, Uint16BufferAttribute, Uint32BufferAttribute } from 'three';
 import { boulderGeometry } from '../propGeometry';
 import { applyAerialFog } from '../terrainMaterial';
 import { registerCsmMaterial } from '../shadowCsm';
@@ -96,7 +96,7 @@ export function rockScanMaterial(): MeshStandardMaterial {
   map.colorSpace = SRGBColorSpace;
   map.wrapS = map.wrapT = RepeatWrapping;
   const normalMap = loader.load(`${ASSET_BASE}/rock-scan-nor.jpg`);
-  normalMap.colorSpace = LinearSRGBColorSpace;
+  normalMap.colorSpace = NoColorSpace;
   normalMap.wrapS = normalMap.wrapT = RepeatWrapping;
   mat = new MeshStandardMaterial({ map, normalMap, roughness: 0.94, metalness: 0 });
   mat.fog = false;

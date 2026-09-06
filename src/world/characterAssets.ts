@@ -192,9 +192,15 @@ export function loadCharacterModel(id: string): Promise<CharacterModel | null> {
     template.updateMatrixWorld(true);
     const box = new Box3().setFromObject(template);
     const hips = template.getObjectByName('Hips');
+    if (!hips) {
+      // A body without a Hips bone cannot be retargeted (hip-height scaling would explode) — reject
+      // to the procedural fallback instead of poisoning the cache with a 100 m sentinel.
+      modelCache.delete(id);
+      return null;
+    }
     return {
       id, template, height: box.max.y - box.min.y, minY: box.min.y,
-      hipRest: hips ? hips.position.clone() : new Vector3(0, 100, 0), clips: new Map(),
+      hipRest: hips.position.clone(), clips: new Map(),
     };
   })();
   modelCache.set(id, p);
@@ -237,6 +243,9 @@ export async function modelClip(model: CharacterModel, name: string): Promise<An
   if (hit !== undefined) return hit;
   const raw = await loadClip(name);
   if (!raw) { model.clips.set(name, null); return null; }
+  // Bodies whose bind pose lacks usable hips data cannot be retargeted safely (a near-zero or missing
+  // hip height would scale translations by orders of magnitude) — reject to the procedural fallback.
+  if (!Number.isFinite(raw.hipY) || raw.hipY < 0.05) { model.clips.set(name, null); return null; }
   const k = model.hipRest.y / raw.hipY;
   // only bones this body has (Castle Guards have no finger bones): a missing target logs a warning per frame
   const have = new Set<string>();

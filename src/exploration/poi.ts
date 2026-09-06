@@ -166,5 +166,7 @@ export class PoiSystem {
     this.events.emit('poi-discovered', poiId);
     const def = this.content.pois.get(poiId);
     this.services.tryGet('ui')?.toast(`Discovered: ${def?.name ?? poiId}`, 'info');
+    // 4.6 fog: the map image bakes its reveal discs, so a new discovery re-bakes (cheap, cached).
+    this.services.tryGet('world')?.invalidateMapCache?.();
   }
 }

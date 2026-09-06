@@ -23,6 +23,9 @@ export const namedCastDialogues: DialogueDef[] = [
       },
       ch1: {
         speaker: 'npc.werner-stauffacher', text: 'Sixteen years since the Rütli, {player}, and still that hat sits on its pole. My own household tells me I brood on it too much.',
+        variants: [
+          { condition: { flag: 'gessler-hat-choice', eq: 'fought' }, text: 'There was steel over that hat, {player}, and your name on it. Schwyz remembers who bleeds early — mind the Vogt does too.' },
+        ],
         choices: [
           { text: 'What will Schwyz do about it?', next: 'ch1-resolve' },
           { text: 'How fares your house at Steinen?', next: 'ch1-house' },
@@ -83,7 +86,10 @@ export const namedCastDialogues: DialogueDef[] = [
       },
       ch1: {
         speaker: 'npc.arnold-von-melchtal', text: 'My father cannot see the alp he tended his whole life, {player}, because a bailiff\'s man took his eyes for it. Tell me I am wrong to want the Vogt gone.',
-        variants: [{ condition: { hasCompanion: 'npc.wilhelm-tell' }, text: 'You keep good company these days — a man who puts a bolt exactly where he means to.' }],
+        variants: [
+          { condition: { hasCompanion: 'npc.wilhelm-tell' }, text: 'You keep good company these days — a man who puts a bolt exactly where he means to.' },
+          { condition: { flag: 'gessler-hat-choice', eq: 'watched' }, text: 'You stood in the square and watched Tell refuse, {player}? My father would have paid his last goat to see that morning.' },
+        ],
         choices: [{ text: 'You are not wrong, Arnold.', effects: [{ rep: ['unterwalden', 3] }], end: true }, { text: 'Vengeance is a heavy thing to carry.', end: true }],
       },
       ch2: { speaker: 'npc.arnold-von-melchtal', text: 'My halberd is sharp and my father still cannot see me carry it. That will have to be enough reason for Morgarten.', end: true },
@@ -94,6 +100,8 @@ export const namedCastDialogues: DialogueDef[] = [
     id: 'dlg.wilhelm-tell', historical: 'legend', note: 'Entirely L; central Tell tradition. Chapter-1-only NPC. LORE.md §5.',
     root: [
       { condition: { questStage: ['quest.der-hut', 'apple-shot'] }, node: 'steady' },
+      { condition: { all: [{ hasCompanion: 'npc.wilhelm-tell' }, { questStage: ['quest.der-hut', 'travel-hohle-gasse'] }] }, node: 'campfire-eve' },
+      { condition: { all: [{ hasCompanion: 'npc.wilhelm-tell' }, { questStage: ['quest.der-hut', 'burgenbruch'] }] }, node: 'campfire-after' },
       { condition: { hasCompanion: 'npc.wilhelm-tell' }, node: 'companion' },
       { condition: { chapter: 'ch1-1307' }, node: 'general' },
     ],
@@ -108,6 +116,17 @@ export const namedCastDialogues: DialogueDef[] = [
       'steady-thanks': { speaker: 'npc.wilhelm-tell', text: 'Then stand where I can see you and say nothing more. The wind is worse than the range.', effects: [{ cutscene: 'cs.apfelschuss' }], end: true },
       'steady-grim': { speaker: 'npc.wilhelm-tell', text: 'Watch or not, it happens the same. Stand back, then, and let me work.', effects: [{ cutscene: 'cs.apfelschuss' }], end: true },
       companion: { speaker: 'npc.wilhelm-tell', text: 'Every crossing on this lake, I know its temper, {player}. Say the word if you need a bolt loosed instead of a boat rowed.', end: true },
+      'campfire-eve': {
+        speaker: 'npc.wilhelm-tell', text: 'Fire\'s low, {player}. Tomorrow Gessler rides the sunken road, and my bolt will be waiting. I have shot it twice already in my head — once for him, once for the miss I will not make.',
+        choices: [
+          { text: '"Sleep, Tell. Dawn is early."', end: true },
+          { text: '"The road behind you is held."', effects: [{ rep: ['uri', 2] }], end: true },
+        ],
+      },
+      'campfire-after': {
+        speaker: 'npc.wilhelm-tell', text: 'Gessler\'s dead in the ditch, {player}, and Bürglen smells the same as ever from here. Burn the strongholds if you must — my part of this was one bolt, and it is spent.',
+        choices: [{ text: '"Uri owes you more than it can pay."', end: true }],
+      },
       general: { speaker: 'npc.wilhelm-tell', text: 'Bürglen keeps me fed on venison and lets me be, mostly. That hat on the Altdorf pole is the Vogt\'s idea of a joke, and a poor one.', end: true },
     },
   },
@@ -154,11 +173,12 @@ export const namedCastDialogues: DialogueDef[] = [
         choices: [{ text: '"Walter Fürst says there will be a meeting."', next: 'meeting' }],
       },
       meeting: { speaker: 'npc.werner-von-attinghausen', text: 'There will be. Steinen, or near it — word will reach you. Go carefully, and go quietly; not every ear on the road loves us.', end: true },
-      'prologue-other': { speaker: 'npc.werner-von-attinghausen', text: 'Uri answers to no bailiff while the Attinghausen name still carries weight in the valley, {player}. That much I intend to keep true.', end: true },
+      'prologue-other': { speaker: 'npc.werner-von-attinghausen', text: 'The house of Attinghausen has stood by Uri since before any charter was written, {player}. While my name still carries weight in the valley, no bailiff rules here unchallenged. That much I intend to keep true.', end: true },
       ch1: {
         speaker: 'npc.werner-von-attinghausen', text: 'I counsel patience where Werner Stauffacher counsels the sword, {player}. Which of us is right, the years ahead will show — I only hope the showing costs us little.',
         variants: [
           { condition: { flag: 'gessler-hat-choice', eq: 'bowed' }, text: 'Word reached me that you bowed to the hat, {player}. A wise-enough head for a bad season — I do not fault it.' },
+          { condition: { flag: 'gessler-hat-choice', eq: 'walked-past' }, text: 'Word reached me that you walked past the hat and reasoned your way clear of the guards after, {player}. A cool head in a watched square — Uri needs more of those than of drawn steel.' },
           { condition: { flag: 'gessler-hat-choice', eq: 'watched' }, text: 'They tell me you stood by and watched Tell refuse that hat, {player}, and said nothing yourself. A cautious man\'s way through a dangerous morning.' },
           { condition: { flag: 'gessler-hat-choice', eq: 'fought' }, text: 'I heard there was steel drawn in the square over that hat, {player}, and your name attached to it. The Vogt will remember it, and so will I.' },
         ],
@@ -194,9 +214,16 @@ export const namedCastDialogues: DialogueDef[] = [
           { text: 'Say nothing, and let the men behind you speak instead.', effects: [{ quest: ['advance', 'quest.marchenstreit', 'raid'] }], end: true },
         ],
       },
-      'negotiate-success': { speaker: 'npc.abt-johannes', text: 'You argue like a man who has read the Bundesbrief\'s own clause on arbitration. Very well — I will not bar the gate, but this is not forgiveness, only patience.', effects: [{ rep: ['einsiedeln', 10] }, { setVar: ['quest.marchenstreit', 'negotiated', true] }, { quest: ['advance', 'quest.marchenstreit', 'aftermath'] }], end: true },
-      'negotiate-fail': { speaker: 'npc.abt-johannes', text: 'Pretty words do not return grazing rights, {player}. Stand aside, or stand against us — the choice is not really mine to make gentle.', effects: [{ quest: ['advance', 'quest.marchenstreit', 'aftermath'] }], end: true },
-      'ch2-other': { speaker: 'npc.abt-johannes', text: 'We are excommunicate by our own bishop\'s word, {player}, and Schwyz still grazes where it pleases. I pray the arbitration your Bundesbrief promises is not only ink.', end: true },
+      'negotiate-success': { speaker: 'npc.abt-johannes', text: 'You argue like a man who has read the Bundesbrief\'s own clause on arbitration. Very well — I will not bar the gate, but this is not forgiveness, only patience.', effects: [{ rep: ['einsiedeln', 10] }, { setVar: ['quest.marchenstreit', 'negotiated', true] }, { journal: 'The abbot heard terms at the gate, and no blood was shed at Einsiedeln — yet the bishop\'s ban fell on Schwyz all the same.' }, { quest: ['advance', 'quest.marchenstreit', 'aftermath'] }], end: true },
+      'negotiate-fail': { speaker: 'npc.abt-johannes', text: 'Pretty words do not return grazing rights, {player}. Stand aside, or stand against us — the choice is not really mine to make gentle.', effects: [{ setVar: ['quest.marchenstreit', 'negotiated', false] }, { journal: 'Talk failed at the abbey gate, and Schwyz took what words could not get. The bishop\'s ban was not long in coming.' }, { quest: ['advance', 'quest.marchenstreit', 'aftermath'] }], end: true },
+      'ch2-other': {
+        speaker: 'npc.abt-johannes', text: 'We are excommunicate by our own bishop\'s word, {player}, and Schwyz still grazes where it pleases. I pray the arbitration your Bundesbrief promises is not only ink.',
+        variants: [
+          { condition: { var: ['quest.marchenstreit', 'negotiated', true] }, text: 'Excommunicate by our own bishop\'s word, {player} — and yet you heard me out at the gate when others would not. I have not forgotten it, whatever the bishop\'s clerks write of Schwyz.' },
+          { condition: { var: ['quest.marchenstreit', 'restraint', false] }, text: 'Excommunicate, {player}, and my monks still wake dreaming of haltered wrists. Keep to your side of the March when you come here.' },
+        ],
+        end: true,
+      },
       ch1: { speaker: 'npc.abt-johannes', text: 'The abbey keeps its accounts of the March pastures carefully, {player}, charter by charter, since before your grandfather\'s grandfather. Schwyz keeps its own count of grievances just as carefully.', end: true },
     },
   },

@@ -3,7 +3,7 @@
  * so the elevation model itself is what needs pinning down.
  */
 import { describe, it, expect } from 'vitest';
-import { dayOfYearFromCalendar, solarPosition, lunarPosition } from './sky';
+import { dayOfYearFromCalendar, solarPosition, lunarPosition, effectiveExposureForHour, exposureAtElevation } from './sky';
 
 const deg = (rad: number): number => (rad * 180) / Math.PI;
 
@@ -70,5 +70,30 @@ describe('lunar position', () => {
     for (let doy = 1; doy <= 30; doy++) if (lunarPosition(doy, 23).elevation > 0) up++;
     expect(up).toBeGreaterThan(9);
     expect(up).toBeLessThan(28);
+  });
+});
+
+describe('evening exposure legibility (free-pilatus-luzern near-black)', () => {
+  const aug = dayOfYearFromCalendar(8, 1);
+
+  it('keeps hour-19 clear effective exposure at or above the legible floor', () => {
+    const evening = effectiveExposureForHour(aug, 19, 'clear');
+    const dayFloor = exposureAtElevation(10); // day-side of the dusk ramp (regression guard)
+    expect(evening).toBeGreaterThanOrEqual(dayFloor);
+    // Legible dusk floor: hour-19 must not dip below its own el=3 dusk key (1.6 pre-fix).
+    // Pre-fix hour-19 interpolates 3->10 down to ~1.58 and fails; the fix lifts the ramp.
+    expect(evening).toBeGreaterThanOrEqual(1.6);
+  });
+
+  it('keeps hour-23 exposure inside the current night range (no accidental brightening)', () => {
+    const night = effectiveExposureForHour(aug, 23, 'clear');
+    expect(night).toBeGreaterThanOrEqual(1.5);
+    expect(night).toBeLessThanOrEqual(1.56);
+  });
+
+  it('pins hour-12 clear exposure to the current day look', () => {
+    const noon = effectiveExposureForHour(aug, 12, 'clear');
+    expect(noon).toBeGreaterThan(0.85);
+    expect(noon).toBeLessThan(0.92);
   });
 });

@@ -41,12 +41,19 @@ export const encounters: EncounterDef[] = [
     // the boat party starts high-r (lake/SSW side, disembarking) with the toll party inland of them. The q
     // axis is already correct (party west/lake-side, toll men east/inland) and the preset is q-invariant, so
     // q is untouched.
+    // 3.6 balance: the tutorial was AI-unwinnable (1/12 AI-vs-AI across seeds; both headless playthroughs
+    // needed a harness-assist concede at round ~28). The toll collector is a clerk with a Messer, not a
+    // line fighter — so the fix goes the other way: the toll party is one footman (the muscle) plus the
+    // collector (who hangs back), the escort is two capable fighters (Säumer + a proper militia spear),
+    // high ground still matters, and defeat-all still demands the escort actually win. Measured 10/12
+    // AI-vs-AI wins after the swap (brunnen.test.ts). Fled still routes to travel-ruetli (honored failure
+    // path, not a dead end).
     deploy: { q: 2, r: 10, cols: 3, rows: 3 },
     units: [
-      { archetype: 'toll-collector', side: 'enemy', q: 11, r: 7 },
-      { archetype: 'habsburg-footman', side: 'enemy', q: 12, r: 6 },
+      { archetype: 'habsburg-footman', side: 'enemy', q: 11, r: 7 },
+      { archetype: 'toll-collector', side: 'enemy', q: 12, r: 6 },
       { archetype: 'saeumer', side: 'player', q: 3, r: 8, group: 'escort', name: 'Säumer of the boat' },
-      { archetype: 'herder', side: 'player', q: 3, r: 6, group: 'escort', name: 'The elder\'s man' },
+      { archetype: 'militia-spear', side: 'player', q: 3, r: 6, group: 'escort', name: 'The elder\'s man' },
     ],
     objectives: [{ type: 'defeat-all' }],
     terrainFeatures: [],

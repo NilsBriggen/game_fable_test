@@ -7,13 +7,23 @@ export const alpstreit: QuestDef = {
   description: 'A Sattel farmer asks you to arbitrate a boundary dispute with the Arth herders — the Bundesbrief promises judgment before the sword.',
   stages: [
     {
-      id: 'dispute', journal: 'Melchior Arnold of Sattel complains that the Arth herders keep moving the boundary stones.',
+      id: 'offer', journal: 'Melchior Arnold of Sattel complains that the Arth herders keep moving the boundary stones.',
       marker: 'poi.sattel', objectiveText: 'Hear the dispute.',
-      onEnter: [{ dialogue: 'dlg.alpstreit-dispute' }],
+      onEnter: [{ dialogue: 'dlg.alpstreit-dispute' }, { quest: ['advance', 'quest.alpstreit', 'inspect'] }],
     },
     {
-      id: 'hearing', journal: 'Both sides lay their claims before you on the disputed slope.',
-      marker: 'poi.sattel', objectiveText: 'Arbitrate the dispute.',
+      id: 'inspect', journal: 'Walk the disputed slope above Sattel and see the moved stones with your own eyes before you rule.',
+      marker: 'poi.steinerberg', objectiveText: 'Inspect the disputed slope.',
+      advanceWhen: [{ cond: { nearPoi: ['poi.steinerberg', 120] }, to: 'examine' }],
+    },
+    {
+      id: 'examine', journal: 'The cut turf and fresh-turned earth on the slope tell their own story.',
+      marker: 'poi.steinerberg', objectiveText: 'Read the marks on the slope.',
+      onEnter: [{ dialogue: 'dlg.alpstreit-inspect' }],
+    },
+    {
+      id: 'hearing', journal: 'Both sides lay their claims before you at the Sattel letzi.',
+      marker: 'poi.sattel-letzi', objectiveText: 'Arbitrate the dispute.',
       onEnter: [{ dialogue: 'dlg.alpstreit-hearing' }],
     },
     {

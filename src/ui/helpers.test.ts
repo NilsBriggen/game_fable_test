@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   formatPfennig, compassX, normalizeAngle, formatHitChance, formatCheckOdds,
   cellToWorldXZ, worldToCell, buildInitiativeChips, buildSaveSlots,
+  buildTargetCardModel, buildTargetCardHitBreakdown, formatPreviewHit,
 } from './helpers';
 import type { SaveMeta } from '@core/schemas';
 
@@ -57,6 +58,24 @@ describe('combat formatting', () => {
     expect(formatHitChance(0.5, [], ['exhausted'])).toBe('50% hit — Burden: exhausted');
     expect(formatHitChance(0.5, ['flanked'], ['long range'])).toBe('50% hit — Edge: flanked; Burden: long range');
   });
+  it('formatHitChance stays the single formatter: legacy 3-arg call shape unchanged', () => {
+    expect(formatHitChance(0.5, [], [])).toBe('50% hit');
+  });
+  it('formatHitChance detail extends (not forks) the base line', () => {
+    const base = formatHitChance(0.5, ['flanked'], ['long range']);
+    const full = formatHitChance(0.5, ['flanked'], ['long range'], {
+      ranged: true, distanceCells: 6, distanceM: 9, heightDelta: 2, flanked: true, charge: false, damage: '1d8',
+    });
+    expect(full.startsWith(base)).toBe(true);
+    expect(full).toContain('Range 6 cells (9.0 m)');
+    expect(full).toContain('ranged');
+    expect(full).toContain('flanked');
+    expect(full).toContain('1d8');
+  });
+  it('formatHitChance detail skips zero heightDelta and melee labels correctly', () => {
+    const s = formatHitChance(0.75, [], [], { ranged: false, distanceCells: 1, distanceM: 1.5, heightDelta: 0, damage: '1d6' });
+    expect(s).toBe('75% hit · melee · Range 1 cells (1.5 m) · 1d6');
+  });
   it('formatCheckOdds brackets a skill label and percent', () => {
     expect(formatCheckOdds('Speech', 65)).toBe('[Speech 65%]');
     expect(formatCheckOdds('Stealth', 64.6)).toBe('[Stealth 65%]');
@@ -101,6 +120,52 @@ describe('initiative render model', () => {
   it('skips ids not present in the roster', () => {
     const chips = buildInitiativeChips([99, 1], units, null);
     expect(chips.map((c) => c.id)).toEqual([1]);
+  });
+  it('buildTargetCardModel without preview keeps the legacy card (hit null)', () => {
+    const u = {
+      id: 8, name: 'Reisläufer', side: 'enemy', q: 1, r: 1, hp: 12, hpMax: 12, morale: 40, moraleMax: 60,
+      initiative: 0, ap: { action: true, bonus: true, reaction: true, moveM: 9, moveMax: 9 },
+      status: [], stance: 'neutral', loaded: false, mounted: false, down: false, routed: false,
+      defense: 11, weapon: null, abilities: [],
+      formation: { adjacentPolearms: 0, inHaufen: false, defenseBonus: 0 },
+      isPlayerControlled: false, archetype: 'peasant', attributes: {},
+    } as never;
+    const m = buildTargetCardModel(u as never);
+    expect(m?.name).toBe('Reisläufer');
+    expect(m?.hit ?? null).toBeNull();
+  });
+  it('buildTargetCardModel attaches the hit breakdown when a preview is supplied', () => {
+    const u = {
+      id: 8, name: 'Reisläufer', side: 'enemy', q: 4, r: 1, hp: 12, hpMax: 12, morale: 40, moraleMax: 60,
+      initiative: 0, ap: { action: true, bonus: true, reaction: true, moveM: 9, moveMax: 9 },
+      status: [], stance: 'neutral', loaded: false, mounted: false, down: false, routed: false,
+      defense: 11, weapon: null, abilities: [],
+      formation: { adjacentPolearms: 0, inHaufen: false, defenseBonus: 0 },
+      isPlayerControlled: false, archetype: 'peasant', attributes: {},
+    } as never;
+    const preview = {
+      hitChance: 0.6,
+      context: { edge: ['high ground'], burden: [], ranged: true, distanceCells: 6, heightDelta: 2, flanked: false, charge: false },
+      damage: '1d8',
+    };
+    const m = buildTargetCardModel(u as never, preview, 1.5);
+    expect(m?.hit).toMatchObject({
+      hitChance: 0.6, edge: ['high ground'], burden: [], ranged: true,
+      distanceCells: 6, distanceM: 9, heightDelta: 2, flanked: false, charge: false,
+      damage: '1d8', cover: null,
+    });
+    expect(m?.hit?.hitLine).toContain('60% hit');
+    expect(m?.hit?.hitLine).toContain('Range 6 cells (9.0 m)');
+  });
+  it('formatPreviewHit / buildTargetCardHitBreakdown convert cells to metres via cellM', () => {
+    const preview = {
+      hitChance: 0.5, context: { edge: [], burden: ['long range'], ranged: true, distanceCells: 2, heightDelta: -1, flanked: true, charge: true }, damage: '1d6',
+    };
+    expect(formatPreviewHit(preview, 1.5)).toContain('Range 2 cells (3.0 m)');
+    expect(buildTargetCardHitBreakdown(preview, 2).distanceM).toBe(4);
+    expect(buildTargetCardHitBreakdown(preview).hitLine).toBe(formatPreviewHit(preview));
+    // cover is not in AttackContext — the model reports the gap explicitly
+    expect(buildTargetCardHitBreakdown(preview).cover).toBeNull();
   });
 });
 

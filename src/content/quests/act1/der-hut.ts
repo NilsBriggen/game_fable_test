@@ -71,5 +71,5 @@ export const derHut: QuestDef = {
       ],
     },
   ],
-  onStart: [{ toast: 'Quest started: Der Hut auf der Stange' }],
+  onStart: [{ toast: 'Quest started: Der Hut auf der Stange' }, { music: 'music.explore' }],
 };

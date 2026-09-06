@@ -137,9 +137,10 @@ function layoutVillage(b: Builder, rng: Rng, yaw: number, pop?: Record<string, n
     const dx = Math.sin(angle) * radius, dz = Math.cos(angle) * radius;
     b.add('house.blockbau', dx, dz, { yaw: -angle + Math.PI, variant: i === 0 ? 'inn' : undefined });
     if (rng.next() < 0.6) b.add('fence', dx + Math.cos(angle) * 5, dz - Math.sin(angle) * 5, { yaw: -angle });
-    if (rng.next() < 0.4) b.add('hayrack', dx - Math.sin(angle) * 6, dz - Math.cos(angle) * 6);
+    if (rng.next() < 0.4) b.add(rng.next() < 0.5 ? 'hayrack' : 'hayrick.tripod', dx - Math.sin(angle) * 6, dz - Math.cos(angle) * 6);
   }
-  b.add('cross', Math.sin(yaw) * 30, Math.cos(yaw) * 30, { yaw });
+  // Phase 2 B2: the shrine-cross variant dresses the village approach on some seeds.
+  b.add(rng.next() < 0.5 ? 'cross' : 'cross.shrine', Math.sin(yaw) * 30, Math.cos(yaw) * 30, { yaw });
 }
 
 /** town (Luzern/Zug): `house.stone` rows, `castle.wall` perimeter with a gate, a church (task spec).
@@ -215,9 +216,13 @@ function layoutPass(b: Builder, yaw: number): void {
   b.add('cross', 10, -10, { yaw });
 }
 
-/** bridge: `bridge.stone` across the gorge at the road's yaw (task spec). */
+/** bridge: `bridge.stone` across the gorge at the road's yaw (task spec), dressed with a shrine-cross
+ *  at one approach and a signpost at the other (4.6 bare-kind dressing, existing kit only). */
 function layoutBridge(b: Builder, yaw: number): void {
   b.add('bridge.stone', 0, 0, { yaw: yaw + Math.PI / 2 });
+  const sx = Math.sin(yaw), cz = Math.cos(yaw);
+  b.add('cross.shrine', sx * 9, cz * 9, { yaw });
+  b.add('signpost', -sx * 9, -cz * 9, { yaw: yaw + Math.PI });
 }
 
 /** port: boats and a quay (task spec) — boats sit on/near the water so they skip the dry-spot check.
@@ -228,7 +233,8 @@ function layoutPort(b: Builder, out: Builder, rng: Rng, yaw: number, pop?: Recor
   for (let i = 0; i < boats; i++) {
     const dx = (i - (boats - 1) / 2) * 4 + Math.sin(yaw + Math.PI / 2) * 10;
     const dz = (i - (boats - 1) / 2) * 1 + Math.cos(yaw + Math.PI / 2) * 10;
-    out.add('boat', dx, dz, { yaw: yaw + rng.next() * 0.3 });
+    // Phase 2 B2: the last boat on a busy quay is the decked cargo Nauen.
+    out.add(i === boats - 1 && boats >= 3 ? 'boat.cargo' : 'boat', dx, dz, { yaw: yaw + rng.next() * 0.3 });
   }
   // the quay hut goes on the landward side: probe successive inland rings, keep the driest spot
   const inland = yaw - Math.PI / 2;
@@ -241,7 +247,8 @@ function layoutPort(b: Builder, out: Builder, rng: Rng, yaw: number, pop?: Recor
   }
   let placed = false;
   for (const [dx, dz] of hutSpots) {
-    if (b.add('house.blockbau', dx, dz, { yaw, variant: 'small' })) { placed = true; break; }
+    // Phase 2 B2: the quay hut is the fisher variant with its drying rack on some seeds.
+    if (b.add(rng.next() < 0.5 ? 'house.blockbau' : 'hut.fisher', dx, dz, { yaw, variant: 'small' })) { placed = true; break; }
   }
   if (!placed) b.add('house.blockbau', Math.sin(inland) * 40 - 6, Math.cos(inland) * 40 + 4, { yaw, variant: 'small' });
   for (let d = 10; d <= 40; d += 10) if (b.add('cross', Math.sin(inland) * d + 10, Math.cos(inland) * d - 4, { yaw })) break;
@@ -251,10 +258,29 @@ function layoutSingle(b: Builder, modelId: string, opts: { yaw?: number; variant
   b.add(modelId, 0, 0, opts);
 }
 
+/** 4.6 dressing for the bare singles, existing kit only: mill/hut get a woodpile + trough,
+ *  cross/church/chapel get a shrine-cross votive + fence run. All offsets rotate through the same
+ *  dry/gentle/overlap search as the anchor, so a tight pad silently skips what does not fit. */
+function layoutDressedSingle(b: Builder, anchor: string, yaw: number, anchorOpts: { variant?: string }): void {
+  layoutSingle(b, anchor, { yaw, ...anchorOpts });
+  const isMillOrHut = anchor === 'mill' || anchor === 'house.blockbau';
+  if (isMillOrHut) {
+    b.add('woodpile', 5, 3, { yaw: yaw + 0.3 });
+    b.add('trough', -4, 4, { yaw });
+  } else {
+    b.add('cross.shrine', 5, -4, { yaw });
+    b.add('fence', -5, -3, { yaw: yaw + Math.PI / 2 });
+  }
+}
+
+/** camp: fire + tent + a second-tent/bedroll cluster and a spare fire's woodpile (4.6 bare-kind
+ *  dressing, existing kit only: 'tent' reads as the bedroll cluster, 'woodpile' as the spare fuel). */
 function layoutCamp(b: Builder): void {
   b.steepOk = true; // camps sit on scree and forest slopes
   b.add('campfire', 0, 0);
   b.add('tent', 6, 2, { yaw: 0.4 });
+  b.add('tent', -6, -1, { yaw: -0.5 });
+  b.add('woodpile', 3, -4);
   b.steepOk = false;
 }
 
@@ -263,12 +289,20 @@ function layoutWall(b: Builder, yaw: number): void {
   for (let i = -1; i <= 1; i++) {
     b.add('letzi.wall', Math.sin(perp) * i * 8, Math.cos(perp) * i * 8, { yaw: perp });
   }
+  // 4.6 dressing: a wayside cross + signpost behind the letzi line (watchman's markers, existing kit).
+  const back = yaw + Math.PI;
+  b.add('cross', Math.sin(back) * 7, Math.cos(back) * 7, { yaw: back });
+  b.add('signpost', Math.sin(back) * 11 + Math.cos(perp) * 6, Math.cos(back) * 11 - Math.sin(perp) * 6, { yaw: back });
 }
 
 function layoutRuin(b: Builder): void {
+  b.add('rock.small', 7, 4);
+  b.add('rock.small', -7, -4);
   b.add('castle.wall', 0, 0, { scale: 0.7 });
-  b.add('rock.small', 4, 2);
-  b.add('rock.small', -3, -2);
+  // 4.6 dressing: a fallen cart-load of timber plus two more rocks on the far side of the wreck.
+  b.add('cart', -2, 7, { yaw: 0.7 });
+  b.add('rock.small', 5, -7);
+  b.add('rock.small', -8, 6);
 }
 
 /** Generate a settlement's static prop layout. Deterministic per POI id (seeded RNG) so the same POI
@@ -297,11 +331,11 @@ export function generateLayout(input: LayoutInput, probe: HeightProbe): PlacedMo
     case 'camp': layoutCamp(b); break;
     case 'wall': layoutWall(b, yaw); break;
     case 'ruin': layoutRuin(b); break;
-    case 'mill': layoutSingle(b, 'mill', { yaw }); break;
-    case 'hut': layoutSingle(b, 'house.blockbau', { yaw, variant: 'small' }); break;
-    case 'cross': layoutSingle(b, 'cross', { yaw }); break;
-    case 'church': layoutSingle(b, 'church', { yaw }); break;
-    case 'chapel': layoutSingle(b, 'chapel', { yaw }); break;
+    case 'mill': layoutDressedSingle(b, 'mill', yaw, {}); break;
+    case 'hut': layoutDressedSingle(b, 'house.blockbau', yaw, { variant: 'small' }); break;
+    case 'cross': layoutDressedSingle(b, 'cross', yaw, {}); break;
+    case 'church': layoutDressedSingle(b, 'church', yaw, {}); break;
+    case 'chapel': layoutDressedSingle(b, 'chapel', yaw, {}); break;
     // landmark / viewpoint / battlefield / meadow: natural sites, no built layout (task spec only asks
     // for a layout on settlement-shaped kinds).
     default: break;

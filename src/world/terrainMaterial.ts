@@ -20,7 +20,7 @@ import { Color, DataTexture, FrontSide, MeshStandardMaterial, RGBAFormat, Unsign
 import { MAP_BOUNDS } from '@content/gazetteer';
 import { getTerrainArrays, macroVariationTexture, TERRAIN_LAYER } from './textures';
 import { bakeSplatMasks, ROAD_RANGE, type SplatMasks } from './look/splat';
-import { getActiveCsm } from './shadowCsm';
+import { registerCsmMaterial } from './shadowCsm';
 export { BLEND_GROUP } from './heightmodel';
 
 export interface TerrainMaterialHandle {
@@ -117,14 +117,16 @@ function emptyMask(): DataTexture {
   return t;
 }
 
-/** Bake the mask from a surface-id sampler (vegetation.ts calls this once the CPU grid exists). */
+/** Bake the mask from a surface-id sampler (vegetation.ts calls this once the CPU grid exists).
+ *  Re-bakes (not a no-op) when called again after a reseed/new-game: the bake is seed-dependent, and
+ *  the grid dimensions can change, so a stale mask would paint the old forest/rock/scree over new
+ *  heights. Same-grid + same-sampler callers are unaffected — bakeSplatMasks is deterministic. */
 export function buildSplatMask(
   surfaceIdAt: (x: number, z: number) => number,
   gridW: number,
   gridH: number,
   heightAt?: (x: number, z: number) => number,
 ): void {
-  if (maskBuilt) return;
   maskBuilt = true;
   const next = bakeSplatMasks(surfaceIdAt, gridW, gridH, heightAt);
   masks?.a.dispose();
@@ -166,7 +168,6 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
     uSeasonTint: { value: new Color(0xa2b66a) },
     uAltitudeTint: { value: new Color(0xa8bc78) }, // pasture drifts to this alpine sage above the villages
     uWetness: { value: 0 },        // rain darkens + glosses the ground
-    uDirectScale: { value: 1 },   // see the CSM note on registerCsmMaterial below
     ...FOG_UNIFORMS,
   };
 
@@ -184,7 +185,7 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
         uniform sampler2DArray tAlbedo, tNormal, tOrm;
         uniform sampler2D tMaskA, tMaskB, tMacro;
         uniform vec2 uMaskMin, uMaskSpan, uMaskTexel;
-        uniform float uSnowLine, uSnowDepth, uWetness, uDirectScale, uRoadRange;
+        uniform float uSnowLine, uSnowDepth, uWetness, uRoadRange;
         uniform vec3 uSeasonTint, uAltitudeTint;
         varying vec3 vWorldPos;
         ${FOG_DECL}
@@ -304,8 +305,8 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // degrees a band of loose scree collects below it. Without this every cliff wore stretched
           // pasture; with the band starting at 39 degrees (0.78) every rolling hillside above the
           // Urnersee broke out in pale blotches that read as snow from the Seelisberg viewpoint.
-          float rockify = smoothstep(0.68, 0.46, nrm.y);
-          float screeify = smoothstep(0.82, 0.64, nrm.y) * (1.0 - rockify) * 0.6;
+          float rockify = 1.0 - smoothstep(0.46, 0.68, nrm.y);
+          float screeify = (1.0 - smoothstep(0.64, 0.82, nrm.y)) * (1.0 - rockify) * 0.6;
           float soften = 1.0 - max(rockify, screeify);
           w1 *= soften; w2 *= soften; w6 *= soften; w7 *= soften; w8 *= soften;
           w3 = max(w3 * soften, rockify);
@@ -353,15 +354,15 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           float detileMix = 0.30 + 0.30 * macro.r;
 
           gAlbAcc = vec3(0.0); gNrmAcc = vec3(0.0); gOrmAcc = vec3(0.0); gWAcc = 0.0;
-          SPLAT(0, 5.0, w0)    // grass
-          SPLAT(1, 6.0, w1)    // alpine meadow
-          SPLAT(2, 4.5, w2)    // forest floor
-          SPLAT(3, 7.0, w3)    // limestone
-          SPLAT(4, 3.2, w4)    // scree
-          SPLAT(5, 8.0, w5)    // snow
+          SPLAT(0, 5.0, w0)    // grass (AI pasture, fine blade detail)
+          SPLAT(1, 6.0, w1)    // alpine meadow (AI hay meadow)
+          SPLAT(2, 4.5, w2)    // forest floor (AI needle litter)
+          SPLAT(3, 4.5, w3)    // limestone (AI fine-grain: 7.0 blurred the AI pits to mush)
+          SPLAT(4, 3.2, w4)    // scree (AI packed gravel)
+          SPLAT(5, 5.0, w5)    // snow (AI soft drifts: 8.0 tiled the ripple into corduroy)
           SPLAT(6, 4.0, w6)    // mud / shore
           SPLAT(7, 3.4, w7)    // village yard
-          SPLAT(8, 2.6, w8)    // cart track
+          SPLAT(8, 3.0, w8)    // cart track (AI dark soil: 2.6 over-magnified the speckle)
           float inv = 1.0 / max(1e-4, gWAcc);
           vec3 albedo = gAlbAcc * inv;
           gMapN = normalize((gNrmAcc * inv) * 2.0 - 1.0);
@@ -390,11 +391,12 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           albedo = mix(albedo, mix(albedo, vec3(litterLum), 0.55) * canopy, w2 * 0.82);
 
           // limestone is grey-white, not the green-grey the season tint would drag it toward, and a
-          // cliff face is brighter on its bedding ledges than in the joints
-          albedo = mix(albedo, albedo * vec3(0.72, 0.72, 0.70) * (0.80 + 0.28 * grainC), w3 * 0.8);
-          // Rocks024L is a near-white plate talus out of the box; at 2 km under haze a scree fan
-          // that bright is indistinguishable from a snowfield (wave-2 Seelisberg capture)
-          albedo = mix(albedo, albedo * vec3(0.60, 0.61, 0.60), w4 * 0.85);
+          // cliff face is brighter on its bedding ledges than in the joints.
+          // (Phase 6: AI fine-pit limestone needs no grey clamp — the old Rocks024L plate talus did.)
+          albedo = mix(albedo, albedo * vec3(0.86, 0.86, 0.85) * (0.80 + 0.28 * grainC), w3 * 0.8);
+          // scree: the AI packed-gravel set is mid-grey out of the box; keep it below the snow line
+          // at 2 km under haze or a scree fan still reads as a snowfield (wave-2 Seelisberg capture)
+          albedo = mix(albedo, albedo * vec3(0.72, 0.73, 0.72), w4 * 0.85);
 
           // The yard set (Ground081) is a pale grey-beige path gravel out of the box; a village
           // trodden by cattle and emptied of chamber pots is browner and duller than that.
@@ -431,14 +433,18 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
           // shore + rain wetting: darker, smoother, slightly bluer.
           // mB.a is baked "height above the nearest lake surface" (see look/splat.ts), so this is
           // correct for the Aegerisee at +97 as well as for the Vierwaldstaettersee at 0.
+          // uWetness (Phase 2 A3) is the live weather wetness from sky.ts; shore is the baked band.
           float shore = smoothstep(0.35, 0.95, mB.a);
           float wet = clamp(max(shore, uWetness) * (1.0 - w5), 0.0, 1.0);
           albedo *= mix(1.0, 0.68, wet);
+          albedo = mix(albedo, albedo * vec3(0.90, 0.96, 1.06), wet * 0.55); // wet-sheen cool tint
 
           diffuseColor.rgb *= pow(clamp(albedo, 0.0, 1.0), vec3(2.2)); // sRGB -> linear
           // dry ground is matte whatever the texture's roughness map says (the grass set's ~0.5 made a
-          // dawn meadow glisten like wet plastic under a grazing sun); wet earth is damp, not a mirror
+          // dawn meadow glisten like wet plastic under a grazing sun); wet earth is damp, not a mirror.
+          // Phase 2 A3 wet sheen: uWetness drops roughness toward a damp sheen on top of the shore wet.
           gRough = clamp(mix(max(orm.y, 0.82), 0.58, wet), 0.05, 1.0);
+          gRough *= mix(1.0, 0.55, uWetness * (1.0 - w5));
           gRough = mix(gRough, gRough * 0.86, w8);            // a packed track has a slight sheen
           diffuseColor.rgb *= mix(1.0, orm.x, 0.55);                   // baked AO
         }
@@ -446,11 +452,6 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       .replace('#include <roughnessmap_fragment>', `
         #include <roughnessmap_fragment>
         roughnessFactor *= gRough;
-      `)
-      .replace('#include <lights_fragment_end>', `
-        #include <lights_fragment_end>
-        reflectedLight.directDiffuse *= uDirectScale;
-        reflectedLight.directSpecular *= uDirectScale;
       `)
       .replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>
@@ -462,27 +463,16 @@ export function getTerrainMaterial(): TerrainMaterialHandle {
       `);
   };
 
-  // NOT registered with CSM, deliberately.
-  //
-  // csm.setupMaterial() defines USE_CSM on the material and swaps in CSMShader's
-  // lights_fragment_begin, which applies each cascade's DirectionalLight only to the depth slice
-  // that cascade owns. On this material, inside the full scene, that binding comes out dead: the
-  // terrain renders with zero direct light (a black landscape under a lit sky, with correctly lit
-  // trees standing on it) while every other material is fine. Measured, not guessed — deleting
-  // USE_CSM from the live material at runtime restores the light immediately, and forcing
-  // needsUpdate does not. Reproducing it outside the app (this same material, this same CSM
-  // configuration, a bare scene) does NOT fail, so the trigger is something about the full scene's
-  // material and light set that I could not isolate; hence a workaround rather than a fix.
-  //
-  // Left un-registered, the terrain takes three's stock directional path, so ALL `cascades` lights
-  // light it (and it still receives their shadow maps — a fragment outside a cascade's map reads as
-  // lit, so the three maps union correctly). That over-lights the direct term by exactly the cascade
-  // count, which uDirectScale takes back out in <lights_fragment_end>; the ambient term is untouched
-  // and therefore still correct. The one cost is that a shadow cast onto the terrain only darkens
-  // the cascade that owns it, i.e. roughly a third of the direct term, so tree shadows on the ground
-  // are softer than they should be. Called out in the final report as a known gap.
-  const csm = getActiveCsm() as { cascades?: number } | null;
-  uniforms.uDirectScale.value = 1 / Math.max(1, csm?.cascades ?? 1);
+  // Registered with CSM: setupMaterial defines USE_CSM/CSM_CASCADES and swaps the CSM
+  // lights chunks into ShaderChunk before first compile; registerCsmMaterial chains our
+  // onBeforeCompile after CSM's so the CSM cascade uniforms (CSM_cascades/cameraNear/shadowFar)
+  // are applied alongside the splat customization. The old black frame came from the register
+  // wrapper aliasing every material's program-cache key (all returned the wrapper's source, so
+  // terrain compiled with another material's cached program — fixed in shadowCsm.ts via a
+  // per-material customProgramCacheKey), not from USE_CSM itself. With USE_CSM each cascade's
+  // light applies only to its depth slice, so the uDirectScale 1/cascades workaround is gone and
+  // tree shadows on the ground darken the full direct term again.
+  registerCsmMaterial(material, 'terrain-splat-v1');
   handle = { material, uniforms };
   return handle;
 }

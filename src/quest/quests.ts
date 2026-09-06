@@ -122,9 +122,13 @@ export class QuestMachine {
       console.warn(`[quest] ${id}: unknown stage "${stageId}"`);
       return;
     }
-    // a retry loop (escort-recover → escort) re-enters a stage the journal already carries: don't repeat it
-    const last = [...this.journalEntries].reverse().find((j) => j.questId === id);
-    if (!q.silentJournal && last?.text !== stage.journal) this.addJournal(stage.journal, id);
+    // A retry loop (escort-recover → escort) re-enters a stage whose journal line the quest already
+    // carries: don't repeat it. The check scans the quest's whole history, not just the last entry —
+    // the last entry at this point is the recover stage's own line, so a last-only comparison would
+    // still double-journal the re-entered stage (bughunt quest #2). The recover stage's own line
+    // already marks the retry in the narrative, so suppressing the repeat loses nothing.
+    const seen = this.journalEntries.some((j) => j.questId === id && j.text === stage.journal);
+    if (!q.silentJournal && !seen) this.addJournal(stage.journal, id);
     await this.deps.runEffects(stage.onEnter, id);
   }
 

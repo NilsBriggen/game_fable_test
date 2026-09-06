@@ -3,6 +3,8 @@
 Every source file below is **CC0 1.0 Universal (public domain dedication)**, from
 **Lennart Demes / ambientCG.com** (https://ambientcg.com/) and **Poly Haven (Rob Tuytel, Rico Cilliers et al.)** (https://polyhaven.com/).
 Fetched and packed reproducibly by `node tools/assets/fetch-world.mjs` from `tools/assets/world-manifest.json`.
+Exception: the 9 `albedo-array.jpg` layers (#L0-#L8) are AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0); `normal-array.jpg` and `orm-array.jpg` layers below remain CC0.
+
 
 The three terrain files are 512×4608 JPEGs holding 9 512² layers each, uploaded as three.js `DataArrayTexture`s.
 The foliage / ground-cover sheets are RGBA PNGs whose cells are **re-composed** from the source
@@ -19,15 +21,15 @@ frame budget for one tree — so the trees are generated from the twig cut-outs 
 
 | File | Source URL | Author | Licence | Size |
 |---|---|---|---|---|
-| `public/assets/textures/terrain/albedo-array.jpg #L0 (grass)` | https://ambientcg.com/get?file=Grass001_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L1 (meadow)` | https://ambientcg.com/get?file=Grass004_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L2 (forest)` | https://ambientcg.com/get?file=Ground023_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L3 (rock)` | https://ambientcg.com/get?file=Rock051_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L4 (scree)` | https://ambientcg.com/get?file=Rocks024L_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L5 (snow)` | https://ambientcg.com/get?file=Snow006_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L6 (mud)` | https://ambientcg.com/get?file=Ground109_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L7 (yard)` | https://ambientcg.com/get?file=Ground081_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
-| `public/assets/textures/terrain/albedo-array.jpg #L8 (track)` | https://ambientcg.com/get?file=Ground051_1K-JPG.zip | ambientCG | CC0 1.0 | 815 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L0 (grass)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L1 (meadow)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L2 (forest)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L3 (rock)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L4 (scree)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L5 (snow)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L6 (mud)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L7 (yard)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
+| `public/assets/textures/terrain/albedo-array.jpg #L8 (track)` | AI-generated (google/gemini-2.5-flash-image via OpenRouter, 2026-09-06, cached pack $0) | AI-generated | project use (AI-generated, not CC0) | 1167 kB (whole array) |
 | `public/assets/textures/terrain/normal-array.jpg #L0 (grass)` | https://ambientcg.com/get?file=Grass001_1K-JPG.zip | ambientCG | CC0 1.0 | 1290 kB (whole array) |
 | `public/assets/textures/terrain/normal-array.jpg #L1 (meadow)` | https://ambientcg.com/get?file=Grass004_1K-JPG.zip | ambientCG | CC0 1.0 | 1290 kB (whole array) |
 | `public/assets/textures/terrain/normal-array.jpg #L2 (forest)` | https://ambientcg.com/get?file=Ground023_1K-JPG.zip | ambientCG | CC0 1.0 | 1290 kB (whole array) |

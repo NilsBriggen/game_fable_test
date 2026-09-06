@@ -93,27 +93,69 @@ function fillArray(tex: DataArrayTexture, data: Uint8Array): void {
  * DataTexture in the world held a CPU copy of its pixels forever — 28 MB for the three terrain
  * arrays alone. The GPU has its own copy after the first upload; drop ours in the upload callback.
  * (A later `needsUpdate` would need the data back; nothing in the world module sets one.)
+ *
+ * Runs via `Texture.onUpdate`, which WebGLTextures calls AFTER `generateMipmap()` during the same
+ * upload (verified in three r185 WebGLTextures.uploadTexture: textureNeedsGenerateMipmaps →
+ * generateMipmap → `texture.onUpdate(texture)`), so releasing here never starves mip generation.
  */
 export function releaseAfterUpload(tex: { image: unknown }): void {
   const img = tex.image as { data?: unknown } | null;
   if (img && 'data' in img) img.data = null;
 }
 
+/**
+ * Colour-space contract for the terrain arrays (Phase 2 B3 audit — verified against the three
+ * r185 upload path and the terrain shader):
+ *
+ * - ALL THREE arrays stay NoColorSpace (linear/raw sampling). The albedo JPEG bytes are sRGB-
+ *   encoded, but terrainMaterial.ts decodes them manually (`pow(albedo, 2.2)`); marking the
+ *   texture SRGBColorSpace would make the GPU decode to linear on sample AND the shader square
+ *   it again (double linearization → near-black terrain). DataArrayTextures cannot rely on the
+ *   automatic sRGB path the same way `map:` materials do — the manual pow IS the decode.
+ * - normal / orm are linear data (tangent-space XYZ / AO+R+M), never sRGB, for the same reason.
+ * - mipmaps: DataArrayTexture with generateMipmaps=true is a complete texture in WebGL2 —
+ *   allocateMemory → texStorage3D(levels from getMipLevels) + texSubImage3D(level 0) +
+ *   generateMipmap(TEXTURE_2D_ARRAY). No per-layer decode is needed; verified in
+ *   WebGLTextures.uploadTexture. Aniso stays 8 (16 streaked along the view ray).
+ */
+export function terrainArrayColorSpace(kind: 'albedo' | 'normal' | 'orm'): typeof NoColorSpace {
+  void kind;
+  return NoColorSpace;
+}
+
+// ---------------------------------------------------------------------------------------------
+// KTX2/Basis migration PREP (Phase 2 B3 — documented fallback, no new npm dep).
+//
+// The terrain arrays are the biggest win of a KTX2 swap (3 × 9.4 MB JPEG → GPU-compressed,
+// no CPU decode, no 28 MB CPU copy). The insertion point is `decodeLayerStack` + `fillArray`
+// below: a KTX2 path returns per-layer compressed blocks (or one CompressedArrayTexture) from
+// `*.ktx2` siblings of the three `*-array.jpg` files, with the SAME layer order and the SAME
+// colour contract as `terrainArrayColorSpace` above (albedo sRGB, normal/orm linear).
+//
+// TODO (Phase 2.0 completion, integrator): add the KTX2Loader module (three/addons, no new npm
+// dep beyond three), `ktx2.setTranscoderPath('assets/basis/')` + `ktx2.detectSupport(renderer)`,
+// and in `getTerrainArrays().ready` branch: `HEAD *-array.ktx2` → load compressed layers →
+// construct/swap the arrays; on any failure fall through to the JPEG `decodeLayerStack` path
+// below, which stays the supported fallback. Do NOT change TERRAIN_LAYER order or LAYER_PX
+// without re-packing tools/assets/fetch-world.mjs.
+// ---------------------------------------------------------------------------------------------
+
 export function getTerrainArrays(): TerrainArrays {
   if (terrainArrays) return terrainArrays;
-  const mk = (r: number, g: number, b: number): DataArrayTexture => {
+  const mk = (r: number, g: number, b: number, kind: 'albedo' | 'normal' | 'orm'): DataArrayTexture => {
     const t = placeholderArray(r, g, b);
     t.wrapS = t.wrapT = RepeatWrapping;
     t.magFilter = LinearFilter;
     t.minFilter = LinearMipmapLinearFilter;
     t.generateMipmaps = true;
     t.anisotropy = 8;    // grazing-angle slopes are the whole game; 16 streaked along the view ray
+    t.colorSpace = terrainArrayColorSpace(kind);
     t.onUpdate = () => releaseAfterUpload(t);
     return t;
   };
-  const albedo = mk(126, 134, 104);
-  const normal = mk(128, 128, 255);
-  const orm = mk(255, 210, 0);   // AO=1, roughness=0.82, metalness=0
+  const albedo = mk(126, 134, 104, 'albedo');
+  const normal = mk(128, 128, 255, 'normal');
+  const orm = mk(255, 210, 0, 'orm');   // AO=1, roughness=0.82, metalness=0
   const arrays: TerrainArrays = {
     albedo, normal, orm, loaded: false,
     ready: Promise.resolve(),

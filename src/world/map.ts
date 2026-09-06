@@ -18,11 +18,53 @@ const INK_SOFT = 'rgba(67,48,28,0.55)';
 const WATER_INK = '#3f5c69';
 
 let cachedUrl: string | null = null;
+/** Cache key for the fogged variant: the discovery set + player reveal cell the baked image holds. */
+let cachedFogKey: string | null = null;
 
 export function worldToMapUv(x: number, z: number): [number, number] {
   const u = (x - MAP_BOUNDS.minX) / (MAP_BOUNDS.maxX - MAP_BOUNDS.minX);
   const v = (z - MAP_BOUNDS.minZ) / (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ);
   return [u, v];
+}
+
+export interface MapFogSpot { x: number; z: number; r: number }
+
+/**
+ * Pure fog predicate (4.6 map/compass fog): true when the world point is still under fog-of-war,
+ * i.e. outside every reveal disc (discovered POIs at their discoverRadius + the player disc).
+ * Pure so headless tests can assert the mask without a canvas.
+ */
+export function mapFogAt(x: number, z: number, spots: readonly MapFogSpot[]): boolean {
+  for (const s of spots) {
+    const dx = x - s.x, dz = z - s.z;
+    if (dx * dx + dz * dz <= s.r * s.r) return false;
+  }
+  return true;
+}
+
+/** Key the fogged image is cached under: sorted POI ids + the player reveal cell (coarse, 200 m). */
+export function mapFogKey(discoveredIds: readonly string[], player: { x: number; z: number } | null): string {
+  const ids = [...discoveredIds].sort().join(',');
+  const cell = player ? `${Math.round(player.x / 200)},${Math.round(player.z / 200)}` : 'nop';
+  return `${ids}|${cell}`;
+}
+
+/** Build reveal discs from discovered POI defs + the player position (4.6 map fog).
+ *  Real chart scale: 16000 m over 1400 px, so a reveal radius needs ~1400+ px to open a readable
+ *  window — POI discs use 6x discoverRadius (min 900 m), the player disc 1200 m. */
+export function mapFogSpots(
+  pois: readonly { id: string; x: number; z: number; discoverRadius: number }[],
+  discoveredIds: readonly string[],
+  player: { x: number; z: number } | null,
+): MapFogSpot[] {
+  const set = new Set(discoveredIds);
+  const spots: MapFogSpot[] = [];
+  for (const p of pois) {
+    if (!set.has(p.id)) continue;
+    spots.push({ x: p.x, z: p.z, r: Math.max(900, p.discoverRadius * 6) });
+  }
+  if (player) spots.push({ x: player.x, z: player.z, r: 1200 });
+  return spots;
 }
 /**
  * Trace a lake outline as a smooth closed curve instead of the gazetteer's 5–12 straight edges:
@@ -71,8 +113,15 @@ function landTint(h: number, surface: string): [number, number, number] {
   return [ca[0] + (cb[0] - ca[0]) * f, ca[1] + (cb[1] - ca[1]) * f, ca[2] + (cb[2] - ca[2]) * f];
 }
 
-export async function renderMapImage(terrain: TerrainManager, regions: RegionDef[]): Promise<string> {
-  if (cachedUrl) return cachedUrl;
+export async function renderMapImage(
+  terrain: TerrainManager,
+  regions: RegionDef[],
+  fog?: { spots: MapFogSpot[]; key: string },
+): Promise<string> {
+  // The unforged base chart is cached on its own; a fogged variant is cached under its fog key so
+  // discovery (or a 200 m player-cell move) re-bakes once, not per frame.
+  if (!fog && cachedUrl) return cachedUrl;
+  if (fog && fog.key === cachedFogKey && cachedUrl) return cachedUrl;
   await terrain.ready;
   const canvas = document.createElement('canvas');
   canvas.width = SIZE; canvas.height = SIZE;
@@ -198,8 +247,14 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
     c.pts.forEach((p, i) => { const [a, b] = toPx(p.x, p.z); i === 0 ? ctx.moveTo(a, b) : ctx.lineTo(a, b); });
     ctx.stroke();
   }
+  // ---- 5b. roads under fog (4.6): skip road segments whose midpoint is still fogged, so the
+  //  wash does not carry a free road atlas. Rivers stay (water is geography, not knowledge).
   for (const c of geo.corridors) {
     if (c.kind !== 'road') continue;
+    if (fog && c.pts.length > 1) {
+      const mid = c.pts[Math.floor(c.pts.length / 2)]!;
+      if (mapFogAt(mid.x, mid.z, fog.spots)) continue;
+    }
     ctx.strokeStyle = INK_SOFT;
     ctx.lineWidth = 2.6;
     ctx.setLineDash([]);
@@ -214,7 +269,10 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
   }
 
   // ---- 6. settlement marks --------------------------------------------------------------------
+  // 4.6 fog: marks for still-fogged places are skipped — the wash would otherwise leave them
+  // faintly legible as free geography. Revealed places keep their marks.
   for (const p of Object.values(PLACES)) {
+    if (fog && mapFogAt(p.x, p.z, fog.spots)) continue;
     const [px, py] = toPx(p.x, p.z);
     ctx.fillStyle = INK;
     ctx.strokeStyle = INK;
@@ -232,12 +290,66 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
     }
   }
 
+  // ---- 6b. fog-of-war (4.6): undiscovered terrain is dimmed under a dark umber wash with soft
+  //  radial reveals around discovered POIs + the player. Direct pixel blend, no composite modes
+  //  (destination-out punches through the chart to transparency; the ageing pass then refills those
+  //  holes to white). Pass 1 dims the whole chart; pass 2 un-dims inside each reveal disc
+  //  (bbox-clipped, smooth 0.55→1.0 edge). Undiscovered settlement marks / region labels / roads
+  //  are skipped at draw time (below/above), so fog hides knowledge, not just light. One-off bake.
+  function paintFog(): void {
+    const spanX = MAP_BOUNDS.maxX - MAP_BOUNDS.minX, spanZ = MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ;
+    const A = 0.82, keep = 1 - A, FR = 38, FG = 30, FB = 20;
+    const img = ctx.getImageData(0, 0, SIZE, SIZE);
+    const d = img.data;
+    const orig = new Uint8ClampedArray(d); // pre-fog chart, to blend back inside reveals
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = d[i] * keep + FR * A;
+      d[i + 1] = d[i + 1] * keep + FG * A;
+      d[i + 2] = d[i + 2] * keep + FB * A;
+    }
+    for (const s of (fog as { spots: MapFogSpot[] }).spots) {
+      const [su, sv] = worldToMapUv(s.x, s.z);
+      const cx = su * SIZE, cy = sv * SIZE;
+      const rp = Math.max((s.r / spanX) * SIZE, (s.r / spanZ) * SIZE);
+      const x0 = Math.max(0, Math.floor(cx - rp)), x1 = Math.min(SIZE - 1, Math.ceil(cx + rp));
+      const y0 = Math.max(0, Math.floor(cy - rp)), y1 = Math.min(SIZE - 1, Math.ceil(cy + rp));
+      for (let py = y0; py <= y1; py++) {
+        const wz = MAP_BOUNDS.minZ + ((py + 0.5) / SIZE) * spanZ;
+        for (let px = x0; px <= x1; px++) {
+          const wx = MAP_BOUNDS.minX + ((px + 0.5) / SIZE) * spanX;
+          const dd = Math.hypot(wx - s.x, wz - s.z) / s.r;
+          if (dd >= 1) continue;
+          let c = 1;
+          if (dd > 0.55) { const t = (dd - 0.55) / 0.45; c = 1 - t * t * (3 - 2 * t); }
+          const i = (py * SIZE + px) * 4;
+          d[i] += (orig[i] - d[i]) * c;
+          d[i + 1] += (orig[i + 1] - d[i + 1]) * c;
+          d[i + 2] += (orig[i + 2] - d[i + 2]) * c;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    // lakes faintly back: water is geography, not knowledge
+    ctx.save();
+    ctx.strokeStyle = 'rgba(63,92,105,0.55)';
+    ctx.lineWidth = 1.2;
+    for (const lake of geo.lakes) { smoothPath(ctx, lake.poly); ctx.stroke(); }
+    ctx.restore();
+  }
+
   // ---- 7. serif region labels -------------------------------------------------------------------
+  // 4.6 fog: labels whose centroid is still fogged are skipped — the wash would otherwise leave
+  // them legible (the earlier revision painted fog over the labels, which punched white holes).
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const r of regions) {
     const [cx, cy] = centroidPx(r.bounds as [number, number][]);
     if (cx < 40 || cy < 40 || cx > SIZE - 40 || cy > SIZE - 40) continue;
+    if (fog) {
+      const spanX = MAP_BOUNDS.maxX - MAP_BOUNDS.minX, spanZ = MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ;
+      const wx = MAP_BOUNDS.minX + (cx / SIZE) * spanX, wz = MAP_BOUNDS.minZ + (cy / SIZE) * spanZ;
+      if (mapFogAt(wx, wz, fog.spots)) continue;
+    }
     const label = spaced(r.name.toUpperCase());
     ctx.font = 'italic 600 21px Georgia, "Times New Roman", serif';
     ctx.lineWidth = 3;
@@ -248,12 +360,15 @@ export async function renderMapImage(terrain: TerrainManager, regions: RegionDef
   }
 
   // ---- 8. ageing, frame, compass -----------------------------------------------------------------
+  if (fog) paintFog(); // over the whole chart: undiscovered labels/marks/roads were skipped above,
+  // so the wash only needs to dim relief/stipple/hachures; reveals restore the chart underneath
   ageParchment(ctx);
   drawFrame(ctx);
   drawCompass(ctx, SIZE - 132, 132);
   drawTitle(ctx);
 
   cachedUrl = canvas.toDataURL('image/png');
+  if (fog) cachedFogKey = fog.key;
   return cachedUrl;
 }
 
@@ -388,4 +503,5 @@ function clamp255(v: number): number {
 
 export function invalidateMapCache(): void {
   cachedUrl = null;
+  cachedFogKey = null;
 }

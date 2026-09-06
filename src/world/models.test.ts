@@ -8,6 +8,11 @@ import { Box3, Group, Mesh, Vector3, type Material, type Object3D } from 'three'
 interface Buffer { toString(enc: string, start?: number, end?: number): string; readUInt32LE(offset: number): number }
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ModelLibrary } from './models';
+import {
+  DRY_TONE, IRON_TONE, LOG_TONE, MASONRY_TONE, PLASTER_TONE, PLANK_DARK, PLANK_TONE,
+  SHINGLE_DARK, SHINGLE_TONE, STONE_TONE, THATCH_TONE, TILE_TONE, TIMBER_DARK, WEIGHT_TONE,
+  mixTone,
+} from './models/kit';
 import { PROP_IDS, hasKit, hasProp, installKit, kitPieceNames } from './models/megakit';
 import { CHARACTER_ARCHETYPES, clipFor, spawnCharacter, type WeaponKind } from './characters';
 import { archetypes } from '@content/archetypes';
@@ -26,8 +31,8 @@ const BUILDINGS = [
   'bridge.wood', 'bridge.stone', 'mill', 'boat',
 ];
 const WEAPONS = ['weapon.spiess', 'weapon.halberd', 'weapon.crossbow', 'weapon.sword', 'weapon.dagger', 'weapon.staff', 'shield.heater', 'shield.buckler'];
-const PROPS = ['cross', 'hayrack', 'fence', 'well', 'woodpile', 'trough', 'market.stall', 'gallows.pole',
-  'campfire', 'tent', 'cart', 'signpost', 'rock.large', 'rock.small', 'stump'];
+const PROPS = ['cross', 'cross.shrine', 'hayrack', 'hayrick.tripod', 'fence', 'well', 'woodpile', 'trough', 'market.stall', 'gallows.pole',
+  'campfire', 'tent', 'cart', 'signpost', 'rock.large', 'rock.small', 'stump', 'palisade.gate', 'hut.fisher', 'boat.cargo'];
 
 function stats(obj: Object3D): { meshes: number; tris: number; mats: Set<Material> } {
   let meshes = 0, tris = 0;
@@ -68,9 +73,79 @@ describe('model library budgets', () => {
     expect(all.size, `${all.size} distinct building materials`).toBeLessThanOrEqual(9);
   });
 
-  // A village as src/exploration/layout.ts lays one out: a well, a church, 14 farmhouses (one of them
-  // the inn), fences, hay racks and a wayside cross. Budget (owner's brief): ≤ 400 draw calls and
-  // ≤ 1.2 M triangles for the whole village after the per-POI merge.
+// A village as src/exploration/layout.ts lays one out: a well, a church, 14 farmhouses (one of them
+// the inn), fences, hay racks and a wayside cross. Budget (owner's brief): ≤ 400 draw calls and
+// ≤ 1.2 M triangles for the whole village after the per-POI merge.
+describe('phase 2 B2 alpine prop variants', () => {
+  const lib = new ModelLibrary(777);
+
+  it('all five variants stay within 7 draw calls and 12k triangles on shared materials only', () => {
+    // reference: every material instance the pre-existing procedural library uses (module-global
+    // propMat cache, so identity comparison is meaningful across ModelLibrary instances)
+    const ref = new ModelLibrary(777);
+    const refMats = new Set<Material>();
+    for (const rid of ['house.blockbau', 'church', 'chapel', 'barn', 'tent', 'boat', 'well', 'cross',
+      'hayrack', 'campfire', 'rock.large', 'market.stall']) {
+      for (const m of stats(ref.spawn(rid)).mats) refMats.add(m);
+    }
+    for (const id of ['cross.shrine', 'hayrick.tripod', 'palisade.gate', 'hut.fisher', 'boat.cargo']) {
+      const obj = lib.spawn(id);
+      const s = stats(obj);
+      expect(s.meshes, `${id}: ${s.meshes} meshes`).toBeLessThanOrEqual(7);
+      expect(s.tris, `${id}: ${Math.round(s.tris)} tris`).toBeLessThanOrEqual(12000);
+      expect(s.meshes, `${id} produced no geometry`).toBeGreaterThan(0);
+      for (const m of s.mats) expect(refMats.has(m), `${id} uses a non-shared material`).toBe(true);
+    }
+  });
+
+  it('variants sit on the ground (boats float) and carry position/normal/uv/colour', () => {
+    for (const id of ['cross.shrine', 'hayrick.tripod', 'palisade.gate', 'hut.fisher']) {
+      const box = new Box3().setFromObject(lib.spawn(id));
+      expect(box.min.y, `${id} floats: lowest point at y=${box.min.y.toFixed(2)}`).toBeLessThanOrEqual(0.06);
+      expect(box.min.y, `${id} is buried: lowest point at y=${box.min.y.toFixed(2)}`).toBeGreaterThan(-2.6);
+      expect(box.max.y, `${id} has no height`).toBeGreaterThan(0.1);
+    }
+    for (const id of ['cross.shrine', 'hayrick.tripod', 'palisade.gate', 'hut.fisher', 'boat.cargo']) {
+      lib.spawn(id).traverse((c) => {
+        const m = c as Mesh;
+        if (!m.isMesh) return;
+        for (const attr of ['position', 'normal', 'uv', 'color']) {
+          expect(m.geometry.getAttribute(attr), `${id}: missing ${attr}`).toBeTruthy();
+        }
+      });
+    }
+  });
+
+  it('footprints fit the layout slots they are wired into', () => {
+    // shrine cross ≈ cross slot, tripod ≈ hayrack slot, gate ≈ one palisade segment, hut ≈ small house
+    const expected: Record<string, [number, number]> = {
+      'cross.shrine': [2, 2], 'hayrick.tripod': [4, 4], 'palisade.gate': [9, 3], 'hut.fisher': [8, 8],
+    };
+    for (const [id, [w, d]] of Object.entries(expected)) {
+      const box = new Box3().setFromObject(lib.spawn(id));
+      const size = box.getSize(new Vector3());
+      expect(size.x, `${id} width ${size.x.toFixed(1)}`).toBeLessThanOrEqual(w);
+      expect(size.z, `${id} depth ${size.z.toFixed(1)}`).toBeLessThanOrEqual(d);
+    }
+  });
+});
+
+describe('phase 2 B3 texture pipeline', () => {
+  it('terrain array colour contract: all NoColorSpace (shader decodes albedo manually)', async () => {
+    const { terrainArrayColorSpace } = await import('./textures');
+    const { NoColorSpace } = await import('three');
+    expect(terrainArrayColorSpace('albedo')).toBe(NoColorSpace);
+    expect(terrainArrayColorSpace('normal')).toBe(NoColorSpace);
+    expect(terrainArrayColorSpace('orm')).toBe(NoColorSpace);
+  });
+
+  it('prop texture upload helper keeps the diff=sRGB / data=linear contract', async () => {
+    const { propTextureUrl } = await import('./assets');
+    expect(propTextureUrl('wood-plank', 'diff')).toBe('assets/textures/props/wood-plank/diff.jpg');
+    expect(propTextureUrl('tiles', 'nor')).toBe('assets/textures/props/megakit/mk-tiles/nor.jpg');
+    expect(propTextureUrl('ph-wooden_bucket_01', 'rough')).toBe('assets/textures/props/ph/ph-wooden_bucket_01/rough.jpg');
+  });
+});
   it('a full village stays inside 400 draw calls and 1.2 M triangles after the per-material merge', () => {
     const recipe: [string, string | undefined, number][] = [
       ['well', undefined, 1], ['church', undefined, 1], ['house.blockbau', 'inn', 1],
@@ -93,8 +168,10 @@ describe('model library budgets', () => {
   it('every model sits on the ground: nothing floats and nothing but a footing is buried', () => {
     // settlements.ts places each model's origin on heightAt, so y = 0 must be the contact plane.
     // Buildings deliberately carry a footing ~2 m below grade for downhill spawns; nothing may float.
+    // Boats float by design (layout puts them on the water).
+    const FLOATING = new Set(['boat', 'boat.cargo']);
     for (const id of [...BUILDINGS, ...PROPS]) {
-      if (id === 'boat') continue;   // boats float, by design (layout puts them on the water)
+      if (FLOATING.has(id)) continue;
       const box = new Box3().setFromObject(lib.spawn(id));
       expect(box.min.y, `${id} floats: lowest point at y=${box.min.y.toFixed(2)}`).toBeLessThanOrEqual(0.06);
       expect(box.min.y, `${id} is buried: lowest point at y=${box.min.y.toFixed(2)}`).toBeGreaterThan(-2.6);
@@ -241,11 +318,28 @@ describe('characters', () => {
     expect(buf.toString('ascii', 0, 4)).toBe('EANM');
     const header = JSON.parse(buf.toString('utf8', 8, 8 + buf.readUInt32LE(4))) as { clips: { name: string }[] };
     const have = new Set(header.clips.map((c) => c.name));
-    const anims: CharacterAnim[] = ['idle', 'walk', 'run', 'attack', 'hit', 'down', 'dead', 'brace', 'shoot', 'reload', 'talk', 'cheer', 'flee'];
+    const anims: CharacterAnim[] = ['idle', 'walk', 'run', 'attack', 'hit', 'down', 'dead', 'brace', 'shoot', 'reload', 'talk', 'cheer', 'flee', 'sit', 'work', 'limp'];
     const weapons: WeaponKind[] = ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff', 'axe', 'lance', 'none'];
     for (const a of anims) for (const w of weapons) for (const shield of [false, true]) for (const seed of [0, 1, 2, 3, 4]) {
       const pick = clipFor(a, w, seed, shield);
       expect(have.has(pick.name), `${a}/${w}: no clip "${pick.name}"`).toBe(true);
+    }
+  });
+
+  it('CHARACTER_CLIP_NAMES covers every clip mixamoClipFor can request', async () => {
+    const { CHARACTER_CLIP_NAMES, mixamoClipFor } = await import('./characters');
+    const anims: CharacterAnim[] = ['idle', 'walk', 'run', 'attack', 'hit', 'down', 'dead', 'brace', 'shoot', 'reload', 'talk', 'cheer', 'flee', 'sit', 'work', 'limp'];
+    const weapons: WeaponKind[] = ['spiess', 'halberd', 'crossbow', 'sword', 'dagger', 'staff', 'axe', 'lance', 'none'];
+    const have = new Set<string>(CHARACTER_CLIP_NAMES as string[]);
+    for (const a of anims) for (const w of weapons) for (const shield of [false, true]) for (const seed of [0, 1, 2, 3]) {
+      const pick = mixamoClipFor(a, w, seed, shield);
+      expect(have.has(pick.name), `${a}/${w}/shield=${shield}: warmup misses "${pick.name}"`).toBe(true);
+    }
+    // and every warmed name is a real shipped file (no prefetch 404s at boot)
+    const spec = 'node:' + 'fs';
+    const { existsSync } = await import(spec) as { existsSync: (p: string) => boolean };
+    for (const name of CHARACTER_CLIP_NAMES as string[]) {
+      expect(existsSync(`public/assets/characters/clips/${name}.glb`), `clip file missing: ${name}.glb`).toBe(true);
     }
   });
 
@@ -346,3 +440,36 @@ describe('per-entity seed', () => {
   });
 });
 
+describe('kit tone legibility (ART.md KCD-muted overcast)', () => {
+  it('mixTone is pure: endpoints identity and midpoint deterministic', () => {
+    const a = 0x9c9488, b = 0x625e55;
+    expect(mixTone(a, b, 0)).toBe(a);
+    expect(mixTone(a, b, 1)).toBe(b);
+    expect(mixTone(0x000000, 0xffffff, 0.5)).toBe(0x808080);
+    expect(mixTone(a, b, 0.35)).toBe(mixTone(a, b, 0.35));
+  });
+
+  it('all shared kit tones are valid 24-bit hex', () => {
+    const tones: [string, number][] = [
+      ['SHINGLE_TONE', SHINGLE_TONE], ['SHINGLE_DARK', SHINGLE_DARK], ['LOG_TONE', LOG_TONE],
+      ['PLANK_TONE', PLANK_TONE], ['PLANK_DARK', PLANK_DARK], ['TIMBER_DARK', TIMBER_DARK],
+      ['STONE_TONE', STONE_TONE], ['MASONRY_TONE', MASONRY_TONE], ['DRY_TONE', DRY_TONE],
+      ['PLASTER_TONE', PLASTER_TONE], ['IRON_TONE', IRON_TONE], ['THATCH_TONE', THATCH_TONE],
+      ['WEIGHT_TONE', WEIGHT_TONE], ['TILE_TONE', TILE_TONE],
+    ];
+    for (const [name, v] of tones) {
+      expect(Number.isInteger(v), `${name} not an integer`).toBe(true);
+      expect(v, `${name} out of 24-bit range`).toBeGreaterThanOrEqual(0x000000);
+      expect(v, `${name} out of 24-bit range`).toBeLessThanOrEqual(0xffffff);
+    }
+  });
+
+  it('shingle course shadow line reads at noon: SHINGLE_DARK well below SHINGLE_TONE', () => {
+    const lum = (v: number): number =>
+      0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255);
+    // ~1/3 darker than the course face so alternating courses + butt shadow lines read as
+    // courses, not a flat plane; pinned against regression to a flat low-contrast roof.
+    expect(lum(SHINGLE_DARK)).toBeLessThan(lum(SHINGLE_TONE) * 0.68);
+    expect(mixTone(SHINGLE_TONE, SHINGLE_DARK, 0.35)).not.toBe(SHINGLE_TONE);
+  });
+});

@@ -110,3 +110,9 @@ Total committed asset bytes: **9.66 MB** in 84 files.
   31 clips the game maps onto `CharacterAnim`. Rigged CC0 humans that exist (KayKit Adventurers,
   Quaternius) are toon-proportioned fantasy archetypes — wrong silhouettes for 1291–1315 Alemannic dress,
   and none of them ship kettle hats, gambesons, monks' habits or a red-white-red surcoat.
+* **Phase 2 B2 Alpine prop variants are pure procedural geometry** (`src/world/models/props.ts`):
+  `cross.shrine` (slim votive Bildstock cross), `hayrick.tripod` (tripod Heinzen for steep meadows),
+  `palisade.gate` (ajar plank gate closing one 8 m palisade segment), `hut.fisher` (one-room Blockbau
+  fisher hut with thatched roof and fish-drying rack), `boat.cargo` (decked Nauen lake cargo boat).
+  All compose into the existing shared kit.ts PBR batches (no new materials, no new draw calls per
+  POI); no third-party source, no new credits rows.

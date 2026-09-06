@@ -39,9 +39,10 @@ export function updateHud(
     }
   }
   if (nearestUndiscovered) {
-    const { def, d } = nearestUndiscovered;
+    const { def } = nearestUndiscovered;
     const bearing = Math.atan2(def.x - t.x, -(def.z - t.z));
-    markers.push({ bearing, kind: 'landmark', label: '?', distance: d, discovered: false });
+    // 4.6 fog: undiscovered stays `?`-only — no name, real kind, or distance leaks (distance: -1).
+    markers.push({ bearing, kind: 'landmark', label: '?', distance: -1, discovered: false });
   }
 
   const state: HudState = {

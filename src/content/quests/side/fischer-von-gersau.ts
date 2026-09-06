@@ -7,9 +7,9 @@ export const fischerVonGersau: QuestDef = {
   description: "Gersau's fishermen answer to no lord, yet the Brunnen toll-men stop their fish carts on the shore road all the same.",
   stages: [
     {
-      id: 'toll-trouble', journal: 'Uli Fischer of Gersau complains of Habsburg toll-men harassing the fish carts.',
+      id: 'trouble', journal: 'Uli Fischer of Gersau complains of Habsburg toll-men harassing the fish carts.',
       marker: 'poi.gersau', objectiveText: 'Hear Uli Fischer out.',
-      onEnter: [{ dialogue: 'dlg.fischer-gersau' }],
+      onEnter: [{ dialogue: 'dlg.fischer-gersau' }, { quest: ['advance', 'quest.fischer-von-gersau', 'confront'] }],
     },
     {
       id: 'confront', journal: 'The toll-man Konrad Niederberger holds the Brunnen quay road.',
@@ -17,8 +17,14 @@ export const fischerVonGersau: QuestDef = {
       onEnter: [{ dialogue: 'dlg.fischer-gersau-confront' }],
     },
     {
-      id: 'resolution', journal: "Gersau's fish carts pass unmolested — for now.",
-      onEnter: [{ quest: ['complete', 'quest.fischer-von-gersau'] }],
+      id: 'freedom', journal: "The toll-man yielded: Gersau's fish carts pass the Brunnen quay unmolested, and Konrad counts the smaller carts twice before he troubles them again.",
+      marker: 'poi.gersau', objectiveText: 'Bring the news back to Uli.',
+      onEnter: [{ dialogue: 'dlg.fischer-gersau-return' }],
+    },
+    {
+      id: 'tribute', journal: "The toll stands, grudgingly softened for the smaller carts. Uli will want to hear how it went — and what it will cost Gersau.",
+      marker: 'poi.gersau', objectiveText: 'Bring the news back to Uli.',
+      onEnter: [{ dialogue: 'dlg.fischer-gersau-return' }],
     },
   ],
   onStart: [{ toast: 'Quest started: Die Fischer von Gersau' }],

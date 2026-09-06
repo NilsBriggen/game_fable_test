@@ -63,45 +63,91 @@ export function createHud(ctx: GameContext, mount: HTMLElement): HudHandle {
     root.classList.toggle('hidden', !on);
   }
 
+  // A6 perf: update() runs every frame — only touch the DOM when values actually changed.
+  // Shared with the 2 Hz quest poll below so the two writers never fight (writes are skipped
+  // when the shared cache already matches).
+  const last: {
+    hpW: string | null; hpT: string | null; moraleW: string | null; moraleT: string | null;
+    fatigueW: string | null; fatigueT: string | null;
+    time: string | null; region: string | null; prompt: string | null;
+    questTitle: string | null; questObj: string | null; questShown: boolean;
+    compassKey: string | null;
+  } = {
+    hpW: null, hpT: null, moraleW: null, moraleT: null, fatigueW: null, fatigueT: null,
+    time: null, region: null, prompt: null,
+    questTitle: null, questObj: null, questShown: false, compassKey: null,
+  };
+
+  function setWidth(elm: HTMLElement, key: 'hpW' | 'moraleW' | 'fatigueW', value: string): void {
+    if (value !== last[key]) { elm.style.width = value; last[key] = value; }
+  }
+  function setText(elm: HTMLElement, key: 'hpT' | 'moraleT' | 'fatigueT' | 'time' | 'region' | 'questTitle' | 'questObj', value: string): void {
+    if (value !== last[key]) { elm.textContent = value; last[key] = value; }
+  }
+
+  /** Show/update the tracker only when the model differs; hide only when it was shown. */
+  function syncQuest(title: string | null, objective: string | null): void {
+    if (title !== null && objective !== null) {
+      if (!last.questShown) { questTracker.style.display = ''; last.questShown = true; }
+      setText(questTitle, 'questTitle', title);
+      setText(questObj, 'questObj', objective);
+    } else if (last.questShown) {
+      questTracker.style.display = 'none';
+      last.questShown = false;
+      last.questTitle = null;
+      last.questObj = null;
+    }
+  }
+
+  function compassKeyOf(yaw: number, markers: { bearing: number; kind: string; label: string; distance: number; discovered: boolean }[]): string {
+    const parts = [yaw.toFixed(4)];
+    for (const m of markers) parts.push(`${m.bearing.toFixed(3)}|${m.kind}|${Math.round(m.distance)}|${m.discovered ? 1 : 0}|${m.label}`);
+    return parts.join(';');
+  }
+
   function update(state: HudState): void {
-    hpFill.style.width = `${pct(state.hp, state.hpMax)}%`;
-    hpNum.textContent = `${Math.round(state.hp)}/${state.hpMax}`;
-    moraleFill.style.width = `${pct(state.morale, state.moraleMax)}%`;
-    moraleNum.textContent = `${Math.round(state.morale)}/${state.moraleMax}`;
-    fatigueFill.style.width = `${Math.max(0, Math.min(100, state.fatigue))}%`;
-    fatigueNum.textContent = `${Math.round(state.fatigue)}`;
+    setWidth(hpFill, 'hpW', `${pct(state.hp, state.hpMax)}%`);
+    setText(hpNum, 'hpT', `${Math.round(state.hp)}/${state.hpMax}`);
+    setWidth(moraleFill, 'moraleW', `${pct(state.morale, state.moraleMax)}%`);
+    setText(moraleNum, 'moraleT', `${Math.round(state.morale)}/${state.moraleMax}`);
+    setWidth(fatigueFill, 'fatigueW', `${Math.max(0, Math.min(100, state.fatigue))}%`);
+    setText(fatigueNum, 'fatigueT', `${Math.round(state.fatigue)}`);
 
-    dateEl.textContent = state.time;
-    regionEl.textContent = state.region;
+    setText(dateEl, 'time', state.time);
+    setText(regionEl, 'region', state.region);
 
-    clear(compassMask);
-    for (const c of compassCardinals(state.compass.yaw, 180)) {
-      compassMask.appendChild(el('div', { class: 'hud-compass-letter', style: `left:${c.x * 100}%` }, [c.letter]));
-    }
-    for (const m of state.compass.markers) {
-      const x = compassX(m.bearing, state.compass.yaw, 180);
-      if (x === null) continue;
-      const showDist = m.discovered && m.distance < 500;
-      compassMask.appendChild(el('div', { class: `hud-compass-marker${m.discovered ? '' : ' undiscovered'}`, style: `left:${x * 100}%` }, [
-        el('span', { class: 'ic', html: m.discovered ? poiIcon(m.kind as any, 14) : ICONS.compassRing }),
-        showDist ? el('span', {}, [`${Math.round(m.distance)} m`]) : null,
-      ]));
-    }
-
-    if (state.quest) {
-      questTracker.style.display = '';
-      questTitle.textContent = state.quest.title;
-      questObj.textContent = state.quest.objective;
+    const ck = compassKeyOf(state.compass.yaw, state.compass.markers);
+    if (ck !== last.compassKey) {
+      last.compassKey = ck;
+      clear(compassMask);
+      for (const c of compassCardinals(state.compass.yaw, 180)) {
+        compassMask.appendChild(el('div', { class: 'hud-compass-letter', style: `left:${c.x * 100}%` }, [c.letter]));
+      }
+      for (const m of state.compass.markers) {
+        const x = compassX(m.bearing, state.compass.yaw, 180);
+        if (x === null) continue;
+        const showDist = m.discovered && m.distance < 500;
+        compassMask.appendChild(el('div', { class: `hud-compass-marker${m.discovered ? '' : ' undiscovered'}`, style: `left:${x * 100}%` }, [
+          el('span', { class: 'ic', html: m.discovered ? poiIcon(m.kind as any, 14) : ICONS.compassRing }),
+          showDist ? el('span', {}, [`${Math.round(m.distance)} m`]) : null,
+        ]));
+      }
     }
 
-    if (state.prompt) {
-      promptEl.style.display = '';
-      const [, key, ...rest] = /^\[(.)\]\s*(.*)$/.exec(state.prompt) ?? [null, null, state.prompt];
-      clear(promptEl);
-      if (key) promptEl.appendChild(el('kbd', {}, [key]));
-      promptEl.appendChild(document.createTextNode(rest.join('') || state.prompt));
-    } else {
-      promptEl.style.display = 'none';
+    if (state.quest) syncQuest(state.quest.title, state.quest.objective);
+
+    const rawPrompt = state.prompt ?? '';
+    if (rawPrompt !== last.prompt) {
+      last.prompt = rawPrompt;
+      if (state.prompt) {
+        promptEl.style.display = '';
+        const [, key, ...rest] = /^\[(.)\]\s*(.*)$/.exec(state.prompt) ?? [null, null, state.prompt];
+        clear(promptEl);
+        if (key) promptEl.appendChild(el('kbd', {}, [key]));
+        promptEl.appendChild(document.createTextNode(rest.join('') || state.prompt));
+      } else {
+        promptEl.style.display = 'none';
+      }
     }
   }
 
@@ -113,6 +159,9 @@ export function createHud(ctx: GameContext, mount: HTMLElement): HudHandle {
   }
 
   function prompt(text: string | null): void {
+    const raw = text ?? '';
+    if (raw === last.prompt) return; // update() already shows the same state
+    last.prompt = raw;
     if (!text) { promptEl.style.display = 'none'; return; }
     promptEl.style.display = '';
     const m = /^\[(.)\]\s*(.*)$/.exec(text);
@@ -126,13 +175,8 @@ export function createHud(ctx: GameContext, mount: HTMLElement): HudHandle {
     const quest = ctx.services.tryGet('quest');
     if (!quest) return;
     const active = quest.activeQuests()[0];
-    if (active) {
-      questTracker.style.display = '';
-      questTitle.textContent = active.title;
-      questObj.textContent = active.objective;
-    } else {
-      questTracker.style.display = 'none';
-    }
+    if (active) syncQuest(active.title, active.objective);
+    else syncQuest(null, null);
   }, QUEST_POLL_MS);
 
   function dispose(): void {

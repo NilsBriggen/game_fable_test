@@ -26,7 +26,7 @@ import { Rng, hashString } from '@core/rng';
 import type { TerrainManager } from './terrain';
 import { FOREST_MAX_H } from './heightmodel';
 import { fbm2D } from './noise';
-import { buildTreeGeometry, treeImpostor, treeMaterial, groundCover, type TreeKind } from './treeGeometry';
+import { buildTreeGeometry, treeImpostor, treeMaterial, groundCover, setWindTime, setWindAmp, type TreeKind } from './treeGeometry';
 import { getViewPosition, registerCsmMaterial } from './shadowCsm';
 import { buildSplatMask, splatMaskReady, getTerrainMaterial } from './terrainMaterial';
 import { rockGeometry, rockScanMaterial, type RockKind } from './look/rocks';
@@ -73,6 +73,32 @@ export function setVegetationDensity(scale: number): void {
   densityScale = Number.isFinite(scale) ? Math.max(0.1, Math.min(1, scale)) : 1;
 }
 
+/**
+ * Frame-cost shed factor (Phase 2 A4-core/A5): multiplies the tree keep rates below. Set from the
+ * world system's adaptive governor; 1 = full density. Reset to 1 when pressure clears. Pure value
+ * (no allocation, no re-scatter by itself): takes effect on the next chunk (re)populate, so the
+ * cost of a re-scatter storm is never paid to *enter* shed mode.
+ */
+let shedFactor = 1;
+export function setVegetationShed(factor: number): void {
+  shedFactor = Number.isFinite(factor) ? Math.max(0.15, Math.min(1, factor)) : 1;
+}
+export function vegetationShedForTest(): number { return shedFactor; }
+
+/**
+ * Rocky-ground guard (Phase 2 A5, Sarnen triangle blowup): the bar's "rocky ground cover" on scree
+ * / rock was pebble InstancedMesh scatter at 30% of a 2.4 m grid inside 40 m. On a scree apron that
+ * is ~870 candidates per chunk *before* the slope/roll gates, each a 250-700-triangle photogrammetry
+ * scan — the dominant triangle term at Sarnen (5.43 M tris at 158 calls is NOT draw-call bound).
+ * Pebbles no longer scatter where the terrain shader already carries stones (the slope-driven scree
+ * band in terrainMaterial.ts); a sparse remainder marks scree only on gentle low ground.
+ */
+function pebbleKeepFor(surface: string, slope: number): number {
+  if (surface !== 'scree' && surface !== 'rock' && surface !== 'mud') return 1;
+  if (slope > 0.5) return 0;   // the shader's scree band owns steep ground
+  return 0.25;                 // gentle aprons keep a sparse mark, not a carpet
+}
+
 /** Per-pool starting capacity: a typical scene, not the worst case — grow() covers the rest, and a
  *  worst-case pool for every species up front is heap that is never used. */
 const CAPACITY: Record<string, number> = { full: 1200, mid: 3000, impostor: 12000, rock: 500, cover: 5000 };
@@ -114,6 +140,7 @@ export class VegetationManager {
   private chunkTier = new Map<string, number>();
   private chunkGrass = new Map<string, Alloc[]>();
   private maskKicked = false;
+  private maskSeed: number | undefined = undefined;
   private overflowWarned = false;
   /** reused across frames: update() must not allocate (bughunt world-runtime #6) */
   private activeKeys = new Set<string>();
@@ -234,13 +261,22 @@ export class VegetationManager {
   }
 
   /** Called every frame by the world 'always' system after terrain streaming. */
-  update(): void {
+  update(elapsed = 0, windAmp = 1): void {
+    // Phase 6: advance the shared wind clock (foliage sway in treeGeometry). Allocation-free.
+    setWindTime(elapsed);
+    setWindAmp(windAmp);
     const view = getViewPosition();
     const camX = view.x, camZ = view.z;
     // The terrain splat mask can only be baked once the CPU grid exists; this is the first place in
-    // the world module that is guaranteed to run after `await terrain.ready`.
+    // the world module that is guaranteed to run after `await terrain.ready`. Re-bakes after a
+    // reseed/new-game (new maskSeed), since the bake is seed-dependent.
+    const maskSeed = (this.terrain as unknown as { gridSeed?: number }).gridSeed;
     if (!this.maskKicked && !splatMaskReady()) {
       this.maskKicked = true;
+      this.maskSeed = maskSeed;
+      buildSplatMask((x, z) => this.terrain.surfaceIdAt(x, z), this.terrain.cpuWidth, this.terrain.cpuHeight, (x, z) => this.terrain.heightAt(x, z));
+    } else if (this.maskKicked && maskSeed !== undefined && maskSeed !== this.maskSeed) {
+      this.maskSeed = maskSeed;
       buildSplatMask((x, z) => this.terrain.surfaceIdAt(x, z), this.terrain.cpuWidth, this.terrain.cpuHeight, (x, z) => this.terrain.heightAt(x, z));
     }
     const active = this.terrain.listActiveChunks();
@@ -348,7 +384,7 @@ export class VegetationManager {
   private populateCell(rng: Rng, originX: number, originZ: number, tier: Tier, lod: number, allocs: Alloc[]): void {
     const spacing = SPACING;
     const size = CELL;
-    const keep = (tier !== 'impostor' ? 1 : lod >= 2 ? FAR_KEEP : IMPOSTOR_KEEP) * densityScale;
+    const keep = (tier !== 'impostor' ? 1 : lod >= 2 ? FAR_KEEP : IMPOSTOR_KEEP) * densityScale * shedFactor;
     for (let gz = 0; gz < size; gz += spacing) {
       for (let gx = 0; gx < size; gx += spacing) {
         const x = originX + gx + (rng.next() - 0.5) * spacing * 0.85;
@@ -456,6 +492,8 @@ export class VegetationManager {
           scale *= 0.9;
         } else if (surface === 'scree' || surface === 'rock' || surface === 'mud') {
           if (dist > CLUTTER_RADIUS || roll > 0.30) continue;
+          const pebbleKeep = pebbleKeepFor(surface, slope);
+          if (pebbleKeep <= 0 || rng.next() > pebbleKeep) continue;
           pool = this.rockPool('pebble');
           scale = 0.5 + rng.next() * 1.1;
         } else if (surface === 'settlement' || surface === 'road') {
@@ -476,10 +514,72 @@ export class VegetationManager {
     this.chunkGrass.set(key, allocs);
   }
 
-  stats(): { instances: number; drawCalls: number } {
+  stats(): { instances: number; drawCalls: number; retainedMb: number; poolCapacities: Record<string, number> } {
     let instances = 0;
-    for (const p of this.pools.values()) instances += p.capacity - p.free.length;
-    return { instances, drawCalls: this.pools.size };
+    let retainedBytes = 0;
+    const poolCapacities: Record<string, number> = {};
+    for (const p of this.pools.values()) {
+      instances += p.capacity - p.free.length;
+      poolCapacities[p.key] = p.capacity;
+      // instanceMatrix is always live; instanceColor only once the pool has a tinted instance.
+      retainedBytes += p.capacity * 16 * 4;
+      if (p.mesh.instanceColor) retainedBytes += p.capacity * 3 * 4;
+    }
+    return { instances, drawCalls: this.pools.size, retainedMb: retainedBytes / 1048576, poolCapacities };
+  }
+
+  /**
+   * Heap-after-eviction hook (Phase 2 A5): compact pools whose live set collapsed — e.g. after
+   * leaving a forest for open water, capacities grown 1.7x per step sit mostly empty. Only call
+   * on settle/teleport, never per frame: it scans every chunk's alloc lists for the highest live
+   * slot per pool, then reallocates pools with 64+ spare slots to ceil(maxLive * 1.25) floored at
+   * the tier's starting CAPACITY. Slot indices below the new capacity are preserved, so every
+   * Alloc already handed out stays valid. Returns the number of pools compacted.
+   */
+  compactPools(): number {
+    const maxLive = new Map<string, number>();
+    const scan = (list: Alloc[] | undefined): void => {
+      if (!list) return;
+      for (const a of list) {
+        const m = maxLive.get(a.poolKey) ?? -1;
+        if (a.index > m) maxLive.set(a.poolKey, a.index);
+      }
+    };
+    for (const list of this.chunkAlloc.values()) scan(list);
+    for (const list of this.chunkGrass.values()) scan(list);
+    let compacted = 0;
+    for (const pool of this.pools.values()) {
+      const top = (maxLive.get(pool.key) ?? -1) + 1; // live slots are all < top by construction
+      const target = Math.max(startCapacityFor(pool.key), Math.ceil(top * 1.25));
+      if (target + 64 < pool.capacity && this.resizePool(pool, target)) compacted++;
+    }
+    return compacted;
+  }
+
+  /** Resize a pool to exactly `next` slots, preserving slot indices (shared core with grow()). */
+  private resizePool(pool: Pool, next: number): boolean {
+    if (next < 1 || next >= pool.capacity) return false;
+    const old = pool.mesh;
+    const mesh = this.makeMesh(pool.key, old.geometry as BufferGeometry, old.material as MeshStandardMaterial, next, pool.casts);
+    mesh.instanceMatrix.array.set((old.instanceMatrix.array as Float32Array).subarray(0, next * 16));
+    const oldColor = old.instanceColor;
+    if (oldColor) {
+      const arr = new Float32Array(next * 3).fill(1);
+      arr.set((oldColor.array as Float32Array).subarray(0, next * 3));
+      mesh.instanceColor = new InstancedBufferAttribute(arr, 3);
+      mesh.instanceColor.setUsage(DynamicDrawUsage);
+      mesh.instanceColor.needsUpdate = true;
+    }
+    mesh.count = old.count;
+    this.group.remove(old);
+    old.dispose();
+    this.group.add(mesh);
+    pool.mesh = mesh;
+    pool.capacity = next;
+    pool.free = pool.free.filter((i) => i < next);
+    pool.highWater = Math.min(pool.highWater, next);
+    this.dirtyPools.add(pool);
+    return true;
   }
 
   dispose(): void {
@@ -489,6 +589,15 @@ export class VegetationManager {
     this.chunkTier.clear();
     this.chunkGrass.clear();
   }
+}
+
+/** Tier starting capacity for a pool key (mirrors the CAPACITY table used at creation). */
+function startCapacityFor(poolKey: string): number {
+  if (poolKey.includes('.impostor')) return CAPACITY.impostor;
+  if (poolKey.includes('.full')) return CAPACITY.full;
+  if (poolKey.includes('.mid')) return CAPACITY.mid;
+  if (poolKey.startsWith('rock.')) return CAPACITY.rock;
+  return CAPACITY.cover;
 }
 
 /** Beech is a lowland/mid-slope tree; spruce and larch take over higher up. */

@@ -35,5 +35,5 @@ export const morgarten: QuestDef = {
       onEnter: [{ cutscene: 'cs.morgarten-aftermath' }],
     },
   ],
-  onStart: [{ toast: 'Quest started: Morgarten' }],
+  onStart: [{ toast: 'Quest started: Morgarten' }, { music: 'music.morgarten' }],
 };

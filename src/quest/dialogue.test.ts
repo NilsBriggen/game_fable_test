@@ -39,6 +39,10 @@ function fakeRt(opts: Options): DialogueRuntime & { effectsLog: string[] } {
     addJournalEntry: () => {}, discoverPoi: () => {}, npcMove: () => {}, npcRemove: () => {},
     runDialogueById: async () => {}, restParty: () => {}, setMusic: () => {}, endAct: () => {},
     getDialogueDef: (id) => opts.dialogues[id],
+    // 4.3 i18n: def-text fallback (no locale loaded in these unit tests — the runner falls back to
+    // the def's own text when rt.t misses; locale resolution is covered by the catalog + override
+    // tests below and the production wiring in index.ts).
+    t: (id) => id,
     npcDisplayName: (id) => (id === 'npc.werner-stauffacher' ? 'Werner Stauffacher' : undefined),
     npcPortrait: () => undefined,
     entityDisplayName: () => undefined,
@@ -278,7 +282,48 @@ describe('runDialogue', () => {
     const rt = fakeRt({ dialogues: {} });
     const outcome = await runDialogue('dlg.missing', rt);
     expect(outcome.ended).toBe(true);
+    expect(outcome.cancelled).toBe(false);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it('hide() mid-conversation cancels neutrally: no node/choice effects run, outcome reports cancelled', async () => {
+    const dialogues: Record<string, DialogueDef> = {
+      'dlg.test': {
+        id: 'dlg.test', historical: 'invented', note: 'x', root: 'first',
+        nodes: {
+          // multi-node dialogue: cancelling at the first node must NOT advance into 'second'
+          first: { speaker: 'narrator', text: 'First.', next: 'second' },
+          second: { speaker: 'narrator', text: 'Second.', effects: [{ toast: 'second-ran' }], end: true },
+        },
+      },
+    };
+    let dismiss = false;
+    const ui: DialogueUiHandle = {
+      show: async (n) => { dismiss = true; return 0; }, // hide() resolves pending show() with stale 0
+      hide: () => {},
+      wasDismissed: () => dismiss,
+    };
+    const rt = fakeRt({ dialogues, ui });
+    const outcome = await runDialogue('dlg.test', rt);
+    expect(outcome).toEqual({ ended: false, cancelled: true, lastNode: 'first', effectsRun: 0 });
+    expect(rt.effectsLog).toEqual([]); // nothing from either node ran
+  });
+
+  it('a picked choice with effects still runs them and reports ended (no false cancellation)', async () => {
+    const dialogues: Record<string, DialogueDef> = {
+      'dlg.test': {
+        id: 'dlg.test', historical: 'invented', note: 'x', root: 'n',
+        nodes: {
+          n: { speaker: 'narrator', text: 'Pick.', choices: [{ text: 'Go', effects: [{ toast: 'went' }], end: true }] },
+        },
+      },
+    };
+    const ui: DialogueUiHandle = { show: async () => 0, hide: () => {}, wasDismissed: () => false };
+    const rt = fakeRt({ dialogues, ui });
+    const outcome = await runDialogue('dlg.test', rt);
+    expect(outcome.ended).toBe(true);
+    expect(outcome.cancelled).toBe(false);
+    expect(rt.effectsLog).toEqual(['toast:went']);
   });
 });

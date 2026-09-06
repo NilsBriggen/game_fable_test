@@ -1,13 +1,10 @@
 /**
- * Critic probe — reproduces "effects on a quest that isn't started": every one of the six side
- * quests (src/content/quests/side/*) is offered purely via an NPC's `dialogueRoot`
- * (src/content/npcs.ts), and that opening dialogue's "agree" choice only ever does
- * `{quest: ['advance', questId, nextStage]}` — never `{quest: ['start', questId]}`.
- * `QuestMachine.advance()` (src/quest/quests.ts) is a silent no-op when `!isStarted(id)`, so talking
- * to the giver NPC and picking "agree" produces dialogue text and NPC-side effects (rep etc. on later
- * nodes) but the quest itself never starts: it never appears in the journal, the active-quest tracker,
- * or save data, and every later `quest:['advance',...]` in that same quest's dialogue chain is *also*
- * silently dropped for the same reason. Confirmed for all six side quests below.
+ * Critic probe — REGRESSION GUARD (was: "side quests never start", bughunt quest #1, fixed 2026-09-05
+ * in the Phase 4 4.0 pass). Every one of the six side quests (src/content/quests/side/*) is offered
+ * purely via an NPC's `dialogueRoot` (src/content/npcs.ts), and the opening dialogue's accept choice
+ * must `{quest: ['start', questId]}` — start, not advance — with the quest's first stage id matching the
+ * giver dialogue's stage. Guards the regression: if any giver dialogue regresses to advance-only, or a
+ * first-stage id drifts from the dialogue the giver actually plays, the quest silently never starts.
  */
 import { describe, it, expect } from 'vitest';
 import { register as registerQuest, QuestServiceImpl } from '../../../../src/quest/index';
@@ -43,17 +40,16 @@ async function setup() {
   return { quest };
 }
 
-describe('side quests never start (giver dialogue only ever quest:advance, never quest:start)', () => {
+describe('side quests start from their giver dialogue (bughunt #1 regression guard)', () => {
   for (const { quest: qid, dialogue, giverNpc } of CASES) {
-    it(`${qid}: talking to ${giverNpc} (${dialogue}) and picking "agree" does NOT start the quest`, async () => {
+    it(`${qid}: talking to ${giverNpc} (${dialogue}) and accepting starts the quest`, async () => {
       const { quest } = await setup();
       expect(quest.isStarted(qid)).toBe(false);
       await quest.runDialogue(dialogue);
-      // Bug: the quest is still not started — the dialogue's `{quest:['advance', ...]}` effect was a
-      // silent no-op inside QuestMachine.advance() because isStarted(qid) was false. Expected behaviour
-      // would be quest.isStarted(qid) === true after accepting the quest offer.
-      expect(quest.isStarted(qid)).toBe(false);
-      expect(quest.stage(qid)).toBeNull();
+      expect(quest.isStarted(qid)).toBe(true);
+      expect(quest.stage(qid)).not.toBeNull();
+      // the quest journal carries a line for the giver stage (it entered through start, not a silent no-op)
+      expect(quest.journal().some((j) => j.questId === qid)).toBe(true);
     });
   }
 });

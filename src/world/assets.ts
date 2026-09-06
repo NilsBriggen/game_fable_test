@@ -34,14 +34,49 @@ function texDir(id: PropTexId): string {
 const loader = new TextureLoader();
 const texCache = new Map<string, Texture>();
 
+// ---------------------------------------------------------------------------------------------
+// Texture upload abstraction (Phase 2 B3: KTX2/Basis migration PREP).
+//
+// Today's loader path is plain JPEG (TextureLoader → sRGB diff, linear nor/rough). The KTX2
+// migration keeps this exact call shape — `uploadPropTexture(id, map)` returns a Texture with
+// the same repeat/aniso/colorspace contract — and only swaps the *inside* of `loadImageTexture`
+// for a KTX2Loader decode (transcoded to BC7/ETC2/ASTC by renderer capability, sRGB vs linear
+// internal format chosen by `map` exactly as the colorSpace assignment below does).
+//
+// TODO (Phase 2.0 completion, integrator): add the `three/addons/loaders/KTX2Loader.js` npm-side
+// module (no new npm dep is added here), create one shared KTX2Loader with
+// `ktx2.setTranscoderPath('assets/basis/')` + `ktx2.detectSupport(renderer)`, and inside
+// `loadImageTexture` below branch: if `HEAD /assets/textures/.../*.ktx2` (or a committed
+// manifest flag per texture id) exists, `ktx2.loadAsync(url)` and copy wrap/aniso/colorSpace
+// from the JPEG path. Fallback is the JPEG below — every caller keeps working when the .ktx2
+// is missing, and no call site changes when it lands.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Single upload point every prop/character texture goes through. `map` selects the colour
+ * contract: 'diff' is sRGB albedo; 'nor'/'rough' are linear data (never sRGB, even after the
+ * KTX2 swap — the transcoded format must be linear for those two).
+ */
+export function loadImageTexture(url: string, map: 'diff' | 'nor' | 'rough'): Texture {
+  const t = loader.load(url);
+  t.wrapS = t.wrapT = RepeatWrapping;
+  t.anisotropy = 8;   // keep: grazing timber/stone at eye level needs it; 16 streaked along the view ray
+  if (map === 'diff') t.colorSpace = SRGBColorSpace;
+  // nor/rough intentionally keep the default (NoColorSpace/linear): marking data maps sRGB
+  // would double-convert them in the shader and wash out normals / darken roughness.
+  return t;
+}
+
+/** Loader hook for the KTX2 migration: resolves the URL a texture id/map loads from. */
+export function propTextureUrl(id: PropTexId, map: 'diff' | 'nor' | 'rough'): string {
+  return `${BASE}/${texDir(id)}/${map}.jpg`;
+}
+
 function tex(id: PropTexId, map: 'diff' | 'nor' | 'rough'): Texture {
   const key = `${id}/${map}`;
   let t = texCache.get(key);
   if (t) return t;
-  t = loader.load(`${BASE}/${texDir(id)}/${map}.jpg`);
-  t.wrapS = t.wrapT = RepeatWrapping;
-  t.anisotropy = 8;
-  if (map === 'diff') t.colorSpace = SRGBColorSpace;
+  t = loadImageTexture(propTextureUrl(id, map), map);
   texCache.set(key, t);
   return t;
 }
@@ -58,6 +93,32 @@ export interface PropMatOpts {
 }
 
 const matCache = new Map<string, MeshStandardMaterial>();
+
+/**
+ * §3.5 wet sheen: rain/fog weather lowers roughness and raises env response on every shared prop
+ * material (no new materials — the cache keys are unchanged, so merged settlement batches keep one
+ * mesh per material). Called from the world stream tick with the sky's wetness; idempotent per value.
+ */
+let lastWet = -1;
+export function applyWetSheen(wetness: number): void {
+  const wet = wetness > 0.5;
+  if ((wet ? 1 : 0) === lastWet) return;
+  lastWet = wet ? 1 : 0;
+  for (const m of matCache.values()) {
+    try {
+      const base = Number(m.userData.baseRoughness ?? NaN);
+      if (!Number.isFinite(base)) {
+        m.userData.baseRoughness = m.roughness;
+        m.userData.baseEnv = m.envMapIntensity;
+      }
+      const b0 = Number(m.userData.baseRoughness);
+      const e0 = Number(m.userData.baseEnv ?? 1);
+      m.roughness = wet ? Math.max(0.15, b0 - 0.25) : b0;
+      m.envMapIntensity = wet ? e0 + 0.5 : e0;
+      m.needsUpdate = false; // uniform-only change: no recompile
+    } catch { /* one bad material must not break the frame */ }
+  }
+}
 
 /** A shared PBR material built from one downloaded ambientCG set. Keyed by look, never per object. */
 export function propMaterial(id: PropTexId, opts: PropMatOpts = {}): MeshStandardMaterial {

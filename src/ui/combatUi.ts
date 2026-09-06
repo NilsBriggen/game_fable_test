@@ -5,12 +5,13 @@
  */
 import { Raycaster, Vector2, Vector3, Plane } from 'three';
 import type { GameContext } from '@core/context';
-import type { CombatCommand, CombatStateView, CombatantView, CellKey } from '@core/services';
+import type { CombatCommand, CombatStateView, CombatantView, CellKey, QuestService } from '@core/services';
 import type { EntityId } from '@core/ecs';
 import { el, clear } from './dom';
 import { showConfirm } from './hud';
 import { abilityIcon, ICONS } from './icons';
-import { formatHitChance, worldToCell, buildInitiativeChips, buildTargetCardModel, buildReactionPrompt } from './helpers';
+import { formatPreviewHit, worldToCell, buildInitiativeChips, buildTargetCardModel, buildReactionPrompt } from './helpers';
+import type { AttackPreviewLike } from './helpers';
 
 export interface CombatUiHandle {
   show(state: CombatStateView): void;
@@ -25,6 +26,16 @@ const STANCES: { id: 'neutral' | 'aggressive' | 'guarded' | 'braced'; label: str
   { id: 'neutral', label: 'Neutral' }, { id: 'aggressive', label: 'Aggressive' },
   { id: 'guarded', label: 'Guarded' }, { id: 'braced', label: 'Braced' },
 ];
+
+/**
+ * 4.5 first-turn hint card decision (pure — headless-testable). Shows only on a player-controlled
+ * active turn while the dismiss flag is unset; any other phase/turn/flag hides it. The flag itself
+ * (`tutorial-combat-hint-seen`) is set by the card's dismiss button or on the first combat win and
+ * persists via the quest service's saved flags, so the card never shows again.
+ */
+export function shouldShowCombatHint(args: { phase: string; playersTurn: boolean; hintSeen: boolean }): boolean {
+  return args.phase === 'active' && args.playersTurn && !args.hintSeen;
+}
 
 export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHandle {
   const root = el('div', { id: 'combat-root', class: 'hidden' });
@@ -153,7 +164,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     if (combat && nearest && abilityForPreview) {
       const preview = combat.previewAttack(active.id, abilityForPreview, nearest.id);
       if (preview) {
-        const text = formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden);
+        const text = formatPreviewHit(preview, view.grid.cellM);
         previewNode = el('div', { class: 'cbt-preview' }, [
           el('div', {}, [`vs ${nearest.name} (${preview.damage}): `, el('span', { class: 'hitpct' }, [text.split(' — ')[0]])]),
           text.includes('—') ? el('div', { class: 'src' }, [text.split(' — ')[1]]) : null,
@@ -198,11 +209,15 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     }
     abilityBar.style.display = 'flex';
     clear(abilityBar);
+    // Keyboard note: hotkeys 1-9 select abilities; tooltips also open on keyboard focus
+    // (`:focus-within` in ui.css) so non-mouse players get the same breakdown.
     active.abilities.forEach((id, idx) => {
       const def = ctx.content.abilities.get(id);
       const btn = el('button', {
         class: `cbt-ability-btn${selectedAbility === id ? ' selected' : ''}`,
         onclick: () => onAbilityClick(active, id, def),
+        tabindex: '0',
+        title: def ? `${def.name} — ${costLabel(def)}` : id,
       }, [
         el('span', { html: abilityIcon(id, 22) }),
         idx < 9 ? el('span', { class: 'hk' }, [`${idx + 1}`]) : null,
@@ -210,6 +225,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
           el('div', { style: 'font-weight:bold' }, [def?.name ?? id]),
           el('div', {}, [costLabel(def)]),
           def ? el('div', {}, [def.description]) : null,
+          el('div', { class: 'kb-note' }, ['Tab-focusable · 1–9 selects']),
         ]),
       ]);
       abilityBar.appendChild(btn);
@@ -230,6 +246,8 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   function onAbilityClick(active: CombatantView, id: string, def?: { target: string }): void {
     if (def?.target === 'self') { submit({ type: 'ability', unit: active.id, ability: id }); selectedAbility = null; return; }
     selectedAbility = selectedAbility === id ? null : id;
+    lastHoverUnitId = null; // hover preview depends on the selected ability — force one recompute
+    lastHoverCell = null;
     renderAbilityBar(lastView!);
   }
 
@@ -301,6 +319,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   function renderResult(view: CombatStateView): void {
     clear(resultHost);
     if (view.phase !== 'ended' || !view.result) return;
+    maybeDismissHintOnWin(view);
     if (ctx.state.state === 'gameover') return; // the game-over screen is the one "you lost" surface (bughunt ui #3)
     const res = view.result;
     const outcomeLabel = { win: 'Victory', lose: 'Defeat', fled: 'Fled the Field' }[res.outcome];
@@ -317,6 +336,60 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     ]));
   }
 
+  // ---------------- 4.5 first-turn hint card (small additive block; no other render path touched) ----------------
+  // Shows once per player — ever — on the first player-controlled active turn (phase 'active'),
+  // guarded by the persistent quest flag `tutorial-combat-hint-seen`. Dismissed by its own button
+  // (sets the flag) or — if the player fights on without dismissing — automatically on the first
+  // combat win (see renderResult below), then never shows again. Pure show/dismiss decision lives in
+  // `shouldShowCombatHint` (exported for the headless test); this block is DOM only.
+  // i18n-delta: ui.tutorial.combatHint.* ("First battle" title, ≤4 hint lines, "To battle" dismiss)
+  const hintCard = el('div', { class: 'eid-panel cbt-hint-card', style: 'display:none' });
+  root.append(hintCard);
+  let hintDismissedThisShow = false;
+
+  function readHintSeen(): boolean {
+    try {
+      return ctx.services.tryGet('quest')?.getFlag('tutorial-combat-hint-seen') === true;
+    } catch { return false; }
+  }
+  function writeHintSeen(): void {
+    try {
+      (ctx.services.tryGet('quest') as QuestService | undefined)?.setFlag('tutorial-combat-hint-seen', true);
+    } catch { /* headless / no quest service: hint simply shows again next fight */ }
+  }
+
+  function renderHintCard(view: CombatStateView): void {
+    const active = view.units.find((u) => u.id === view.activeUnit);
+    const playersTurn = !!(active && active.isPlayerControlled && view.phase === 'active');
+    // Harness/tournament scenes (combat-brunnen-quay without -turn): the engine auto-steps every unit
+    // under AI control, so a player-hint card must stay hidden by construction — no click can reach it.
+    const humanDriven = !ctx.harness;
+    if (!humanDriven || !shouldShowCombatHint({ phase: view.phase, playersTurn, hintSeen: readHintSeen() })) {
+      hintCard.style.display = 'none';
+      clear(hintCard);
+      hintDismissedThisShow = false;
+      return;
+    }
+    if (hintDismissedThisShow) { hintCard.style.display = 'none'; return; }
+    hintCard.style.display = '';
+    clear(hintCard);
+    hintCard.append(
+      el('div', { class: 't' }, ['First battle']),
+      el('div', { class: 'row' }, ['Move into reach, then attack.']),
+      el('div', { class: 'row' }, ['Brace against polearms and charges.']),
+      el('div', { class: 'row' }, ['High ground gives Edge on the roll.']),
+      el('div', { class: 'row' }, ['End Turn (Space) when spent.']),
+      el('button', {
+        class: 'eid-btn primary',
+        onclick: () => { writeHintSeen(); hintDismissedThisShow = true; hintCard.style.display = 'none'; },
+      }, ['To battle']),
+    );
+  }
+
+  function maybeDismissHintOnWin(view: CombatStateView): void {
+    if (view.phase === 'ended' && view.result?.outcome === 'win' && !readHintSeen()) writeHintSeen();
+  }
+
   function renderAll(view: CombatStateView): void {
     renderDeploy(view);
     renderInitiative(view);
@@ -326,6 +399,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     renderLog(view);
     renderReaction(view);
     renderResult(view);
+    renderHintCard(view);
     refreshTargetCardFromState(view);
     const active = view.units.find((u) => u.id === view.activeUnit);
     const playersTurn = !!(active && active.isPlayerControlled && view.phase === 'active');
@@ -341,7 +415,13 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     const cu = view.units.find((u) => u.id === cardUnitId);
     const model = view.phase === 'ended' ? null : buildTargetCardModel(cu ?? null);
     if (!model) { renderTargetCard(null, 0, 0); return; }
-    renderTargetCard(cu!, lastCardX, lastCardY);
+    // Recompute the hover preview so the card's hit breakdown (same data as the hover
+    // line) never goes stale on state updates; string building only, no throttle change.
+    const combat = ctx.services.tryGet('combat');
+    const active = currentActive(view);
+    const ability = active ? selectedAbility ?? defaultAttackAbility(active) : null;
+    const preview = combat && active && ability && cu ? combat.previewAttack(active.id, ability, cu.id) : null;
+    renderTargetCard(cu!, lastCardX, lastCardY, preview);
   }
 
   // ---------------- input ----------------
@@ -352,27 +432,70 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     return u && u.isPlayerControlled ? u : null;
   }
 
+  // A6 perf: mousemove fires far faster than the frame rate and each handler does a raycast +
+  // previewAttack + unit-card work. Coalesce to one hover recompute per animation frame, and skip
+  // the recompute entirely when the hovered cell/unit did not change since the last rAF.
+  let hoverQueued: { x: number; y: number } | null = null;
+  let hoverRaf = 0;
+  let lastHoverUnitId: EntityId | null = null;
+  let lastHoverCell: CellKey | null = null;
+
   function onCanvasMouseMove(e: MouseEvent): void {
     const view = lastView;
     if (!view || root.classList.contains('hidden')) return;
+    if (view.phase !== 'deploy' && view.phase !== 'active') return;
+    hoverQueued = { x: e.clientX, y: e.clientY };
+    if (hoverRaf) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      const pending = hoverQueued;
+      hoverQueued = null;
+      if (pending && lastView) processHover(pending.x, pending.y, lastView);
+    });
+  }
+
+  function processHover(clientX: number, clientY: number, view: CombatStateView): void {
+    if (root.classList.contains('hidden')) return;
     if (view.phase === 'deploy' || view.phase === 'active') {
-      const hoveredUnit = nearestUnitOnScreen(e.clientX, e.clientY, view);
+      const hoveredUnit = nearestUnitOnScreen(clientX, clientY, view);
       const combat = ctx.services.tryGet('combat');
       const active = currentActive(view);
       if (view.phase === 'active' && active && combat) {
         if (hoveredUnit && hoveredUnit.side !== active.side) {
-          const ability = selectedAbility ?? defaultAttackAbility(active);
-          const preview = ability ? combat.previewAttack(active.id, ability, hoveredUnit.id) : null;
-          hoverPreviewLine = preview ? `Hover ${hoveredUnit.name}: ${formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden)}` : null;
+          const sameUnit = lastHoverUnitId !== null && lastHoverUnitId === hoveredUnit.id;
+          if (!sameUnit) {
+            lastHoverUnitId = hoveredUnit.id;
+            lastHoverCell = null;
+            const ability = selectedAbility ?? defaultAttackAbility(active);
+            const preview = ability ? combat.previewAttack(active.id, ability, hoveredUnit.id) : null;
+            hoverPreviewLine = preview ? `Hover ${hoveredUnit.name}: ${formatPreviewHit(preview, view.grid.cellM)}` : null;
+            renderTargetCard(hoveredUnit, clientX, clientY, preview);
+            updatePreviewOnly(view, active);
+          } else {
+            lastCardX = clientX;
+            lastCardY = clientY;
+          }
         } else if (!hoveredUnit) {
-          const cell = screenToCell(e.clientX, e.clientY, view);
-          const mv = cell ? combat.previewMove(active.id, cell) : null;
-          hoverPreviewLine = mv ? `Move here: ${mv.costM.toFixed(1)}m${mv.provokes.length ? `, provokes ${mv.provokes.length}` : ''}` : null;
+          const cell = screenToCell(clientX, clientY, view);
+          const sameCell = cell !== null && lastHoverCell !== null && cell.q === lastHoverCell.q && cell.r === lastHoverCell.r
+            && lastHoverUnitId === null;
+          if (!sameCell) {
+            lastHoverUnitId = null;
+            lastHoverCell = cell;
+            const mv = cell ? combat.previewMove(active.id, cell) : null;
+            hoverPreviewLine = mv ? `Move here: ${mv.costM.toFixed(1)}m${mv.provokes.length ? `, provokes ${mv.provokes.length}` : ''}` : null;
+            renderTargetCard(null, clientX, clientY);
+            updatePreviewOnly(view, active);
+          }
         } else {
-          hoverPreviewLine = null;
+          if (lastHoverUnitId !== null || hoverPreviewLine !== null) {
+            lastHoverUnitId = hoveredUnit.id;
+            lastHoverCell = null;
+            hoverPreviewLine = null;
+            renderTargetCard(null, clientX, clientY);
+            updatePreviewOnly(view, active);
+          }
         }
-        renderTargetCard(hoveredUnit && hoveredUnit.side !== active.side ? hoveredUnit : null, e.clientX, e.clientY);
-        updatePreviewOnly(view, active);
       }
     }
   }
@@ -384,9 +507,12 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     const combat = ctx.services.tryGet('combat');
     const ability = selectedAbility ?? defaultAttackAbility(active);
     const preview = combat && nearest && ability ? combat.previewAttack(active.id, ability, nearest.id) : null;
+    const text = preview ? formatPreviewHit(preview, view.grid.cellM) : null;
+    const head = text ? text.split(' — ')[0] : null;
+    const rest = text && text.includes('—') ? text.split(' — ')[1] : null;
     const node = el('div', { class: 'cbt-preview' }, [
-      preview && nearest ? el('div', {}, [`vs ${nearest.name} (${preview.damage}): `, el('span', { class: 'hitpct' }, [formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).split(' — ')[0]])]) : null,
-      preview && formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).includes('—') ? el('div', { class: 'src' }, [formatHitChance(preview.hitChance, preview.context.edge, preview.context.burden).split(' — ')[1]]) : null,
+      preview && nearest && head ? el('div', {}, [`vs ${nearest.name} (${preview.damage}): `, el('span', { class: 'hitpct' }, [head])]) : null,
+      rest ? el('div', { class: 'src' }, [rest]) : null,
       hoverPreviewLine ? el('div', { class: 'src' }, [hoverPreviewLine]) : null,
     ]);
     if (!node.hasChildNodes()) { existing?.remove(); return; }
@@ -396,11 +522,11 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
   let cardUnitId: number | null = null;
   let lastCardX = 0;
   let lastCardY = 0;
-  function renderTargetCard(u: CombatantView | null, x: number, y: number): void {
+  function renderTargetCard(u: CombatantView | null, x: number, y: number, preview?: AttackPreviewLike | null): void {
     cardUnitId = u ? u.id : null;
     lastCardX = x;
     lastCardY = y;
-    const model = buildTargetCardModel(u);
+    const model = buildTargetCardModel(u, preview ?? null, lastView?.grid.cellM ?? 1.5);
     if (!model) { targetCard.style.display = 'none'; return; }
     clear(targetCard);
     targetCard.style.display = '';
@@ -412,19 +538,24 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
       el('div', {}, [model.defLine]),
       model.statuses.length ? el('div', { class: 'cbt-status-row' }, model.statuses.map((id) => el('span', { class: 'cbt-status-chip' }, [id]))) : null,
       model.formationLine ? el('div', {}, [model.formationLine]) : null,
+      model.hit ? el('div', { class: 'src' }, [model.hit.hitLine]) : null,
     ];
     for (const r of rows) if (r) targetCard.appendChild(r);
   }
 
   function hideAll(): void {
     root.classList.add('hidden');
-    for (const p of [deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard]) p.style.display = 'none';
+    for (const p of [deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard, hintCard]) p.style.display = 'none';
     clear(reactionModalHost);
     clear(resultHost);
     lastView = null;
     selectedAbility = null;
     hoverPreviewLine = null;
     cardUnitId = null;
+    lastHoverUnitId = null;
+    lastHoverCell = null;
+    hoverQueued = null;
+    if (hoverRaf) { cancelAnimationFrame(hoverRaf); hoverRaf = 0; }
     deployStaged = new Map();
     deploySelected = null;
   }
@@ -487,6 +618,8 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
       lastView = state;
       root.classList.remove('hidden');
       selectedAbility = null;
+      lastHoverUnitId = null;
+      lastHoverCell = null;
       renderAll(state);
     },
     update(state: CombatStateView): void {
@@ -498,7 +631,7 @@ export function createCombatUi(ctx: GameContext, mount: HTMLElement): CombatUiHa
     },
     hideAfterResult(): void {
       // keep the result card (if any) until Continue; everything else goes now
-      for (const p of [deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard]) p.style.display = 'none';
+      for (const p of [deployBanner, initiativeRow, unitCard, abilityBar, objectivesPanel, logPanel, endTurnBtn, fleeBtn, targetCard, hintCard]) p.style.display = 'none';
       clear(reactionModalHost);
       if (!resultHost.hasChildNodes()) hideAll();
     },

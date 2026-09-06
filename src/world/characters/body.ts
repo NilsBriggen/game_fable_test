@@ -11,7 +11,7 @@ import { Quaternion, Vector3, Euler } from 'three';
 import { SkinBuilder, type Weight } from './skinBuilder';
 import {
   BINDE_RED, BINDE_WHITE, LEATHER_C, LINEN, MAIL_C, SHOE_C, STEEL_C, WOOD_C, HAIR_GREY, shade,
-  type Look, type ShieldKind, type WeaponKind,
+  type Frame, type Look, type ShieldKind, type WeaponKind,
 } from './looks';
 import { LAYER_GAIN } from '../characterAssets';
 
@@ -468,6 +468,14 @@ export function buildLookGeometry(look: Look, boneIndex: (n: string) => number, 
   const hi = lod === 0;
   const hem = look.hem;
   const female = !!look.female;
+  const frame: Frame = look.frame ?? 'medium';
+  // B1 variety pass: four procedural frames (lean/medium/sturdy/stout) around the medium build — a
+  // seeded `frameFor(seed)` maps a crowd's seeds onto 1× lean + 2× medium + 1× sturdy + 1× stout, so five
+  // men sharing the Peasant Man body still read as five men. Multipliers stay within ±20 % of the
+  // authored radii: skinning, clothing layers and the budget tests' sole/crown assertions are unaffected.
+  const TG = frame === 'lean' ? 0.90 : frame === 'sturdy' ? 1.10 : frame === 'stout' ? 1.20 : 1;
+  const LG = frame === 'lean' ? 0.88 : frame === 'sturdy' ? 1.10 : frame === 'stout' ? 1.22 : 1;
+  const AG = frame === 'lean' ? 0.88 : frame === 'sturdy' ? 1.08 : frame === 'stout' ? 1.15 : 1;
   const seg = hi ? 12 : 6;          // armour / belt / cloak lofts
   const segT = hi ? 16 : 8;         // the tunic itself: 6 pleats need the samples
   const segL = hi ? 8 : 5;
@@ -477,9 +485,9 @@ export function buildLookGeometry(look: Look, boneIndex: (n: string) => number, 
   for (const s of ['l', 'r'] as const) {
     const up = V(`upperleg.${s}`), knee = V(`lowerleg.${s}`), ankle = V(`foot.${s}`).setY(0.11);
     const hose = look.trim;
-    cloth.tube(up.clone().setY(up.y + 0.03), knee, [{ t: 0, r: 0.088 }, { t: 1, r: 0.066 }], `upperleg.${s}`, `lowerleg.${s}`, hose, { seg: segL, blend: [0.7, 1] });
-    if (hi) cloth.ball(knee, [0.063, 0.06, 0.066], `lowerleg.${s}`, hose, 7, [[`upperleg.${s}`, 0.4], [`lowerleg.${s}`, 0.6]]);
-    cloth.tube(knee, ankle, [{ t: 0, r: 0.064 }, { t: 0.5, r: 0.058 }, { t: 1, r: 0.044 }], `lowerleg.${s}`, `foot.${s}`, hose, { seg: segL, blend: [0.75, 1] });
+    cloth.tube(up.clone().setY(up.y + 0.03), knee, [{ t: 0, r: 0.088 * LG }, { t: 1, r: 0.066 * LG }], `upperleg.${s}`, `lowerleg.${s}`, hose, { seg: segL, blend: [0.7, 1] });
+    if (hi) cloth.ball(knee, [0.063 * LG, 0.06, 0.066 * LG], `lowerleg.${s}`, hose, 7, [[`upperleg.${s}`, 0.4], [`lowerleg.${s}`, 0.6]]);
+    cloth.tube(knee, ankle, [{ t: 0, r: 0.064 * LG }, { t: 0.5, r: 0.058 * LG }, { t: 1, r: 0.044 * LG }], `lowerleg.${s}`, `foot.${s}`, hose, { seg: segL, blend: [0.75, 1] });
     const fx = TARGET[`foot.${s}`][0];
     if (hi) {
       hide.tube(P(fx, 0.052, -0.075), P(fx, 0.032, 0.14), [{ t: 0, r: 0.042 }, { t: 0.35, r: 0.052 }, { t: 0.72, r: 0.047 }, { t: 1, r: 0.028 }],
@@ -505,16 +513,16 @@ export function buildLookGeometry(look: Look, boneIndex: (n: string) => number, 
     sec.push({ y: 1.455, rx: 0.07, rz: 0.066, w: W_CHEST });
   } else {
     const c = look.child;
-    sec.push({ y: hem, rx: 0.27, rz: 0.21, w: W_HIPS, fold: 0.035 });
-    if (hem < 0.72) sec.push({ y: (hem + 0.90) / 2, rx: 0.235, rz: 0.18, w: W_HIPS, fold: 0.02 });
-    sec.push({ y: 0.90, rx: 0.205, rz: 0.155, w: W_HIPS, fold: 0.008 });
-    sec.push({ y: 0.965, rx: 0.20, rz: 0.15, w: W_HIPS, fold: 0.006 });
-    sec.push({ y: 1.07, rx: 0.19, rz: 0.145, w: W_SPINE, fold: 0.006 });
-    sec.push({ y: 1.20, rx: 0.205, rz: 0.155, w: W_MID, fold: 0.006 });
-    sec.push({ y: 1.30, rx: 0.215, rz: 0.155, w: W_CHEST });
-    sec.push({ y: 1.385, rx: c ? 0.20 : 0.215, rz: 0.145, w: W_CHEST });
-    sec.push({ y: 1.43, rx: 0.155, rz: 0.11, w: W_CHEST });
-    sec.push({ y: 1.455, rx: 0.075, rz: 0.07, w: W_CHEST });
+    sec.push({ y: hem, rx: 0.27 * TG, rz: 0.21 * TG, w: W_HIPS, fold: 0.035 });
+    if (hem < 0.72) sec.push({ y: (hem + 0.90) / 2, rx: 0.235 * TG, rz: 0.18 * TG, w: W_HIPS, fold: 0.02 });
+    sec.push({ y: 0.90, rx: 0.205 * TG, rz: 0.155 * TG, w: W_HIPS, fold: 0.008 });
+    sec.push({ y: 0.965, rx: 0.20 * TG, rz: 0.15 * TG, w: W_HIPS, fold: 0.006 });
+    sec.push({ y: 1.07, rx: 0.19 * TG, rz: 0.145 * TG, w: W_SPINE, fold: 0.006 });
+    sec.push({ y: 1.20, rx: 0.205 * TG, rz: 0.155 * TG, w: W_MID, fold: 0.006 });
+    sec.push({ y: 1.30, rx: 0.215 * TG, rz: 0.155 * TG, w: W_CHEST });
+    sec.push({ y: 1.385, rx: (c ? 0.20 : 0.215) * TG, rz: 0.145 * TG, w: W_CHEST });
+    sec.push({ y: 1.43, rx: 0.155 * TG, rz: 0.11 * TG, w: W_CHEST });
+    sec.push({ y: 1.455, rx: 0.075 * TG, rz: 0.07 * TG, w: W_CHEST });
   }
   cloth.loft(thin(sec, hi), look.cloth, { seg: segT, capBottom: true, capTop: true, folds: FOLDS });
   // hem band + collar in the trim colour
@@ -529,10 +537,10 @@ export function buildLookGeometry(look: Look, boneIndex: (n: string) => number, 
   for (const s of ['l', 'r'] as const) {
     const sh = V(`upperarm.${s}`), el = V(`lowerarm.${s}`), wr = V(`wrist.${s}`);
     const sx = s === 'l' ? 1 : -1;
-    cloth.ball(sh.clone().setX(sh.x - sx * 0.02).setY(sh.y - 0.012), [0.07, 0.062, 0.064], 'chest', look.cloth, hi ? 8 : 5, [['chest', 0.55], [`upperarm.${s}`, 0.45]]);
-    cloth.tube(sh, el, [{ t: 0, r: 0.067 }, { t: 1, r: 0.054 }], `upperarm.${s}`, `lowerarm.${s}`, look.cloth, { seg: segL, blend: [0.65, 1] });
-    if (hi) cloth.ball(el, [0.053, 0.052, 0.052], `lowerarm.${s}`, look.cloth, 7, [[`upperarm.${s}`, 0.4], [`lowerarm.${s}`, 0.6]]);
-    cloth.tube(el, wr, [{ t: 0, r: 0.054 }, { t: 0.78, r: 0.044 }, { t: 0.8, r: 0.048, color: shade(look.cloth, 0.72) }, { t: 1, r: 0.046, color: shade(look.cloth, 0.72) }],
+    cloth.ball(sh.clone().setX(sh.x - sx * 0.02).setY(sh.y - 0.012), [0.07 * AG, 0.062 * AG, 0.064 * AG], 'chest', look.cloth, hi ? 8 : 5, [['chest', 0.55], [`upperarm.${s}`, 0.45]]);
+    cloth.tube(sh, el, [{ t: 0, r: 0.067 * AG }, { t: 1, r: 0.054 * AG }], `upperarm.${s}`, `lowerarm.${s}`, look.cloth, { seg: segL, blend: [0.65, 1] });
+    if (hi) cloth.ball(el, [0.053 * AG, 0.052 * AG, 0.052 * AG], `lowerarm.${s}`, look.cloth, 7, [[`upperarm.${s}`, 0.4], [`lowerarm.${s}`, 0.6]]);
+    cloth.tube(el, wr, [{ t: 0, r: 0.054 * AG }, { t: 0.78, r: 0.044 * AG }, { t: 0.8, r: 0.048 * AG, color: shade(look.cloth, 0.72) }, { t: 1, r: 0.046 * AG, color: shade(look.cloth, 0.72) }],
       `lowerarm.${s}`, `wrist.${s}`, look.cloth, { seg: segL, blend: [0.65, 1] });
     buildHand(hide, look, s, lod);
   }
@@ -568,45 +576,57 @@ export function buildLookGeometry(look: Look, boneIndex: (n: string) => number, 
   }
 
   // ---- armour (LORE §7: Confederates gambeson + Eisenhut, Habsburg troops mail + surcoat) ----
+  // B1 variety pass: pilgrim's mantle (paenula) over the shoulders of the sturdy/stout frames — a folded
+  // loft + brooch, no new layer (cloth), so the 4-draw budget is untouched. The wrap reads as a second
+  // garment silhouette from every angle, which is what breaks the one-body crowd read at 5+ m.
+  if (frame === 'sturdy' || frame === 'stout') {
+    cloth.loft([
+      { y: 1.18, rx: 0.252 * TG, rz: 0.20 * TG, w: W_CHEST, fold: 0.02 },
+      { y: 1.33, rx: 0.245 * TG, rz: 0.19 * TG, w: W_CHEST, fold: 0.015 },
+      { y: 1.43, rx: 0.20 * TG, rz: 0.155 * TG, w: W_CHEST, fold: 0.008 },
+      { y: 1.475, rx: 0.13 * TG, rz: 0.115 * TG, w: W_CHEST },
+    ], shade(look.trim, 1.05), { seg, folds: FOLDS, phase: 2.2 });
+    if (hi) metal.ball(P(0, 1.40, 0.185 * TG), 0.018, 'chest', 0xb8a36a, 6);
+  }
   if (look.gambeson) {   // quilted coat: vertical stitched channels, hip length, sleeveless over the tunic
     cloth.loft(thin([
-      { y: 0.78, rx: 0.25, rz: 0.19, w: W_HIPS, fold: 0.01 }, { y: 0.95, rx: 0.225, rz: 0.17, w: W_HIPS, fold: 0.01 },
-      { y: 1.07, rx: 0.215, rz: 0.16, w: W_SPINE, fold: 0.01 }, { y: 1.20, rx: 0.228, rz: 0.17, w: W_MID, fold: 0.01 },
-      { y: 1.31, rx: 0.238, rz: 0.172, w: W_CHEST, fold: 0.008 }, { y: 1.39, rx: 0.24, rz: 0.16, w: W_CHEST, fold: 0.006 },
-      { y: 1.435, rx: 0.16, rz: 0.115, w: W_CHEST }, { y: 1.458, rx: 0.08, rz: 0.072, w: W_CHEST },
+      { y: 0.78, rx: 0.25 * TG, rz: 0.19 * TG, w: W_HIPS, fold: 0.01 }, { y: 0.95, rx: 0.225 * TG, rz: 0.17 * TG, w: W_HIPS, fold: 0.01 },
+      { y: 1.07, rx: 0.215 * TG, rz: 0.16 * TG, w: W_SPINE, fold: 0.01 }, { y: 1.20, rx: 0.228 * TG, rz: 0.17 * TG, w: W_MID, fold: 0.01 },
+      { y: 1.31, rx: 0.238 * TG, rz: 0.172 * TG, w: W_CHEST, fold: 0.008 }, { y: 1.39, rx: 0.24 * TG, rz: 0.16 * TG, w: W_CHEST, fold: 0.006 },
+      { y: 1.435, rx: 0.16 * TG, rz: 0.115 * TG, w: W_CHEST }, { y: 1.458, rx: 0.08 * TG, rz: 0.072 * TG, w: W_CHEST },
     ], hi), shade(look.cloth, 1.06), { seg, folds: hi ? 12 : 0, capTop: true });
     if (hi) for (const s of ['l', 'r'] as const) {
-      cloth.tube(V(`upperarm.${s}`), V(`lowerarm.${s}`), [{ t: 0, r: 0.074 }, { t: 1, r: 0.062 }], `upperarm.${s}`, `lowerarm.${s}`, shade(look.cloth, 1.06), { seg: segL, blend: [0.65, 1] });
+      cloth.tube(V(`upperarm.${s}`), V(`lowerarm.${s}`), [{ t: 0, r: 0.074 * AG }, { t: 1, r: 0.062 * AG }], `upperarm.${s}`, `lowerarm.${s}`, shade(look.cloth, 1.06), { seg: segL, blend: [0.65, 1] });
     }
   }
   if (look.mail) {
     mail.loft(thin([
-      { y: 0.72, rx: 0.245, rz: 0.19, w: W_HIPS, fold: 0.012 }, { y: 0.94, rx: 0.215, rz: 0.16, w: W_HIPS, fold: 0.006 },
-      { y: 1.07, rx: 0.205, rz: 0.15, w: W_SPINE }, { y: 1.20, rx: 0.22, rz: 0.16, w: W_MID },
-      { y: 1.31, rx: 0.232, rz: 0.165, w: W_CHEST }, { y: 1.39, rx: 0.235, rz: 0.155, w: W_CHEST },
-      { y: 1.435, rx: 0.16, rz: 0.115, w: W_CHEST }, { y: 1.46, rx: 0.08, rz: 0.075, w: W_CHEST },
+      { y: 0.72, rx: 0.245 * TG, rz: 0.19 * TG, w: W_HIPS, fold: 0.012 }, { y: 0.94, rx: 0.215 * TG, rz: 0.16 * TG, w: W_HIPS, fold: 0.006 },
+      { y: 1.07, rx: 0.205 * TG, rz: 0.15 * TG, w: W_SPINE }, { y: 1.20, rx: 0.22 * TG, rz: 0.16 * TG, w: W_MID },
+      { y: 1.31, rx: 0.232 * TG, rz: 0.165 * TG, w: W_CHEST }, { y: 1.39, rx: 0.235 * TG, rz: 0.155 * TG, w: W_CHEST },
+      { y: 1.435, rx: 0.16 * TG, rz: 0.115 * TG, w: W_CHEST }, { y: 1.46, rx: 0.08 * TG, rz: 0.075 * TG, w: W_CHEST },
     ], hi), MAIL_C, { seg, folds: FOLDS, capTop: true });
     if (hi) for (const s of ['l', 'r'] as const) {
-      mail.tube(V(`upperarm.${s}`), V(`lowerarm.${s}`), [{ t: 0, r: 0.076 }, { t: 1, r: 0.064 }], `upperarm.${s}`, `lowerarm.${s}`, MAIL_C, { seg: segL, blend: [0.65, 1] });
-      mail.tube(V(`lowerarm.${s}`), V(`wrist.${s}`), [{ t: 0, r: 0.064 }, { t: 1, r: 0.05 }], `lowerarm.${s}`, `wrist.${s}`, MAIL_C, { seg: segL, blend: [0.65, 1] });
+      mail.tube(V(`upperarm.${s}`), V(`lowerarm.${s}`), [{ t: 0, r: 0.076 * AG }, { t: 1, r: 0.064 * AG }], `upperarm.${s}`, `lowerarm.${s}`, MAIL_C, { seg: segL, blend: [0.65, 1] });
+      mail.tube(V(`lowerarm.${s}`), V(`wrist.${s}`), [{ t: 0, r: 0.064 * AG }, { t: 1, r: 0.05 * AG }], `lowerarm.${s}`, `wrist.${s}`, MAIL_C, { seg: segL, blend: [0.65, 1] });
     }
   }
   if (look.plates && hi) { // coat of plates: riveted horizontal bands over the mail
     metal.loft([
-      { y: 1.02, rx: 0.236, rz: 0.17, w: W_SPINE }, { y: 1.10, rx: 0.232, rz: 0.168, w: W_SPINE }, { y: 1.11, rx: 0.238, rz: 0.172, w: W_MID },
-      { y: 1.19, rx: 0.234, rz: 0.17, w: W_MID }, { y: 1.20, rx: 0.24, rz: 0.174, w: W_MID }, { y: 1.28, rx: 0.238, rz: 0.172, w: W_CHEST },
-      { y: 1.29, rx: 0.244, rz: 0.176, w: W_CHEST }, { y: 1.35, rx: 0.242, rz: 0.174, w: W_CHEST },
+      { y: 1.02, rx: 0.236 * TG, rz: 0.17 * TG, w: W_SPINE }, { y: 1.10, rx: 0.232 * TG, rz: 0.168 * TG, w: W_SPINE }, { y: 1.11, rx: 0.238 * TG, rz: 0.172 * TG, w: W_MID },
+      { y: 1.19, rx: 0.234 * TG, rz: 0.17 * TG, w: W_MID }, { y: 1.20, rx: 0.24 * TG, rz: 0.174 * TG, w: W_MID }, { y: 1.28, rx: 0.238 * TG, rz: 0.172 * TG, w: W_CHEST },
+      { y: 1.29, rx: 0.244 * TG, rz: 0.176 * TG, w: W_CHEST }, { y: 1.35, rx: 0.242 * TG, rz: 0.174 * TG, w: W_CHEST },
     ], 0x6d6f74, { seg });
   }
   if (look.surcoat) {
     cloth.loft(thin([
-      { y: 0.55, rx: 0.265, rz: 0.205, w: W_HIPS, color: BINDE_RED, fold: 0.03 },
-      { y: 0.92, rx: 0.228, rz: 0.17, w: W_HIPS, color: BINDE_RED, fold: 0.012 },
-      { y: 0.98, rx: 0.225, rz: 0.168, w: W_HIPS, color: BINDE_WHITE, fold: 0.01 },
-      { y: 1.14, rx: 0.228, rz: 0.17, w: W_SPINE, color: BINDE_WHITE, fold: 0.008 },
-      { y: 1.20, rx: 0.235, rz: 0.175, w: W_MID, color: BINDE_RED, fold: 0.008 },
-      { y: 1.34, rx: 0.248, rz: 0.178, w: W_CHEST, color: BINDE_RED },
-      { y: 1.40, rx: 0.22, rz: 0.15, w: W_CHEST, color: BINDE_RED },
+      { y: 0.55, rx: 0.265 * TG, rz: 0.205 * TG, w: W_HIPS, color: BINDE_RED, fold: 0.03 },
+      { y: 0.92, rx: 0.228 * TG, rz: 0.17 * TG, w: W_HIPS, color: BINDE_RED, fold: 0.012 },
+      { y: 0.98, rx: 0.225 * TG, rz: 0.168 * TG, w: W_HIPS, color: BINDE_WHITE, fold: 0.01 },
+      { y: 1.14, rx: 0.228 * TG, rz: 0.17 * TG, w: W_SPINE, color: BINDE_WHITE, fold: 0.008 },
+      { y: 1.20, rx: 0.235 * TG, rz: 0.175 * TG, w: W_MID, color: BINDE_RED, fold: 0.008 },
+      { y: 1.34, rx: 0.248 * TG, rz: 0.178 * TG, w: W_CHEST, color: BINDE_RED },
+      { y: 1.40, rx: 0.22 * TG, rz: 0.15 * TG, w: W_CHEST, color: BINDE_RED },
     ], hi), BINDE_RED, { seg, folds: FOLDS, phase: 2 });
   }
 

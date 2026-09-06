@@ -7,18 +7,26 @@ export const badZuWolfenschiessen: QuestDef = {
   description: "A Wolfenschiessen farmer asks for help keeping quiet what happened to a bailiff's man in the bath-house.",
   stages: [
     {
-      id: 'rumour', journal: 'Jost Durrer of Wolfenschiessen hints at a killing best kept quiet.',
+      id: 'offer', journal: 'Jost Durrer of Wolfenschiessen hints at a killing best kept quiet.',
       marker: 'poi.wolfenschiessen', objectiveText: 'Hear Jost out.',
-      onEnter: [{ dialogue: 'dlg.bad-wolfenschiessen' }],
+      onEnter: [{ dialogue: 'dlg.bad-wolfenschiessen' }, { quest: ['advance', 'quest.bad-zu-wolfenschiessen', 'help-hide'] }],
     },
     {
       id: 'help-hide', journal: 'A body wants a quiet grave before dawn.',
-      marker: 'poi.wolfenschiessen', objectiveText: 'Help hide what happened.',
+      marker: 'poi.wolfenschiessen', objectiveText: 'Help hide what happened before first light.',
       onEnter: [{ dialogue: 'dlg.bad-wolfenschiessen-hide' }],
+      advanceWhen: [
+        { cond: { var: ['quest.bad-zu-wolfenschiessen', 'haste', 'dawn-met'] }, to: 'quiet' },
+        { cond: { var: ['quest.bad-zu-wolfenschiessen', 'haste', 'slow'] }, to: 'exposed' },
+      ],
     },
     {
-      id: 'resolution', journal: 'By first light, there is nothing left to find.',
+      id: 'quiet', journal: 'By first light, there is nothing left to find.',
       onEnter: [{ quest: ['complete', 'quest.bad-zu-wolfenschiessen'] }],
+    },
+    {
+      id: 'exposed', journal: 'The work was too slow, or too sloppy — a clerk from Sarnen will come asking, sooner or later.',
+      onEnter: [{ setFlag: ['wolfenschiessen-clerk-coming', true] }, { dialogue: 'dlg.bad-wolfenschiessen-clerk' }],
     },
   ],
   onStart: [{ toast: 'Quest started: Das Bad zu Wolfenschiessen' }],

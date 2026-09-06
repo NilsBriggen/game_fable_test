@@ -5,8 +5,8 @@
  */
 import {
   Group, LineSegments, LineBasicMaterial, BufferGeometry, Float32BufferAttribute, Mesh, MeshStandardMaterial,
-  PlaneGeometry, CapsuleGeometry, SphereGeometry, CylinderGeometry, ConeGeometry, BoxGeometry, Color, Sprite,
-  SpriteMaterial, CanvasTexture, Object3D,
+  MeshBasicMaterial, PlaneGeometry, CapsuleGeometry, SphereGeometry, CylinderGeometry, ConeGeometry, BoxGeometry, Color, Sprite,
+  SpriteMaterial, CanvasTexture, Object3D, AdditiveBlending,
 } from 'three';
 import type { GameContext } from '@core/context';
 import type { CellView, CharacterAnim, CharacterHandle, CombatEventRecord, CombatStateView, SurfaceType, WorldService } from '@core/services';
@@ -153,7 +153,18 @@ function makeBarSprite(frac: number, color: string): Sprite {
   return sprite;
 }
 
-interface DamagePop { sprite: Sprite; life: number; }
+interface DamagePop { sprite: Sprite; life: number; maxLife: number; }
+
+/** per-unit hit-flash overlay state: a single additive shell mesh means shared/skinned materials are
+ *  never touched (no whole-crowd flash), and one overlay per unit bounds the draw cost. */
+interface HitFlash { overlay: Mesh; life: number; maxLife: number; }
+
+/** trauma added per hit point of damage (before the cap) — a 4-dmg jab nudges, a 12-dmg halberd swing thuds */
+const SHAKE_PER_DMG = 0.045;
+const SHAKE_HIT_CAP = 0.6;
+const FLASH_MAX_S = 0.28;
+/** fully-soaked hits still landed visually: block-flash when soak ate everything */
+const BLOCK_FLASH_S = 0.12;
 
 export class CombatRenderer {
   private root = new Group();
@@ -169,8 +180,13 @@ export class CombatRenderer {
   /** units walking a `move` event's path; while present, `update()` leaves their position alone */
   private moving = new Map<number, { points: [number, number, number][]; idx: number }>();
   private damagePops: DamagePop[] = [];
+  private flashes = new Map<number, HitFlash>();
   private debugEl: HTMLDivElement | null = null;
   private grid: GridInfo | null = null;
+
+  private reducedMotion(): boolean {
+    return (this.ctx.settings as { reducedMotion?: boolean } | undefined)?.reducedMotion === true;
+  }
 
   constructor(private ctx: GameContext) {
     this.root.name = 'combat-render-root';
@@ -404,11 +420,21 @@ export class CombatRenderer {
     for (const [id, mesh] of [...this.unitMeshes]) this.removeUnit(id, mesh);
     for (const p of this.damagePops) this.root.remove(p.sprite);
     this.damagePops = [];
+    this.clearFlashes();
     while (this.highlightGroup.children.length) {
       const c = this.highlightGroup.children.pop()!;
       if (c instanceof Mesh) { c.geometry.dispose(); (c.material as MeshStandardMaterial).dispose(); }
     }
     this.hide();
+  }
+
+  private clearFlashes(): void {
+    for (const [, f] of this.flashes) {
+      f.overlay.parent?.remove(f.overlay);
+      f.overlay.geometry.dispose();
+      (f.overlay.material as MeshBasicMaterial).dispose();
+    }
+    this.flashes.clear();
   }
 
   private removeUnit(id: number, mesh: Object3D): void {
@@ -418,6 +444,13 @@ export class CombatRenderer {
     this.unitHandles.delete(id);
     this.unitPose.delete(id);
     this.moving.delete(id);
+    const f = this.flashes.get(id);
+    if (f) {
+      f.overlay.parent?.remove(f.overlay);
+      f.overlay.geometry.dispose();
+      (f.overlay.material as MeshBasicMaterial).dispose();
+      this.flashes.delete(id);
+    }
   }
 
   /** Exploration's yaw convention (npc.ts/index.ts): yaw 0 faces −Z, `rotation.y = atan2(dx, −dz)`. */
@@ -434,7 +467,8 @@ export class CombatRenderer {
   }
 
   /** Engine event → character animation (requests/art-2): attacker swings/shoots facing the target, the
-   *  target flinches on damage, goes down, dies; movers walk their path (see `tick`) instead of teleporting. */
+   *  target flinches on damage, goes down, dies; movers walk their path (see `tick`) instead of teleporting.
+   *  Outcome callouts (miss/blocked) reuse the damage-pop sprite lifecycle — see EVENTS below. */
   onEvent(rec: CombatEventRecord): void {
     const mesh = rec.unit !== undefined ? this.unitMeshes.get(rec.unit) : undefined;
     const targetId = typeof rec.data?.target === 'number' ? (rec.data.target as number) : rec.target;
@@ -448,12 +482,32 @@ export class CombatRenderer {
         this.moving.set(rec.unit, { points, idx: 0 });
         break;
       }
-      case 'attack':
+      case 'attack': {
+        if (mesh) {
+          if (targetMesh) { this.face(mesh, targetMesh.position.x, targetMesh.position.z); this.face(targetMesh, mesh.position.x, mesh.position.z); }
+          const attacker = rec.unit !== undefined ? this.ctx.services.tryGet('combat')?.getState()?.units.find((u) => u.id === rec.unit) : undefined;
+          const ranged = !!attacker?.weapon?.ranged || /bolt|shoot|loose|crossbow/i.test(rec.text);
+          this.playOn(rec.unit, ranged ? 'shoot' : 'attack');
+        }
+        // EVENTS (engine.ts, read-only): attack recs always carry data { target, roll: AttackRoll }.
+        // roll.hit=false → clean miss; roll.hit=true with damage 0 → soak/shield ate everything (fully
+        // blocked — engine emits NO damage event then, `if (roll.damage > 0) pushLog('damage')`). There are
+        // no parry/dodge/deflect events anywhere in engine/ai/rules — only these two outcomes are real.
+        const roll = rec.data?.roll as { hit?: boolean; damage?: number } | undefined;
+        if (roll && targetId !== undefined) {
+          if (roll.hit === false) this.spawnOutcomeCallout(targetId, 'miss'); // i18n-delta: ui.combat.miss
+          else if (roll.hit === true && roll.damage === 0) {
+            this.spawnOutcomeCallout(targetId, 'blocked'); // i18n-delta: ui.combat.blocked
+            this.flashUnit(targetId, true);
+          }
+        }
+        break;
+      }
       case 'ability': {
         if (!mesh) return;
         if (targetMesh) { this.face(mesh, targetMesh.position.x, targetMesh.position.z); this.face(targetMesh, mesh.position.x, mesh.position.z); }
-        if (rec.kind === 'ability' && /reloads/.test(rec.text)) { this.playOn(rec.unit, 'reload'); break; }
-        if (rec.kind === 'ability' && !targetMesh) break; // brace, shield wall, rally… static abilities
+        if (/reloads/.test(rec.text)) { this.playOn(rec.unit, 'reload'); break; }
+        if (!targetMesh) break; // brace, shield wall, rally… static abilities
         const attacker = rec.unit !== undefined ? this.ctx.services.tryGet('combat')?.getState()?.units.find((u) => u.id === rec.unit) : undefined;
         const ranged = !!attacker?.weapon?.ranged || /bolt|shoot|loose|crossbow/i.test(rec.text);
         this.playOn(rec.unit, ranged ? 'shoot' : 'attack');
@@ -461,8 +515,13 @@ export class CombatRenderer {
       }
       case 'damage': {
         const amount = typeof rec.data?.amount === 'number' ? (rec.data.amount as number) : 0;
-        if (amount <= 0 || rec.unit === undefined) return;
-        if (this.unitPose.get(rec.unit) === 'up') this.playOn(rec.unit, 'hit');
+        if (rec.unit === undefined) return;
+        if (amount > 0) {
+          if (this.unitPose.get(rec.unit) === 'up') this.playOn(rec.unit, 'hit');
+          this.flashUnit(rec.unit);
+          this.shakeForDamage(amount);
+        }
+        // amount<=0 hits are heal pops (spawnDamageNumber path); outcome callouts ride on 'attack' below.
         break;
       }
       case 'reaction': {
@@ -509,7 +568,56 @@ export class CombatRenderer {
     const sprite = makeTextSprite(amount > 0 ? `-${amount}` : `+${-amount}`, amount > 0 ? '#ff5a5a' : '#5aff8a');
     sprite.position.set(x, y + 1.9, z);
     this.root.add(sprite);
-    this.damagePops.push({ sprite, life: 1.2 });
+    this.damagePops.push({ sprite, life: 1.2, maxLife: 1.2 });
+  }
+
+  /** miss / fully-blocked outcome callouts through the same text-sprite pop lifecycle as damage numbers:
+   *  small grey text over the defender's cell. No engine changes — reads the attack rec's own roll. */
+  spawnOutcomeCallout(unitId: number, text: 'miss' | 'blocked'): void {
+    const mesh = this.unitMeshes.get(unitId);
+    const sprite = makeTextSprite(text, '#b8b4a8');
+    sprite.scale.set(1.0, 0.3, 1);
+    if (mesh) sprite.position.set(mesh.position.x, mesh.position.y + 1.7, mesh.position.z);
+    else {
+      const combat = this.ctx.services.tryGet('combat');
+      const u = combat?.getState()?.units.find((x) => x.id === unitId);
+      const [x, y, z] = u ? this.cellCenter(u.q, u.r) : [0, 0, 0];
+      sprite.position.set(x, y + 1.7, z);
+    }
+    this.root.add(sprite);
+    this.damagePops.push({ sprite, life: 0.9, maxLife: 0.9 });
+  }
+
+  /** per-unit hit flash: an additive overlay shell parented to the unit group — rigged characters share
+   *  their layer materials across the whole crowd (characterAssets matCache), so touching emissive would
+   *  flash everyone; the overlay only ever covers the struck unit. `blocked=true` is the dimmer
+   *  fully-soaked variant. Gated behind reducedMotion (no flash at all when set). */
+  flashUnit(unitId: number, blocked = false): void {
+    if (this.reducedMotion()) return;
+    const mesh = this.unitMeshes.get(unitId);
+    if (!mesh) return;
+    let f = this.flashes.get(unitId);
+    if (!f) {
+      const geo = new SphereGeometry(0.85, 10, 8);
+      const mat = new MeshBasicMaterial({ color: 0xff5040, transparent: true, opacity: 0, blending: AdditiveBlending, depthTest: false, depthWrite: false });
+      const overlay = new Mesh(geo, mat);
+      overlay.position.y = 1.0;
+      mesh.add(overlay);
+      f = { overlay, life: 0, maxLife: FLASH_MAX_S };
+      this.flashes.set(unitId, f);
+    }
+    f.maxLife = blocked ? BLOCK_FLASH_S : FLASH_MAX_S;
+    f.life = f.maxLife;
+    (f.overlay.material as MeshBasicMaterial).opacity = blocked ? 0.25 : 0.55;
+  }
+
+  /** damage-proportional camera trauma via the exploration rig. render.ts has no direct rig handle, but
+   *  ctx.services.tryGet('exploration')?.getCameraRig() is the same clean service-interface path
+   *  combat/index.ts's frameCamera already uses — no new plumbing, no cross-feature internals import.
+   *  Gated behind reducedMotion (no shake when set). */
+  shakeForDamage(amount: number): void {
+    if (this.reducedMotion() || !(amount > 0)) return;
+    this.ctx.services.tryGet('exploration')?.getCameraRig()?.shake(Math.min(SHAKE_HIT_CAP, amount * SHAKE_PER_DMG));
   }
 
   tick(dt: number): void {
@@ -535,8 +643,24 @@ export class CombatRenderer {
       const p = this.damagePops[i];
       p.life -= dt;
       p.sprite.position.y += dt * 0.6;
-      (p.sprite.material as SpriteMaterial).opacity = Math.max(0, p.life / 1.2);
-      if (p.life <= 0) { this.root.remove(p.sprite); this.damagePops.splice(i, 1); }
+      (p.sprite.material as SpriteMaterial).opacity = Math.max(0, p.life / p.maxLife);
+      if (p.life <= 0) {
+        this.root.remove(p.sprite);
+        (p.sprite.material as SpriteMaterial).dispose();
+        this.damagePops.splice(i, 1);
+      }
+    }
+    // hit flashes: overlay opacity decays linearly to 0 over its life; no per-frame allocation
+    for (const [id, f] of this.flashes) {
+      f.life -= dt;
+      if (f.life <= 0) {
+        f.overlay.parent?.remove(f.overlay);
+        f.overlay.geometry.dispose();
+        (f.overlay.material as MeshBasicMaterial).dispose();
+        this.flashes.delete(id);
+        continue;
+      }
+      (f.overlay.material as MeshBasicMaterial).opacity = 0.55 * (f.life / f.maxLife);
     }
   }
 

@@ -65,6 +65,42 @@ function lodForDistance(d: number): number {
   return 3;
 }
 
+/** Beyond this distance a shed-mode new chunk is requested at the coarsest LOD instead of its
+ *  distance LOD (Phase 2 A4-core adaptive streaming). */
+const FAR_DEFER_M = 2000;
+
+/**
+ * Hysteresis governor for adaptive streaming (Phase 2 A4-core). Enters shed mode only after
+ * several consecutive over-budget frames and leaves only after a sustained healthy run, so a
+ * single hitch cannot flap the streaming tier. Pure (no Worker/three) so vitest can cover it.
+ */
+export class StreamingLoadGovernor {
+  degraded = false;
+  private over = 0;
+  private under = 0;
+  constructor(
+    private enterMs = 20,
+    private exitMs = 14,
+    private enterFrames = 3,
+    private exitFrames = 30,
+  ) {}
+  push(avgMs: number): boolean {
+    if (!Number.isFinite(avgMs)) return this.degraded;
+    if (!this.degraded) {
+      if (avgMs > this.enterMs) {
+        this.over++;
+        if (this.over >= this.enterFrames) { this.degraded = true; this.over = 0; this.under = 0; }
+      } else this.over = 0;
+    } else {
+      if (avgMs < this.exitMs) {
+        this.under++;
+        if (this.under >= this.exitFrames) { this.degraded = false; this.under = 0; this.over = 0; }
+      } else this.under = 0;
+    }
+    return this.degraded;
+  }
+}
+
 interface ChunkEntry {
   cx: number; cz: number;
   /** worker request the current pendingLod belongs to; a chunkDone for any other id is stale (evicted + re-requested) */
@@ -104,6 +140,15 @@ export class TerrainManager {
   private focus: { x: number; z: number } | null = null;
   private frameBudgetUsed = 0;
   chunksBuilt = 0;
+  /** Adaptive streaming governor (Phase 2 A4-core): sheds far-LOD requests and upload throughput
+   *  after sustained over-budget frames; recovers with hysteresis. Fed from `update()` via the
+   *  wall-clock frame delta so no core/graphics import is needed. Integrator note: this is MAIN-THREAD
+   *  wall time (JS upload + scene work), NOT GPU time — use gfx.frameMs in main.ts if a GPU-side
+   *  budget is wanted; the governor's own ring is a cheap local proxy. */
+  private governor = new StreamingLoadGovernor();
+  private lastSampleAt = -1;
+  /** rolling mean of the last ~30 main-thread frame deltas, ms */
+  private avgFrameMs = 0;
 
   constructor(private seed: number, private onChunkLoaded?: (info: { cx: number; cz: number; lod: number; allWater: boolean }) => void) {
     this.worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
@@ -149,6 +194,9 @@ export class TerrainManager {
   }
 
   // ---------------- CPU queries (exact, fast, bilinear) ----------------
+
+  /** World seed this grid was generated from (vegetation.ts re-bakes the seed-dependent splat mask on change). */
+  get gridSeed(): number { return this.seed; }
 
   heightAt(x: number, z: number): number {
     if (!this.heights) return 0;
@@ -244,6 +292,10 @@ export class TerrainManager {
         const d = Math.hypot(ccx - centerX, ccz - centerZ);
         if (d > radius) continue;
         let lod = lodForDistance(d);
+        // Adaptive shed: far chunks are (re)requested at LOD3, not their distance LOD, until the
+        // governor recovers. Already-built close chunks are NOT downgraded (no visible pop, no
+        // worker churn): only chunks that still need a worker build take the cheap path.
+        if (this.governor.degraded && d > FAR_DEFER_M) lod = 3;
         // hysteresis: a chunk sitting on a LOD boundary keeps its current LOD until the camera moves 12 % past it
         const cur = this.chunks.get(this.key(cx, cz))?.currentLod ?? -1;
         if (cur >= 0 && cur !== lod && Math.abs(cur - lod) === 1) {
@@ -347,7 +399,22 @@ export class TerrainManager {
   }
 
   /** Called every frame by the world system with the current camera position. */
-  update(camPos: { x: number; z: number }, frameTime: number): void {
+  update(camPos: { x: number; z: number }, frameTime: number, frameMs?: number): void {
+    // Feed the adaptive governor BEFORE doing this frame's work, from main-thread wall time.
+    // frameTime is ctx.elapsed (seconds, game clock); frameMs (when passed) is the real renderer
+    // frame interval from the gfx ring — preferred, since elapsed stalls under pause/menus.
+    // Both clamp to the same 0.1 s the main loop uses.
+    const sample = frameMs !== undefined ? Math.min(100, Math.max(0, frameMs)) : null;
+    if (sample !== null) {
+      this.avgFrameMs += (sample - this.avgFrameMs) * (this.avgFrameMs === 0 ? 1 : 1 / 30);
+      this.governor.push(this.avgFrameMs);
+    } else if (this.lastSampleAt >= 0) {
+      const dtMs = Math.min(100, Math.max(0, (frameTime - this.lastSampleAt) * 1000));
+      this.avgFrameMs += (dtMs - this.avgFrameMs) * (this.avgFrameMs === 0 ? 1 : 1 / 30);
+      this.governor.push(this.avgFrameMs);
+    }
+    this.lastSampleAt = frameTime;
+
     this.cutFarNearCamera(camPos.x, camPos.z);
     this.applyRegion(camPos.x, camPos.z, VIEW_RADIUS, frameTime);
     if (this.focus) this.applyRegion(this.focus.x, this.focus.z, 900, frameTime);
@@ -361,18 +428,41 @@ export class TerrainManager {
       const d = Math.hypot(ccx - camPos.x, ccz - camPos.z);
       const nearFocus = this.focus && Math.hypot(ccx - this.focus.x, ccz - this.focus.z) < 900 + CHUNK_SIZE;
       if (d > evictDist && !nearFocus) {
-        if (e.mesh) { this.group.remove(e.mesh); e.mesh.geometry.dispose(); e.mesh = null; }
+        if (e.mesh) {
+          // geometry only: the material is the shared getTerrainMaterial() singleton, never owned here.
+          this.group.remove(e.mesh);
+          e.mesh.geometry.dispose();
+          e.mesh = null;
+        }
         this.chunks.delete(key);
       }
     }
 
+    // Drop stale queued builds the eviction pass just orphaned (bounded: only when the queue is
+    // deep; the steady state turns over at 1-2 uploads/frame). Filtering the array releases the
+    // transferred CPU buffers to GC instead of holding them behind a backlog of builds.
+    if (this.uploadQueue.length > 24) {
+      this.uploadQueue = this.uploadQueue.filter((msg) => this.chunks.has(this.key(msg.cx, msg.cz)));
+    }
+
+    // Degraded mode halves the upload throughput (2 -> 1 chunk/frame) as well as deferring far
+    // LOD. Uploads are the main-thread BufferGeometry allocation + first-compile cost, so this is
+    // the knob that actually moves frame time; worker throughput is unaffected (builds land queued).
+    const uploads = this.governor.degraded ? 1 : UPLOAD_PER_FRAME;
     this.frameBudgetUsed = 0;
-    while (this.frameBudgetUsed < UPLOAD_PER_FRAME && this.uploadQueue.length) {
+    while (this.frameBudgetUsed < uploads && this.uploadQueue.length) {
       const msg = this.uploadQueue.shift()!;
       this.uploadChunk(msg);
       this.frameBudgetUsed++;
     }
   }
+
+  /** Test hook: feed the streaming governor without a frame loop. */
+  pushFrameSampleForTest(avgMs: number): boolean { return this.governor.push(avgMs); }
+  streamingDegradedForTest(): boolean { return this.governor.degraded; }
+  avgFrameMsForTest(): number { return this.avgFrameMs; }
+  /** Adaptive shed state for the world system (mirrored into vegetation density). */
+  get degraded(): boolean { return this.governor.degraded; }
 
   private uploadChunk(msg: ChunkDoneMsg): void {
     const e = this.chunks.get(this.key(msg.cx, msg.cz));
@@ -444,15 +534,52 @@ export class TerrainManager {
     return out;
   }
 
-  stats(): { chunksLoaded: number; chunksPending: number } {
+  /** Evict the far backdrop mesh and its authored-height copy (only safe pre-ready / on teardown). */
+  disposeFarMesh(): void {
+    if (this.farMesh) {
+      this.group.remove(this.farMesh);
+      this.farMesh.geometry.dispose();
+      this.farMesh = null;
+    }
+    this.farBaseY = null;
+    this.farCutAt = { x: NaN, z: NaN };
+  }
+
+  /** Estimated retained CPU MB (Phase 2 A5) for the integrator's heap-after-eviction measurement. */
+  retainedCpuMb(): { heightsMb: number; surfaceMb: number; uploadQueueMb: number; farBaseMb: number; totalMb: number } {
+    // CPU height/surface grids (always live for queries), pending upload-queue transfer buffers,
+    // and the far-backdrop authored-height copy. GPU BufferAttribute storage and the worker's own
+    // grid copy are deliberately EXCLUDED (not main-thread heap the harness reports). Uploaded
+    // chunk arrays are transferred, not retained: uploadChunk wraps the message buffers.
+    const heightsMb = this.heights ? this.heights.byteLength / 1048576 : 0;
+    const surfaceMb = this.surface ? this.surface.byteLength / 1048576 : 0;
+    let uploadBytes = 0;
+    for (const msg of this.uploadQueue) {
+      uploadBytes += msg.positions.byteLength + msg.normals.byteLength + msg.uvs.byteLength
+        + msg.surfaceId.byteLength + msg.indices.byteLength;
+    }
+    const uploadQueueMb = uploadBytes / 1048576;
+    const farBaseMb = this.farBaseY ? this.farBaseY.byteLength / 1048576 : 0;
+    const totalMb = heightsMb + surfaceMb + uploadQueueMb + farBaseMb;
+    return { heightsMb, surfaceMb, uploadQueueMb, farBaseMb, totalMb };
+  }
+
+  stats(): { chunksLoaded: number; chunksPending: number; retainedMb: number; degraded: boolean } {
     let pending = 0;
     for (const e of this.chunks.values()) if (e.pendingLod !== null) pending++;
-    return { chunksLoaded: this.chunks.size, chunksPending: pending + this.uploadQueue.length };
+    return {
+      chunksLoaded: this.chunks.size,
+      chunksPending: pending + this.uploadQueue.length,
+      retainedMb: this.retainedCpuMb().totalMb,
+      degraded: this.governor.degraded,
+    };
   }
 
   dispose(): void {
     for (const e of this.chunks.values()) if (e.mesh) { e.mesh.geometry.dispose(); }
     this.chunks.clear();
+    this.uploadQueue.length = 0;
+    this.disposeFarMesh();
     this.worker.terminate();
   }
 }

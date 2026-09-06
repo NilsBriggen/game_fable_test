@@ -7,3 +7,6 @@ tools/harness/.lock/
 tools/harness/.lock2/
 tools/critic/world2/
 tools/critic/world3/
+# Raw user-supplied Flow generations (16 MB); the remastered game loops live in
+# public/assets/music/ (24 MB, committed) — see public/assets/CREDITS-music.md.
+music/

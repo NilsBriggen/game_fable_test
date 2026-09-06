@@ -480,6 +480,11 @@ async function fetchPolyhavenModel(entry) {
   log(`${entry.id}: ${totalTris} tris → ${entry.target} (${Math.round(buf.length / 1024)} KB)`);
   credits.push({ file: entry.target.replace(/^public\//, ''), url: page, author, licence: src.licence, bytes: buf.length, note: `${entry.id} (${entry.res ?? '1k'} glTF), re-packed (EKIT)` });
   // textures per material: diff / nor (glTF +Y) / rough (from the packed ARM's G channel, or a rough map)
+  // KTX2/Basis note (Phase 2 B3 PREP): `convertJpeg` stays the committed-format writer. When the
+  // integrator lands the KTX2 migration, add a `convertKtx2` beside it here (basis_universal CLI or
+  // the same Chromium canvas → .ktx writer) emitting `<out>.ktx2` siblings of these JPEGs, and let
+  // src/world/assets.ts `loadImageTexture` prefer the sibling when present. sRGB-vs-linear follows
+  // the same `out` (diff = sRGB, nor/rough = linear).
   (gl.json.materials || []).forEach((m, i) => {
     const imgUri = (texIdx) => (texIdx === undefined ? null : decodeURIComponent(gl.json.images[gl.json.textures[texIdx].source].uri));
     const pbr = m.pbrMetallicRoughness || {};

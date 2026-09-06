@@ -107,14 +107,23 @@ export function buildChunkGeometry(
     }
   }
 
-  // skirts: duplicate each border row/col, pushed down, to hide LOD seams between neighbouring chunks
+  // skirts: duplicate each border row/col, pushed down, to hide LOD seams between neighbouring chunks.
+  // Depth is adaptive in local relief (Phase 2 A5): the flat table below covers the measured worst
+  // real 16 m LOD3 step (203 m at the Gotthard/Bristen walls), and a chunk whose own min/max span a
+  // larger relief gets relief + 8 m instead, since a neighbour step can never exceed the local relief
+  // by more than the interpolation error. Capped at 640 m so a pathological chunk cannot extrude a
+  // spike to the map floor. Residual gap (documented, not hidden): skirts close the VERTICAL step;
+  // a LOD0-vs-LOD3 boundary in a gorge still has a horizontal T-junction mismatch of up to half the
+  // coarse spacing (8 m), visible as a hairline crack at grazing angles from inside the gorge.
+  const relief = Number.isFinite(minY) && Number.isFinite(maxY) ? Math.max(0, maxY - minY) : 0;
+  const skirtDepth = Math.min(640, Math.max(SKIRT_DEPTH_BY_LOD[lod] ?? SKIRT_DEPTH, Math.ceil(relief + 8)));
   const west = mainCount, east = mainCount + verts, north = mainCount + 2 * verts, south = mainCount + 3 * verts;
   function writeSkirt(base: number, edgeAt: (i: number) => number): void {
     for (let i = 0; i < verts; i++) {
       const mi = edgeAt(i);
       const si = base + i;
       positions[si * 3] = positions[mi * 3];
-      positions[si * 3 + 1] = positions[mi * 3 + 1] - (SKIRT_DEPTH_BY_LOD[lod] ?? SKIRT_DEPTH);
+      positions[si * 3 + 1] = positions[mi * 3 + 1] - skirtDepth;
       positions[si * 3 + 2] = positions[mi * 3 + 2];
       uvs[si * 2] = uvs[mi * 2]; uvs[si * 2 + 1] = uvs[mi * 2 + 1];
       surfaceId[si] = surfaceId[mi];

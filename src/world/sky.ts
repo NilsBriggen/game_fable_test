@@ -7,7 +7,7 @@
 import {
   AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, CanvasTexture, ClampToEdgeWrapping,
   CircleGeometry, Color, DoubleSide, FogExp2, Group, HemisphereLight, Mesh, MeshBasicMaterial, PerspectiveCamera, Points,
-  PointsMaterial, RepeatWrapping, SRGBColorSpace, Scene, SphereGeometry, Vector3, WebGLRenderer,
+  PointsMaterial, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Scene, SphereGeometry, Vector3, WebGLRenderer,
 } from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { CSM } from 'three/examples/jsm/csm/CSM.js';
@@ -82,9 +82,10 @@ const SKY_KEYS: SkyKey[] = [
   { el: -6,  zenith: 0x101c3c, horizon: 0x30456e, haze: 0x2b3a5c, sunGlow: 0x5b5878, light: 0x6d7cae, ambient: 0x3d4f7c, exposure: 1.56 },
   // twilight ambient lifted (was 0x51608c / 0x7d90b4): a dusk vista of shadowed flanks read as mud at 19:00
   { el: -1,  zenith: 0x1d3566, horizon: 0x8a6a76, haze: 0x60607f, sunGlow: 0xc07a58, light: 0xc4794e, ambient: 0x6f7fa8, exposure: 1.5 },
-  // low-sun exposure lifted (1.3 / 0.97): a valley village in the mountains' shadow at 19:00 in August
-  // rendered as night while the real sky still lights it
-  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x9aabc8, exposure: 1.6 },
+  // low-sun exposure lifted (1.3 / 0.97, then 1.6 -> 1.68): a valley village in the mountains' shadow
+  // at 19:00 in August rendered as night while the real sky still lights it; hour-19 (el ~3.3)
+  // interpolates just past this peak toward el 10, so the peak must clear the 1.6 legibility floor
+  { el: 3,   zenith: 0x2a558f, horizon: 0xdc9257, haze: 0x9a8f96, sunGlow: 0xf3a860, light: 0xff9a4f, ambient: 0x9aabc8, exposure: 1.68 },
   { el: 10,  zenith: 0x2f639f, horizon: 0xe3bd92, haze: 0xb3bccb, sunGlow: 0xf7cf9b, light: 0xffd9a3, ambient: 0x9db4cd, exposure: 1.08 },
   { el: 28,  zenith: 0x336cb0, horizon: 0xcbdcea, haze: 0xa9c1da, sunGlow: 0xf6e3c0, light: 0xfff2d8, ambient: 0xbcd6e8, exposure: 0.92 },
   { el: 65,  zenith: 0x2f6bb8, horizon: 0xd3e3ef, haze: 0xa4bfdb, sunGlow: 0xf2ead8, light: 0xfffaf0, ambient: 0xc6dcec, exposure: 0.88 },
@@ -111,7 +112,7 @@ function skyLook(elevationDeg: number, out: SkyLook): SkyLook {
   lerpKeyColor(a.sunGlow, b.sunGlow, t, out.sunGlow);
   lerpKeyColor(a.light, b.light, t, out.light);
   lerpKeyColor(a.ambient, b.ambient, t, out.ambient);
-  out.exposure = a.exposure + (b.exposure - a.exposure) * t;
+  out.exposure = exposureAtElevation(elevationDeg);
   return out;
 }
 
@@ -143,6 +144,32 @@ const WEATHER: Record<Weather, WeatherParams> = {
   snow:     { turbidity: 5.5, rayleigh: 0.6, sunMul: 0.42, ambientMul: 1.20, fogDensity: 0.000480, overcast: 0.88, cumulus: 0.72, cloudTint: 0xc2ccd4, desat: 0.80, particles: 'snow', wetness: 0.00, snowDepth: 0.55, chop: 0.7, exposureMul: 1.05 },
   fog:      { turbidity: 4.5, rayleigh: 0.6, sunMul: 0.30, ambientMul: 1.10, fogDensity: 0.001500, overcast: 0.75, cumulus: 0.40, cloudTint: 0xc8d0d6, desat: 0.90, particles: 'none', wetness: 0.25, snowDepth: 0, chop: 0.5, exposureMul: 1.10 },
 };
+// ---------------------------------------------------------------------------------------------
+// Pure exposure helpers (no GPU). skyLook() above is the sole runtime writer; these expose the
+// same SKY_KEYS × WEATHER.exposureMul lookup for tests so the evening legibility floor and the
+// night/day pins can be checked without a renderer.
+// ---------------------------------------------------------------------------------------------
+
+/** Tone-mapping exposure for a sun elevation (pure SKY_KEYS interpolation). */
+export function exposureAtElevation(elevationDeg: number): number {
+  let i = 0;
+  while (i < SKY_KEYS.length - 2 && elevationDeg > SKY_KEYS[i + 1].el) i++;
+  const a = SKY_KEYS[i], b = SKY_KEYS[i + 1];
+  const t = Math.max(0, Math.min(1, (elevationDeg - a.el) / (b.el - a.el)));
+  return a.exposure + (b.exposure - a.exposure) * t;
+}
+
+/** Effective renderer exposure for an elevation + weather (key × WEATHER.exposureMul), pure. */
+export function effectiveExposureAtElevation(elevationDeg: number, weather: Weather): number {
+  return exposureAtElevation(elevationDeg) * WEATHER[weather].exposureMul;
+}
+
+/** Effective renderer exposure for a calendar hour (solarPosition + key lookup), pure, no GPU. */
+export function effectiveExposureForHour(dayOfYear: number, hour: number, weather: Weather): number {
+  const elDeg = (solarPosition(dayOfYear, hour).elevation * 180) / Math.PI;
+  return effectiveExposureAtElevation(elDeg, weather);
+}
+
 
 // ---------------------------------------------------------------------------------------------
 // Canvas textures: cloud deck, star/moon sprites, rain streak, snow flake
@@ -248,6 +275,8 @@ export interface SkyHandle {
   setSeason(s: Season): void;
   /** turn-based combat at night or in rain gets a fill so the field stays legible (BG3 lights its fights) */
   setCombatFill(on: boolean): void;
+  /** current weather wetness 0..1 (§3.5 wet sheen reads this; terrain shader reads uWetness directly) */
+  wetness(): number;
   /** resize the CSM cascade shadow maps (requests/ui-4, ui-5: settings `shadowRes`) */
   setShadowSize(px: number): void;
   update(dt: number, renderer: WebGLRenderer): void;
@@ -255,7 +284,6 @@ export interface SkyHandle {
 }
 
 export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebGLRenderer): SkyHandle {
-  void renderer;
   const group = new Group();
   group.name = 'sky';
 
@@ -331,47 +359,93 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
 
   scene.fog = new FogExp2(0xbfd2e0, 0.00016);
 
-  // --- weather particles -----------------------------------------------------------------------
+  // --- weather particles: GPU-animated -----------------------------------------------------------------
+  // One Points cloud, shader-animated (Phase 2 A3). Fall and the snow sway run in the vertex
+  // shader from uTime and wrap in a 170x80 m box around the camera; the CPU writes no
+  // attributes per frame. Same coverage as the old CPU loop (1400 rain / 1000 snow in the box).
   const rainTex = rainTexture();
   const flakeTex = discTexture(32, 0.4);
   const PARTICLE_COUNT = 1400;
+  // Phase 2 A5 (Sarnen-night-rain blowup): the rain Points cloud is 1 draw call but 1400
+  // screen-covering alpha sprites. Triangles are NOT the particle term (2 tris/sprite); the
+  // 5.43 M tris at 158 calls are alpha-tested vegetation cards + decimated scan rocks (see
+  // vegetation.ts pebbleKeepFor). RAIN_COUNT/SNOW_COUNT below cut the overdraw-dominated precip
+  // pass with no visible density change from a follow camera.
+  const RAIN_COUNT = 700;
+  const SNOW_COUNT = 350;
   const PARTICLE_BOX = 170;
   const PARTICLE_TOP = 80;
-  let particles: Points | null = null;
-  let particleMat: PointsMaterial | null = null;
+  let precip: Points | null = null;
+  let precipMat: ShaderMaterial | null = null;
   let particleKind: 'rain' | 'snow' | 'none' = 'none';
-  const drift = new Float32Array(PARTICLE_COUNT * 2);
+
+  const PRECIP_VERT = /* glsl */ `
+    attribute float aSeed;
+    uniform float uTime, uFall, uSway, uTop, uSize, uScale;
+    void main() {
+      vec3 p = position;
+      float span = uTop + 6.0;
+      p.y = mod(position.y - uTime * uFall, span) - 6.0;
+      p.x += sin(uTime * 0.7 + aSeed * 6.2831) * uSway;
+      p.z += cos(uTime * 0.7 + aSeed * 6.2831) * uSway;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      gl_PointSize = uSize * (uScale / max(1.0, -mv.z));
+      gl_Position = projectionMatrix * mv;
+    }
+  `;
+  const PRECIP_FRAG = /* glsl */ `
+    uniform sampler2D map;
+    uniform vec3 color;
+    uniform float opacity;
+    void main() {
+      vec4 tex = texture2D(map, gl_PointCoord);
+      vec4 c = vec4(color, opacity) * tex;
+      if (c.a < 0.01) discard;
+      gl_FragColor = c;
+    }
+  `;
 
   function ensureParticles(kind: 'rain' | 'snow' | 'none'): void {
     if (kind === particleKind) return;
     particleKind = kind;
-    if (particles) { group.remove(particles); particles.geometry.dispose(); particleMat?.dispose(); particles = null; particleMat = null; }
+    if (precip) { group.remove(precip); precip.geometry.dispose(); precipMat?.dispose(); precip = null; precipMat = null; }
     if (kind === 'none') return;
+    const snowy = kind === 'snow';
     const positions = new Float32Array(PARTICLE_COUNT * 3);
+    const seeds = new Float32Array(PARTICLE_COUNT);
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       positions[i * 3] = (Math.random() - 0.5) * PARTICLE_BOX;
-      positions[i * 3 + 1] = Math.random() * PARTICLE_TOP;
+      positions[i * 3 + 1] = Math.random() * (PARTICLE_TOP + 6.0) - 6.0;
       positions[i * 3 + 2] = (Math.random() - 0.5) * PARTICLE_BOX;
-      drift[i * 2] = (Math.random() - 0.5) * 2;
-      drift[i * 2 + 1] = (Math.random() - 0.5) * 2;
+      seeds[i] = Math.random();
     }
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(positions, 3));
-    particleMat = new PointsMaterial({
-      map: kind === 'snow' ? flakeTex : rainTex,
-      color: kind === 'snow' ? 0xffffff : 0xd6e6f2,
-      size: kind === 'snow' ? 0.55 : 3.2,
-      sizeAttenuation: true,
+    geo.setAttribute('aSeed', new BufferAttribute(seeds, 1));
+    // Rain reads denser than snow at the same coverage; the box itself is identical.
+    geo.setDrawRange(0, snowy ? SNOW_COUNT : RAIN_COUNT);
+    precipMat = new ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uFall: { value: snowy ? 3.2 : 34 },
+        uSway: { value: snowy ? 1.6 : 0 },
+        uTop: { value: PARTICLE_TOP },
+        uSize: { value: snowy ? 0.55 : 3.2 },
+        uScale: { value: 540 },
+        map: { value: snowy ? flakeTex : rainTex },
+        color: { value: new Color(snowy ? 0xffffff : 0xd6e6f2) },
+        opacity: { value: snowy ? 0.95 : 0.75 },
+      },
+      vertexShader: PRECIP_VERT,
+      fragmentShader: PRECIP_FRAG,
       transparent: true,
-      opacity: kind === 'snow' ? 0.95 : 0.75,
       depthWrite: false,
-      fog: false,
     });
-    particles = new Points(geo, particleMat);
-    particles.frustumCulled = false;
-    particles.name = 'weather-' + kind;
-    particles.renderOrder = 10;
-    group.add(particles);
+    precip = new Points(geo, precipMat);
+    precip.frustumCulled = false;
+    precip.name = 'weather-' + kind;
+    precip.renderOrder = 10;
+    group.add(precip);
   }
 
   // --- state -----------------------------------------------------------------------------------
@@ -379,6 +453,60 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
   let season: Season = 'summer';
   let curHour = 8, curMonth = 8, curDay = 1;
   let exposure = 0.9;
+  const rendererRef: WebGLRenderer | null = renderer ?? null;
+  let envWarming = false;
+  // §3.1 IBL: diffuse image-based ambient from the live sky. The PMREM is generated from a tiny
+  // gradient scene (zenith→horizon→ground) rebuilt only when the look changes (weather/hour/season
+  // steps), throttled to 2 s — zero per-frame cost, no HDR assets, no new dependencies. Applied as
+  // scene.environment with LOW intensity so CSM sun + hemisphere stay the key/fill and PBR props
+  // (kit.ts, characterAssets) gain shadow-side detail instead of a new look.
+  let pmrem: { fromScene(s: Scene, sigma: number): { texture: unknown }; dispose(): void } | null = null;
+  let envScene: Scene | null = null;
+  let lastEnvKey = '';
+  let lastEnvAt = -Infinity;
+  function ensureEnv(): void {
+    if (pmrem || envWarming || !rendererRef) return;
+    envWarming = true;
+    void import('three').then((m) => {
+      try {
+        if (!pmrem && rendererRef) pmrem = new m.PMREMGenerator(rendererRef) as unknown as typeof pmrem;
+      } catch { pmrem = null; } finally { envWarming = false; }
+    }).catch(() => { envWarming = false; });
+  }
+  function updateEnvironment(scene: Scene, nowMs: number): void {
+    ensureEnv();
+    const key = `${weather}|${Math.round(curHour * 2)}|${season}|${Math.round(exposure * 20)}`;
+    if (key === lastEnvKey || nowMs - lastEnvAt < 2000) return;
+    lastEnvKey = key;
+    lastEnvAt = nowMs;
+    try {
+      envScene ??= new Scene();
+      while (envScene.children.length) envScene.remove(envScene.children[0]);
+      const grad = new CanvasTexture(envGradient());
+      grad.colorSpace = SRGBColorSpace;
+      grad.mapping = 3001 as unknown as typeof grad.mapping; // EquirectangularReflectionMapping
+      envScene.background = grad as unknown as Scene['background'];
+      const gen = pmrem;
+      if (!gen) { grad.dispose(); return; }
+      const rt = gen.fromScene(envScene, 0.6);
+      scene.environment = rt.texture as unknown as Scene['environment'];
+      (scene as unknown as { environmentIntensity?: number }).environmentIntensity = 0.35;
+      grad.dispose();
+    } catch { /* IBL must never break the sky */ }
+  }
+  function envGradient(): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 32;
+    const g = c.getContext('2d')!;
+    const grad = g.createLinearGradient(0, 0, 0, 32);
+    grad.addColorStop(0, `#${look.zenith.getHexString()}`);
+    grad.addColorStop(0.52, `#${look.horizon.getHexString()}`);
+    grad.addColorStop(0.56, `#${look.haze.getHexString()}`);
+    grad.addColorStop(1, '#3a352c');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 32);
+    return c;
+  }
   const look: SkyLook = {
     zenith: new Color(), horizon: new Color(), haze: new Color(), sunGlow: new Color(),
     light: new Color(), ambient: new Color(), exposure: 0.9,
@@ -546,6 +674,9 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
       combatFill = on;
       applySun();
     },
+    wetness() {
+      return WEATHER[weather].wetness;
+    },
     setShadowSize(px: number) {
       // CSM reads shadowMapSize once in createLights() plus per-frame in update(); push the new size
       // onto all three places so the resize actually takes effect (verified against three r170 CSM.js).
@@ -575,29 +706,25 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
       csm.updateFrustums();
       csm.update();
       glRenderer.toneMappingExposure = exposure;
+      // §3.1 IBL: throttled inside (2 s, look-change only) — near-free from here.
+      try { updateEnvironment(scene, performance.now()); } catch { /* IBL must never break the frame */ }
 
-      if (particles) {
-        const pos = particles.geometry.getAttribute('position') as BufferAttribute;
-        const snowy = particleKind === 'snow';
-        const fall = (snowy ? 3.2 : 34) * dt;
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-          let y = pos.getY(i) - fall;
-          if (y < -6) y = PARTICLE_TOP;
-          pos.setY(i, y);
-          if (snowy) {
-            const t = clock * 0.7 + i;
-            pos.setX(i, pos.getX(i) + Math.sin(t) * drift[i * 2] * dt * 1.6);
-            pos.setZ(i, pos.getZ(i) + Math.cos(t) * drift[i * 2 + 1] * dt * 1.6);
-          }
-        }
-        pos.needsUpdate = true;
-        // particles live under `group`, which is already at the camera: only the vertical offset is local
-        particles.position.set(0, -PARTICLE_TOP * 0.42, 0);
+      if (precip && precipMat) {
+        precipMat.uniforms.uTime.value = clock;
+        // Same perspective divisor three.js PointsMaterial uses (half the drawing-buffer height),
+        // so uSize keeps its old meaning and coverage is unchanged.
+        (precipMat.uniforms.uScale as { value: number }).value = glRenderer.domElement.height * 0.5;
+        // precip lives under `group`, which is already at the camera: only offsets are local.
+        precip.position.set(0, -PARTICLE_TOP * 0.42, 0);
       }
     },
     dispose() {
       setActiveCsm(null);
       csm.dispose();
+      try { pmrem?.dispose(); } catch { /* ignore */ }
+      pmrem = null;
+      envScene = null;
+      scene.environment = null;
       (sky.material as any).dispose();
       sky.geometry.dispose();
       domeGeo.dispose(); cumulusMat.dispose();
@@ -607,7 +734,7 @@ export function buildSky(scene: Scene, camera: PerspectiveCamera, renderer: WebG
       stars.geometry.dispose(); (stars.material as PointsMaterial).dispose(); starTex.dispose();
       moonGeo.dispose(); moonMat.dispose(); moonTex.dispose();
       rainTex.dispose(); flakeTex.dispose();
-      if (particles) { particles.geometry.dispose(); particleMat?.dispose(); }
+      if (precip) { precip.geometry.dispose(); precipMat?.dispose(); }
     },
   };
 }

@@ -15,8 +15,8 @@ export interface Collider {
 }
 
 /** Footprint radius (metres) per model id; anything not listed is treated as walk-through (small props,
- *  boats, fences — decorative or already water-only). The well, cross and hayrack are solid too, so the
- *  crowd that gathers on the square stands around the well instead of inside it. */
+ *  boats — decorative or already water-only). Tents, fences, carts, woodpiles, rocks, troughs and
+ *  campfires are solid: the crowd gathers around them, not inside them. */
 export const RADIUS: Record<string, number> = {
   'house.blockbau': 4.2,
   'house.stone': 4.6,
@@ -34,11 +34,25 @@ export const RADIUS: Record<string, number> = {
   'bridge.wood': 0,
   well: 2.4,
   cross: 0.6,
+  'cross.shrine': 0.8,
   hayrack: 1.8,
+  'hayrick.tripod': 1.6,
+  'hut.fisher': 4.2,
+  'palisade.gate': 4,
+  tent: 2,
+  fence: 0.8,
+  campfire: 1,
+  'rock.small': 0.8,
+  'rock.large': 1.5,
+  woodpile: 1.2,
+  trough: 1,
+  cart: 1.6,
+  signpost: 0.4,
+  // boat.cargo is water-only like boat (walk-through: no entry).
 };
 
 /** Low props the camera looks over (buildings default to 9 m). */
-export const HEIGHT: Record<string, number> = { well: 2.6, cross: 2.6, hayrack: 3.2 };
+export const HEIGHT: Record<string, number> = { well: 2.6, cross: 2.6, 'cross.shrine': 3.0, hayrack: 3.2, 'hayrick.tripod': 3.4, 'hut.fisher': 4.5 };
 
 /** Footprint used by the layout generator to keep models from interpenetrating (includes small props). */
 export const SPACING: Record<string, number> = { ...RADIUS, fence: 0.8, tent: 2, campfire: 1, 'rock.small': 0.8, 'rock.large': 1.5 };
@@ -60,7 +74,8 @@ export function resolveCollisions(pos: { x: number; z: number }, colliders: Coll
     const dx = pos.x - c.x, dz = pos.z - c.z;
     const minDist = c.radius + radius;
     const distSq = dx * dx + dz * dz;
-    if (distSq >= minDist * minDist || distSq < 1e-8) continue;
+    if (distSq >= minDist * minDist) continue;
+    if (distSq < 1e-8) { pos.x = c.x + minDist; continue; } // dead centre: push out along +X instead of sticking
     const dist = Math.sqrt(distSq);
     const push = (minDist - dist) / dist;
     pos.x += dx * push;

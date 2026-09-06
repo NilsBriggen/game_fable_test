@@ -10,6 +10,22 @@ import type { Unit } from './types';
 import { hasStatus, isPolearm } from './types';
 import { cellDistance } from './rules/grid';
 import { moraleDc } from './rules/morale';
+import type { Difficulty } from '@core/context';
+
+/**
+ * 4.4 Habsburg discipline, gated on difficulty (deterministic per seed — no RNG changes).
+ * Story mode softens the column: footmen only Brace against cavalry already at half the normal
+ * charge range (radius halved), and sergeants rally "lazily" — they still close to allies in
+ * trouble, but only within a short shuffle instead of crossing the column. Normal and Hard run
+ * full discipline (identical code paths, so Normal stays the identity the samplers were tuned on).
+ */
+export function disciplineFor(difficulty: Difficulty | undefined): { footmanBraceRangeMult: number; sergeantLazyRally: boolean } {
+  if (difficulty === 'story') return { footmanBraceRangeMult: 0.5, sergeantLazyRally: true };
+  return { footmanBraceRangeMult: 1, sergeantLazyRally: false };
+}
+
+/** Lazy-rally shuffle radius (cells of reach to scan) for a Story-mode sergeant — see sergeantAct. */
+export const STORY_SERGEANT_RALLY_SCAN = 6;
 
 function dist(a: Unit, b: Unit): number { return cellDistance(a.q, a.r, b.q, b.r); }
 
@@ -213,7 +229,9 @@ function footmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng: Rn
   // down on round 1 beat a disciplined one (the column was never resilient enough to punish indiscipline).
   if (u.weapon?.properties.includes('brace') && u.stance !== 'braced' && u.ap.bonus) {
     const cellM = engine.gridInfo()?.cellM ?? 1.5;
-    const cavalryNear = enemies.some((e) => e.mounted && !e.routed && cellDistance(u.q, u.r, e.q, e.r) * cellM <= 2 * u.speedMBase);
+    // 4.4: Story mode halves the Habsburg brace radius (enemy footmen only) — the column reacts late.
+    const rangeMult = u.side === 'enemy' ? disciplineFor(engine.difficulty).footmanBraceRangeMult : 1;
+    const cavalryNear = enemies.some((e) => e.mounted && !e.routed && cellDistance(u.q, u.r, e.q, e.r) * cellM <= 2 * u.speedMBase * rangeMult);
     if (cavalryNear) engine.aiAbility(u, 'ability.brace');
   }
   const target = [...enemies].sort((a, b) => (a.hp / a.hpMax) - (b.hp / b.hpMax) || dist(u, a) - dist(u, b))[0];
@@ -251,7 +269,11 @@ function crossbowmanAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
     footmanAct(engine, u, enemies, _rng);
     return;
   }
-  if (!u.loaded) { engine.aiAbility(u, 'ability.reload'); return; }
+  if (!u.loaded) {
+    // A failed reload (no bonus/action left, free reload spent) must not end the turn: fall through to
+    // movement so the unit still repositions instead of standing still doing nothing.
+    if (engine.aiAbility(u, 'ability.reload')) return;
+  }
   const nearest = [...enemies].sort((a, b) => dist(u, a) - dist(u, b))[0];
   if (!nearest) return;
   const short = u.ranged.range?.short ?? 6;
@@ -290,6 +312,7 @@ function waldstaetteAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], _rng
   }
   // issue 2: Brace whenever a mounted threat is within charge range (2× this unit's speed), so the Haufen
   // isn't caught flat-footed the way probe10b's 24/24 samples showed (`braces=0` — the AI never used it).
+  // (Player-side doctrine: never difficulty-gated — only Habsburg discipline softens on Story.)
   if (isPolearm(u.weapon) && u.stance !== 'braced' && u.ap.bonus) {
     const cellM = engine.gridInfo()?.cellM ?? 1.5;
     const cavalryNear = enemies.some((e) => e.mounted && cellDistance(u.q, u.r, e.q, e.r) * cellM <= 2 * u.speedMBase);
@@ -344,15 +367,22 @@ function sergeantAct(engine: CombatEngineImpl, u: Unit, enemies: Unit[], rng: Rn
   const nearestTrouble = [...inTrouble].sort((a, b) => dist(u, a) - dist(u, b))[0];
   if (nearestTrouble && u.ap.action) {
     if (dist(u, nearestTrouble) <= 3) { engine.aiAbility(u, 'ability.rally'); return; }
-    // Round-3 minor: closing to rally range is a pure rally-approach move (the action is reserved for Rally
-    // itself), so Disengage first when the sergeant would otherwise walk out under blades, and prefer the
-    // OA-free line among the near-equivalent approach cells.
-    tryDisengageForRetreat(engine, u);
-    const reach = engine.reachable(u.id);
-    const scored = reach.map((cell) => ({ cell, score: -Math.abs(cellDistance(cell.q, cell.r, nearestTrouble.q, nearestTrouble.r) - 2) }));
-    const cell = pickSafeCell(engine, u, scored) ?? stepToward(engine, u, nearestTrouble, 2);
-    if (cell) engine.aiMove(u, cell);
-    if (dist(u, nearestTrouble) <= 3 && u.ap.action) { engine.aiAbility(u, 'ability.rally'); return; }
+    // 4.4: Story-mode Habsburg sergeants rally lazily — they only shuffle toward trouble already
+    // nearby instead of marching across the column to reach it. Deterministic: a pure distance gate,
+    // no RNG. Player-side sergeants (and Normal/Hard) always close the distance.
+    const lazy = u.side === 'enemy' && disciplineFor(engine.difficulty).sergeantLazyRally;
+    if (lazy && dist(u, nearestTrouble) > STORY_SERGEANT_RALLY_SCAN) { /* too far: hold, don't march */ }
+    else {
+      // Round-3 minor: closing to rally range is a pure rally-approach move (the action is reserved for Rally
+      // itself), so Disengage first when the sergeant would otherwise walk out under blades, and prefer the
+      // OA-free line among the near-equivalent approach cells.
+      tryDisengageForRetreat(engine, u);
+      const reach = engine.reachable(u.id);
+      const scored = reach.map((cell) => ({ cell, score: -Math.abs(cellDistance(cell.q, cell.r, nearestTrouble.q, nearestTrouble.r) - 2) }));
+      const cell = pickSafeCell(engine, u, scored) ?? stepToward(engine, u, nearestTrouble, 2);
+      if (cell) engine.aiMove(u, cell);
+      if (dist(u, nearestTrouble) <= 3 && u.ap.action) { engine.aiAbility(u, 'ability.rally'); return; }
+    }
   }
   footmanAct(engine, u, enemies, rng);
 }

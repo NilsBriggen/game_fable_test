@@ -46,7 +46,10 @@ export const LOD_FAR = 25;
 
 const san = (n: string) => n.replace(/[.\s]/g, '_');
 
-/** hips-height ratio target/source: scales the animated root+hips translation so the bob stays natural. */
+/** hips-height ratio target/source: scales the animated root+hips translation so the bob stays natural.
+ *  KayKit source hips rest ≈ 0.406 m, human target 0.95 m — but a full 2.34× scale of every root/hips
+ *  delta would double-count the stride the owner already applies by moving the object, so the constant
+ *  is tuned (≈1.21) rather than derived: bob amplitude reads right without foot-speed mismatch. */
 const MOTION_SCALE = 1.21;
 
 interface Rig {
@@ -183,6 +186,16 @@ export function clipFor(anim: CharacterAnim, weapon: WeaponKind, seed: number, s
     case 'brace': return { name: 'Melee_Blocking', loop: true };
     case 'talk': return { name: 'Interact', loop: false };
     case 'cheer': return { name: 'Cheering', loop: true };
+    // 3.5 settlement-life loops (KayKit pack has no dedicated sit/work/limp clips — deliberate reuse,
+    // documented here like every other mapping above):
+    // - `sit` reuses `Sit_Chair_Idle` (seated weight, settled hands) — inn benches, tavern evenings;
+    // - `work` reuses `Working_A` (both arms forward-down, repetitive bend) — wall-building, farm labour;
+    // - `limp` reuses `Hit_B`-paced `Walking_B` (shorter, heavier step than Walking_A/C) — wounded walk,
+    //   Morgarten carried-off beat. A true asymmetric limp would need a new clip; this reads as hurt
+    //   without one.
+    case 'sit': return { name: 'Sit_Chair_Idle', loop: true };
+    case 'work': return { name: 'Working_A', loop: true };
+    case 'limp': return { name: 'Walking_B', loop: true };
     default: return { name: 'Idle_A', loop: true };
   }
 }
@@ -217,6 +230,14 @@ export function mixamoClipFor(anim: CharacterAnim, weapon: WeaponKind, seed: num
     case 'brace': return { name: sword ? 'Blocking' : 'Standing_Block_Idle', loop: true };
     case 'talk': return { name: 'Talking', loop: false };
     case 'cheer': return { name: 'Cheering', loop: true };
+    // 3.5 settlement-life loops from the downloaded Mixamo set (manifest "clips"):
+    // - `sit` = Sitting_Idle (seated, settled weight) — inn benches, tavern evenings;
+    // - `work` = Standing_Idle_03 (bent to the ground, examining/working at foot level) — wall-building,
+    //   farm labour. Excluded from the idle pool for exactly this bend; here the bend IS the point.
+    // - `limp` = Running_Tired played slow (heavy, uneven tread) — wounded walk, Morgarten carried-off.
+    case 'sit': return { name: 'Sitting_Idle', loop: true };
+    case 'work': return { name: 'Standing_Idle_03', loop: true };
+    case 'limp': return { name: 'Running_Tired', loop: true };
     default: return { name: 'Idle', loop: true };
   }
 }
@@ -262,6 +283,7 @@ function tintedClone(mat: MeshStandardMaterial, tint: [number, number, number], 
       }`);
   };
   c.dispose = () => {};   // shared textures; exploration disposes NPC materials on freeze
+  c.userData.tintedClone = true; // per-instance material (see Character.dispose): owned by the character
   registerCsmMaterial(c);
   return c;
 }
@@ -441,6 +463,7 @@ class Character implements CharacterHandle {
       for (const p of parts) {
         const m = new Mesh(p.geometry, characterMaterial(p.layer));
         m.castShadow = true;
+        m.userData.heldKit = true; // owned by this character (see dispose): never a shared-cache mesh
         holder.add(m);
         this.meshes.push(m);
       }
@@ -533,6 +556,9 @@ class Character implements CharacterHandle {
     this.oneShotUntil = this.time + dur;
     return new Promise((resolve) => { this.pending.push({ at: this.oneShotUntil, resolve }); });
   }
+
+  /** The animation currently held — lets owners (NPC settlement poses) avoid restarting a loop. */
+  currentAnimName(): CharacterAnim { return this.currentAnim ?? 'idle'; }
 
   private pending: { at: number; resolve: () => void }[] = [];
 
@@ -664,6 +690,22 @@ class Character implements CharacterHandle {
     this.mixer?.stopAllAction();
     this.skeleton?.dispose();
     this.object.parent?.remove(this.object);
+    // Per-instance held-kit meshes (userData.heldKit, hung on the hand bones) and per-instance
+    // tinted material clones are owned by this character, not the shared caches — dispose their
+    // geometries/materials so combat removeUnit/clearAfterEnd doesn't leak one set per unit per fight.
+    // Shared-cache procedural meshes (dispose === noop, no heldKit flag, untinted) are skipped: freeing
+    // a pooled buffer would tear it out from under every other character using it.
+    for (const m of this.meshes) {
+      const mesh = m as Mesh & { userData?: { heldKit?: boolean } };
+      const mat = mesh.material as unknown;
+      const mats = Array.isArray(mat) ? mat : mat ? [mat] : [];
+      for (const mm of mats) {
+        const owned = mesh.userData?.heldKit === true
+          || (mm as { userData?: { tintedClone?: boolean } }).userData?.tintedClone === true;
+        if (owned) (mm as { dispose?: () => void }).dispose?.();
+      }
+      if (mesh.userData?.heldKit === true) mesh.geometry?.dispose?.();
+    }
     for (const p of this.pending) p.resolve();
     this.pending = [];
     this.meshes = [];
@@ -715,6 +757,18 @@ export function updateCharacters(dt: number): void {
 export function spawnCharacter(archetype: string, opts: { variant?: string; mounted?: boolean; seed?: number } = {}): CharacterHandle {
   return new Character(archetype, opts);
 }
+
+/** Every Mixamo clip name mixamoClipFor can request (3.5 warmup): the full set the world prefetches
+ *  at boot / on load so settlement NPCs never play their first seconds in the bind pose. Must stay in
+ *  sync with mixamoClipFor's returns — models.test.ts asserts coverage. */
+export const CHARACTER_CLIP_NAMES = [
+  'Idle', 'Standing_Idle', 'Standing_Idle_02', 'Walking', 'Running', 'Running_Tired',
+  'Sword_And_Shield_Idle', 'Sword_And_Shield_Walk', 'Great_Sword_Idle', 'Great_Sword_Walk',
+  'Great_Sword_Slash', 'Two_Hand_Sword_Combo', 'Sword_And_Shield_Slash', 'Sword_And_Shield_Attack',
+  'Stabbing', 'Aiming', 'Reloading', 'Blocking', 'Standing_Block_Idle', 'Sword_And_Shield_Impact',
+  'Hit_Reaction', 'Hit_To_Body', 'Falling_Down', 'Talking', 'Cheering',
+  'Sitting_Idle', 'Standing_Idle_03',
+];
 
 /** Archetype ids the look table covers (without the `char.` prefix). */
 export const CHARACTER_ARCHETYPES = Object.keys(LOOKS);

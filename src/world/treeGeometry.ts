@@ -214,9 +214,41 @@ export function treeMaterial(): MeshStandardMaterial {
     map: foliageAtlasTexture(), alphaTest: 0.42, side: DoubleSide, roughness: 0.92, metalness: 0, vertexColors: true,
   });
   sharedMaterial.fog = false;
-  sharedMaterial.onBeforeCompile = (shader) => applyAerialFog(shader as any);
+  sharedMaterial.onBeforeCompile = (shader) => { applyAerialFog(shader as any); applyWindSway(shader as any, 1.0); };
   registerCsmMaterial(sharedMaterial);
   return sharedMaterial;
+}
+
+/** Shared wind clock (seconds). Advanced by vegetation.update via setWindTime. */
+const windUniform: { value: number } = { value: 0 };
+export function setWindTime(t: number): void { windUniform.value = t; }
+
+/**
+ * Phase 6 wind sway: displaces full/mid-tier foliage by height fraction, instancing-aware.
+ * Amplitude scales with local height (top sways, trunk stays) and is small enough to never
+ * move a trunk off its collider. Reduced-motion disables via uWindAmp = 0 (see vegetation.ts).
+ */
+const windAmpUniform: { value: number } = { value: 1 };
+export function setWindAmp(a: number): void { windAmpUniform.value = a; }
+function applyWindSway(shader: { vertexShader: string; uniforms: Record<string, { value: unknown }> }, strength: number): void {
+  shader.uniforms.uWindTime = windUniform as { value: unknown };
+  shader.uniforms.uWindAmp = windAmpUniform as { value: unknown };
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', 'uniform float uWindTime;\nuniform float uWindAmp;\n#include <common>')
+    .replace('#include <begin_vertex>', /* glsl */ `
+      #include <begin_vertex>
+      {
+        // height fraction within this instance: position.y is local pre-instance metres
+        float hf = clamp(position.y / 9.0, 0.0, 1.0);
+        float ph = 0.0;
+        #ifdef USE_INSTANCING
+          ph = float(gl_InstanceID) * 1.61803398875;
+        #endif
+        float sway = (sin(uWindTime * 1.7 + ph + position.x * 0.35) * 0.6 + sin(uWindTime * 3.1 + ph * 1.3) * 0.4);
+        vec2 wdir = vec2(0.62, 0.78);
+        transformed.xz += wdir * (sway * hf * hf * ${strength.toFixed(2)} * 0.22 * uWindAmp);
+      }
+    `);
 }
 
 let impostorMat: MeshStandardMaterial | null = null;
@@ -226,7 +258,7 @@ function impostorMaterial(): MeshStandardMaterial {
     map: treeImpostorAtlas(), alphaTest: 0.35, side: DoubleSide, roughness: 1, metalness: 0,
   });
   impostorMat.fog = false;
-  impostorMat.onBeforeCompile = (shader) => applyAerialFog(shader as any);
+  impostorMat.onBeforeCompile = (shader) => { applyAerialFog(shader as any); applyWindSway(shader as any, 0.3); };
   registerCsmMaterial(impostorMat);
   return impostorMat;
 }
@@ -269,7 +301,7 @@ function groundCoverMaterial(): MeshStandardMaterial {
     map: groundCoverAtlasTexture(), alphaTest: 0.34, side: DoubleSide, roughness: 1, metalness: 0, vertexColors: true,
   });
   groundMat.fog = false;
-  groundMat.onBeforeCompile = (shader) => applyAerialFog(shader as any);
+  groundMat.onBeforeCompile = (shader) => { applyAerialFog(shader as any); applyWindSway(shader as any, 0.6); };
   return groundMat;
 }
 

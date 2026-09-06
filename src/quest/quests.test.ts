@@ -141,6 +141,31 @@ describe('QuestMachine', () => {
     expect(machine.stage('quest.a')).toBe('stage2'); // and the stage is already updated by the time the event fires
   });
 
+  it('bughunt quest #2: re-entering a stage via a recover loop does not duplicate its journal line', async () => {
+    const loop: QuestDef = {
+      id: 'quest.loop', title: 'Loop', kind: 'main', chapter: 'prologue-1291', historical: 'invented', note: 'test',
+      description: 'x',
+      stages: [
+        { id: 'fight', journal: 'Hold the road behind the crossbowman.' },
+        { id: 'recover', journal: 'Driven back. Regroup and try again.' },
+      ],
+    };
+    let now = 1000;
+    const deps: QuestMachineDeps = {
+      getQuestDef: (id) => (id === 'quest.a' ? questA : id === 'quest.loop' ? loop : undefined),
+      runEffects: async () => {},
+      now: () => now,
+      poiPosition: () => null,
+      emit: () => {},
+    };
+    const machine = new QuestMachine(deps);
+    await machine.start('quest.loop');
+    await machine.advance('quest.loop', 'recover');
+    await machine.advance('quest.loop', 'fight'); // retry: re-enters the fight stage
+    const lines = machine.journalEntries.filter((j) => j.questId === 'quest.loop').map((j) => j.text);
+    expect(lines).toEqual(['Hold the road behind the crossbowman.', 'Driven back. Regroup and try again.']);
+  });
+
   it('reset() clears a quest entirely so it can be start()ed again (Morgarten-loss retry)', async () => {
     const { machine } = makeMachine();
     await machine.start('quest.a');

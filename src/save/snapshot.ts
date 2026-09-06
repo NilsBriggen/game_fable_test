@@ -5,6 +5,7 @@
  */
 import type { SaveFile, Canton, SerializedCombat } from '@core/schemas';
 import { SAVE_SCHEMA_VERSION } from '@core/schemas';
+import { isDifficulty } from '@core/context';
 import { Player, Transform } from '@core/components';
 import type { GfxLike, SaveHost } from './host';
 
@@ -106,6 +107,12 @@ export function buildSnapshot(host: SaveHost, slot: number, label?: string): Sav
     seed: host.seed,
     gameTime: host.clock.time,
     chapter: questData.chapter,
+    // 4.4: difficulty lives in save metadata (tolerant-optional — no schema bump: old saves simply
+    // omit it and load as 'normal'). Read from the live settings via structural access so this
+    // snapshot helper stays decoupled from a full GameContext import (cf. CombatHost.difficulty).
+    difficulty: isDifficulty((host as { settings?: { difficulty?: unknown } }).settings?.difficulty)
+      ? (host as { settings: { difficulty: 'story' | 'normal' | 'hard' } }).settings.difficulty
+      : 'normal',
     world: host.world.serialize(),
     playerId,
     party: partyIds,
@@ -123,6 +130,17 @@ export function buildSnapshot(host: SaveHost, slot: number, label?: string): Sav
     season: host.clock.season(),
     thumbnailDataUrl: renderThumbnail(host.gfx),
   };
+}
+
+/**
+ * 4.4: restores the save's difficulty metadata into live settings (tolerant: absent/unknown → 'normal',
+ * no migration, no player-save deletion). Kept as a pure helper next to applyWorldState so callers
+ * without a full GameContext (tests, headless hosts) can drive it through structural settings access.
+ */
+export function applyDifficulty(host: { settings?: { difficulty?: unknown } }, save: { difficulty?: unknown }): 'story' | 'normal' | 'hard' {
+  const difficulty = isDifficulty(save.difficulty) ? save.difficulty : 'normal';
+  if (host.settings) host.settings.difficulty = difficulty;
+  return difficulty;
 }
 
 /**

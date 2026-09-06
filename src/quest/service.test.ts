@@ -326,6 +326,30 @@ describe('QuestServiceImpl (register + integration)', () => {
     expect(trace.filter((t) => t === 'complete:quest.muster-1315')).toHaveLength(2); // both the first (failed) run and the retry complete the muster hub itself; only Morgarten fails
     expect(quest.isDone('quest.morgarten')).toBe(true);
     expect(quest.isDone('quest.brunnen-1315')).toBe(true); // the retried run reaches the end of Act 1
+    expect(quest.getFlag('morgarten.retry')).toBe(false); // the retried hub's ready stage clears the retry marker
+  });
+
+  it("3.4: {music} effects drive the UI audio bus (bed name after the 'music.' dot)", async () => {
+    const { ctx } = setup();
+    const played: string[] = [];
+    const ui = new ScriptedUiService();
+    (ui as unknown as { audio: { playMusic(id: string): void } }).audio = { playMusic: (id) => played.push(id) };
+    ctx.services.register('ui', asUiService(ui));
+    await register(ctx);
+    const quest = ctx.services.get('quest') as QuestServiceImpl;
+    await quest.runEffects([{ music: 'music.tavern' }]);
+    expect(played).toEqual(['tavern']);
+    await quest.runEffects([{ music: 'music.battle' }]);
+    expect(played).toEqual(['tavern', 'battle']);
+  });
+
+  it("3.4: {music} with no audio on the UI service is a silent no-op (headless)", async () => {
+    const { ctx } = setup();
+    const ui = new ScriptedUiService(); // no .audio — headless fake
+    ctx.services.register('ui', asUiService(ui));
+    await register(ctx);
+    const quest = ctx.services.get('quest') as QuestServiceImpl;
+    await expect(quest.runEffects([{ music: 'music.tavern' }])).resolves.toBeUndefined();
   });
 
   it('critic wave3-quest.md round 2 #2 (probe 9): "So sworn" (the oath dialogue\'s own close) is shown before the sealing cutscene\'s caption, not after', async () => {

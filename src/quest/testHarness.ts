@@ -133,7 +133,7 @@ export class FakeExplorationService {
   teleport(entity: EntityId, x: number, z: number): void { this.teleports.push({ entity, x, z }); }
   setControlEnabled(): void {}
   getCameraRig(): CameraRig {
-    return { camera: {} as never, setMode: () => {}, getMode: () => 'follow', setFree: () => {}, focus: () => {}, update: () => {} };
+    return { camera: {} as never, setMode: () => {}, getMode: () => 'follow', setFree: () => {}, focus: () => {}, shake: () => {}, update: () => {} };
   }
   discover(poiId: string): void { this.discoveredSet.add(poiId); this.emit('poi-discovered', poiId); }
   isDiscovered(poiId: string): boolean { return this.discoveredSet.has(poiId); }
@@ -200,6 +200,7 @@ export class ScriptedUiService {
       return Math.max(0, this.pick(node));
     },
     hide: (): void => {},
+    wasDismissed: (): boolean => false,
   };
   combat = { show(): void {}, update(): void {}, hide(): void {}, onCommand(): void {} };
   cutscene = {

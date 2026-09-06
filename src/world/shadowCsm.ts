@@ -21,14 +21,24 @@ export function getActiveCsm(): CSM | null {
   return activeCsm;
 }
 
+/** Materials already wired (setupMaterial replaces onBeforeCompile; double-wrapping would chain it twice). */
+const wired = new WeakSet<Material>();
+
 /** Wraps the material's existing onBeforeCompile (if any) so CSM's cascade uniforms are applied too. */
-export function registerCsmMaterial(material: Material): void {
-  if (!activeCsm) return;
+export function registerCsmMaterial(material: Material, cacheTag?: string): void {
+  if (!activeCsm || wired.has(material)) return;
+  wired.add(material);
   const prev = (material as any).onBeforeCompile as ((shader: any, renderer: any) => void) | undefined;
+  // Default customProgramCacheKey() is onBeforeCompile.toString(): after the wrap below, every
+  // registered material would return the wrapper's identical source as its key and one program
+  // would be reused for all of them (terrain renders with the tree shader or vice versa → black).
+  // Capture a distinct key per material before overwriting onBeforeCompile.
+  const prevKey = cacheTag ?? (material as any).customProgramCacheKey?.call(material) as string | undefined;
   activeCsm.setupMaterial(material as any);
   const csmObc = (material as any).onBeforeCompile as (shader: any, renderer: any) => void;
   (material as any).onBeforeCompile = (shader: any, renderer: any) => {
     prev?.(shader, renderer);
     csmObc?.(shader, renderer);
   };
+  (material as any).customProgramCacheKey = () => `${prevKey ?? prev?.toString() ?? 'plain'}::csm`;
 }

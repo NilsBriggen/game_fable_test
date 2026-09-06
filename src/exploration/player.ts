@@ -27,7 +27,7 @@ export class PlayerController {
   private enabled = true;
   private wantJump = false;
 
-  constructor(private canvas: HTMLCanvasElement, private cameraRig: CameraRigImpl) {
+  constructor(private canvas: HTMLCanvasElement, private cameraRig: CameraRigImpl, private getInvertY?: () => boolean) {
     this.bind();
   }
 
@@ -52,7 +52,9 @@ export class PlayerController {
     });
     document.addEventListener('mousemove', (e) => {
       if (!this.pointerLocked || !this.enabled) return;
-      this.cameraRig.addYawPitch(-e.movementX * 0.0025, -e.movementY * 0.0022);
+      // Phase 2 A1.4: the settings panel's Invert Y now reaches the active input consumer.
+      const invert = this.getInvertY?.() ? -1 : 1;
+      this.cameraRig.addYawPitch(-e.movementX * 0.0025, invert * -e.movementY * 0.0022);
     });
     window.addEventListener('wheel', (e) => {
       if (this.cameraRig.getMode() !== 'follow') return;
@@ -148,15 +150,18 @@ export class PlayerController {
     jumpRequested: boolean,
   ): void {
     const swimming = worldService.isWater(t.x, t.z);
-    const ground = worldService.heightAt(t.x, t.z);
     if (swimming) {
-      // Surface swimming: `heightAt` already returns the local lake's own level in water, so we float
-      // right at it rather than sinking to the lakebed.
-      t.y = ground;
+      // Surface swimming: float at the local lake's own level, which is a water query — NOT the
+      // bilinear lakebed height that heightAt returns inside water. Settling to the bed sank swimmers.
+      const level = typeof worldService.lakeLevelAt === 'function'
+        ? worldService.lakeLevelAt(t.x, t.z) ?? 0
+        : 0;
+      t.y = level;
       vel.vy = 0;
       vel.grounded = true;
       return;
     }
+    const ground = worldService.heightAt(t.x, t.z);
     if (jumpRequested && vel.grounded) {
       vel.vy = Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
       vel.grounded = false;

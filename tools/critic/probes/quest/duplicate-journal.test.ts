@@ -1,13 +1,10 @@
 /**
- * Critic probe — "duplicate journal entries" via the escort/Hohle-Gasse "lose and retry" loops.
- * `quest.der-eid`'s `escort-recover` stage (src/content/quests/act1/der-eid.ts) and
- * `quest.der-hut`'s `hohle-gasse-recover` stage (src/content/quests/act1/der-hut.ts) both respond to
- * a lost encounter by re-`advance`-ing straight back into the stage that just ran the encounter —
- * *without* the `{silentJournal: true}` treatment that `QuestServiceImpl`'s own Morgarten/muster-1315
- * retry loop (src/quest/index.ts, the `quest-failed` handler) uses for exactly this reason. Since
- * `QuestMachine.enterStage` (src/quest/quests.ts) journals `stage.journal` on every entry unless
- * `silentJournal` is set, and a plain `{quest:['advance', ...]}` effect never sets it, losing the
- * encounter a second time re-adds the *exact same* stage journal line verbatim.
+ * Critic probe — REGRESSION GUARD (was: "duplicate journal entries", bughunt quest #2, fixed 2026-09-05
+ * in the Phase 4 4.0 pass … actually fixed earlier: QuestMachine.enterStage dedupes by scanning the
+ * quest's whole journal history, src/quest/quests.ts:125-131). `quest.der-eid`'s `escort-recover` stage
+ * and `quest.der-hut`'s `hohle-gasse-recover` stage respond to a lost encounter by re-`advance`-ing
+ * straight back into the stage that just ran the encounter; the guard asserts the retry adds no second
+ * copy of the identical stage journal line.
  */
 import { describe, it, expect } from 'vitest';
 import { register as registerQuest, QuestServiceImpl } from '../../../../src/quest/index';
@@ -59,8 +56,8 @@ describe('duplicate journal entries on a lost-encounter retry loop', () => {
     expect(combat.calls.filter((c) => c === 'enc.brunnen-quay').length).toBe(2); // proves the retry loop actually fired
 
     const escortLines = quest.journal().filter((j) => j.text.startsWith('A boat carries the elder toward Steinen'));
-    // Bug: this is 2 (duplicated) — the same stage journal line is added once per entry into 'escort',
-    // and the retry path never sets silentJournal. Expected: at most 1 (or a distinct "second attempt" line).
-    expect(escortLines.length).toBe(2);
+    // Guard: the retry re-enters 'escort' but must not journal the identical line a second time
+    // (enterStage dedupes against the quest's whole history, src/quest/quests.ts:125-131).
+    expect(escortLines.length).toBe(1);
   }, 20000);
 });

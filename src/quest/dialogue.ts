@@ -12,15 +12,22 @@ import type { DialogueChoice, DialogueDef, DialogueNode } from '@core/schemas';
 import type { DialogueNodeView, DialogueOutcome } from '@core/services';
 import type { Runtime } from './runtime';
 import { evaluateCondition } from './conditions';
-import { runEffects } from './effects';
+import { runEffect, runEffects } from './effects';
 
 export interface DialogueUiHandle {
   show(node: DialogueNodeView): Promise<number>;
   hide(): void;
+  /** Set by the UI's hide() when the player dismisses the panel mid-conversation (pause menu, Esc,
+   *  scenario teardown) rather than picking a choice. The runner checks it after every awaited show()
+   *  so a forced close reads as neutral cancellation — no node/choice effects run for the dismissed
+   *  node, and the outcome reports cancelled:true. Defaults to false when unset. */
+  wasDismissed?(): boolean;
 }
 
 export interface DialogueRuntime extends Runtime {
   getDialogueDef(id: string): DialogueDef | undefined;
+  /** 4.3 i18n: display-time locale lookup — `t(id)` resolves through the active locale with en fallback. */
+  t(id: string): string;
   npcDisplayName(id: string): string | undefined;
   npcPortrait(id: string): string | undefined;
   entityDisplayName(entity: EntityId): string | undefined;
@@ -63,6 +70,9 @@ function resolveCheck(
 ): boolean {
   const key = checkKey(dialogueId, nodeId, choiceIndex, speakerEntity);
   const cached = rt.getVar(CHECK_VARS_QUEST, key);
+  // A quest retry that explicitly clears this dialogue's cached rolls (machine.clearVarPrefix, e.g.
+  // the Morgarten muster-hub retry) allows a fresh roll below; otherwise a cached result stands, so
+  // outcomes stay deterministic across save/load.
   if (typeof cached === 'boolean') return cached;
   const bonus = Math.floor(rt.getSkillLevel(check.skill) / 10) + rt.skillAttrMod(check.skill);
   const roll = rt.rollD20();
@@ -81,11 +91,29 @@ function resolveRoot(def: DialogueDef, rt: DialogueRuntime, dialogueId: string):
   return '';
 }
 
-function resolveText(node: DialogueNode, rt: DialogueRuntime): string {
+function resolveText(dialogueId: string, nodeId: string, node: DialogueNode, rt: DialogueRuntime): string {
+  // 4.3 i18n: display-time lookup — content defs stay en-only; the active locale resolves here.
+  // IDs are stable (see src/core/i18n.ts); the runner asks rt.t() (backed by the shared catalog),
+  // which falls back to en and then to the id itself. Tests inject the catalog semantics through
+  // their fake rt.t, so no direct `strings` import is needed here (and headless fakes can resolve
+  // def text directly).
+  const base = `dlg.${dialogueId.replace(/^dlg\./, '')}.node.${nodeId}`;
   if (node.variants) {
-    for (const v of node.variants) if (evaluateCondition(v.condition, rt)) return v.text;
+    for (let i = 0; i < node.variants.length; i++) {
+      if (evaluateCondition(node.variants[i].condition, rt)) {
+        const hit = rt.t(`${base}.variant.${i}`);
+        return hit === `${base}.variant.${i}` ? node.variants[i].text : hit;
+      }
+    }
   }
-  return node.text;
+  const hit = rt.t(`${base}.text`);
+  return hit === `${base}.text` ? node.text : hit;
+}
+
+function resolveChoiceText(dialogueId: string, nodeId: string, index: number, fallback: string, rt: DialogueRuntime): string {
+  const base = `dlg.${dialogueId.replace(/^dlg\./, '')}.node.${nodeId}`;
+  const hit = rt.t(`${base}.choice.${index}`);
+  return hit === `${base}.choice.${index}` ? fallback : hit;
 }
 
 function substitute(text: string, rt: DialogueRuntime): string {
@@ -128,7 +156,7 @@ export async function runDialogue(
   const def = rt.getDialogueDef(dialogueId);
   if (!def) {
     console.warn(`[dialogue] unknown dialogue "${dialogueId}"`);
-    return { ended: true, lastNode: '', effectsRun: 0 };
+    return { ended: true, cancelled: false, lastNode: '', effectsRun: 0 };
   }
   // ARCHITECTURE.md §4: explore ⇄ dialogue. Always paired with requestState('explore') below, however
   // the loop exits (normal end, missing node, disabled pick) — see the `finally`.
@@ -145,6 +173,19 @@ export async function runDialogue(
   const rootSpeaker = def.nodes[nodeId]?.speaker;
   if (rootSpeaker && rootSpeaker !== 'player' && rootSpeaker !== 'narrator') rt.setFlag(`talked:${rootSpeaker}`, true);
 
+  // Neutral cancellation: the UI's hide() may resolve a pending show() with a stale index (the DOM
+  // panel resolves 0 on teardown). If the panel reports it was dismissed rather than answered, treat
+  // the conversation as cancelled — skip the dismissed node's effects and choice routing entirely.
+  // Callers (main.ts scenario teardown drains a multi-node dialogue with repeated hide() calls) see
+  // outcome.cancelled rather than silently stepping the story forward one node per hide().
+  function dismissedByUi(ui: DialogueUiHandle | undefined): boolean {
+    try {
+      return ui?.wasDismissed?.() === true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
   while (true) {
     const node = def.nodes[nodeId];
@@ -153,9 +194,11 @@ export async function runDialogue(
       break;
     }
     lastNode = nodeId;
-    const text = substitute(resolveText(node, rt), rt);
+    const text = substitute(resolveText(dialogueId, nodeId, node, rt), rt);
     const speakerName = resolveSpeakerName(node, rt, speakerEntity);
     const speakerPortrait = resolveSpeakerPortrait(node, rt);
+    // §1.7 voice line id: stable string-catalog id for this node (same scheme as resolveText).
+    const voiceId = `dlg.${dialogueId.replace(/^dlg\./, '')}.node.${nodeId}`;
 
     // Critic wave3-quest.md round 2 #2: show the node BEFORE running its effects — a node's own
     // `effects` (e.g. `{cutscene:...}`, `{quest:['advance',...]}`) must never race ahead of the text
@@ -163,14 +206,17 @@ export async function runDialogue(
     // triggers is deferred until this whole dialogue call returns, not just until this node.
     if (node.end || !node.choices || node.choices.length === 0) {
       if (ui) {
-        await ui.show({ speakerName, speakerPortrait, text, choices: [] });
+        await ui.show({ speakerName, speakerPortrait, text, choices: [], voiceId });
+        if (dismissedByUi(ui)) return { ended: false, cancelled: true, lastNode, effectsRun };
         ui.hide();
       } else {
         console.info(`[dialogue:${dialogueId}] ${speakerName ? `${speakerName}: ` : ''}${text}`);
       }
       if (node.effects) {
-        await runEffects(node.effects, rt, questId);
-        effectsRun += node.effects.length;
+        const immediate = node.effects.filter((e) => !('dialogue' in e) && !('cutscene' in e) && !('encounter' in e) && !('quest' in e));
+        const nested = node.effects.filter((e) => ('dialogue' in e) || ('cutscene' in e) || ('encounter' in e) || ('quest' in e));
+        for (const e of immediate) { await runEffect(e, rt, questId); effectsRun++; }
+        if (nested.length) { await runEffects(nested, rt, questId); effectsRun += nested.length; }
       }
       if (!node.end && node.next) {
         nodeId = node.next;
@@ -183,12 +229,12 @@ export async function runDialogue(
     if (shown.length > 0 && !shown.some((sc) => sc.enabled)) {
       // every choice gated off: never hand the UI a dead end — show the line, run the node's effects, end
       console.warn(`[dialogue:${dialogueId}] node "${nodeId}" has no enabled choice; ending`);
-      if (ui) { await ui.show({ speakerName, speakerPortrait, text, choices: [] }); ui.hide(); }
+      if (ui) { await ui.show({ speakerName, speakerPortrait, text, choices: [], voiceId }); ui.hide(); }
       if (node.effects) { await runEffects(node.effects, rt, questId); effectsRun += node.effects.length; }
       break;
     }
-    const views = shown.map(({ c, enabled }) => ({
-      text: c.text,
+    const views = shown.map(({ c, enabled, originalIndex }) => ({
+      text: resolveChoiceText(dialogueId, nodeId, originalIndex, c.text, rt),
       enabled,
       checkOdds: c.check ? computeCheckOdds(c.check, rt) : undefined,
       hint: c.check ? skillLabel(c.check.skill) : undefined,
@@ -196,22 +242,27 @@ export async function runDialogue(
 
     let picked: number;
     if (ui) {
-      picked = await ui.show({ speakerName, speakerPortrait, text, choices: views });
+      picked = await ui.show({ speakerName, speakerPortrait, text, choices: views, voiceId });
+      if (dismissedByUi(ui)) return { ended: false, cancelled: true, lastNode, effectsRun };
     } else {
       console.info(`[dialogue:${dialogueId}] ${speakerName ? `${speakerName}: ` : ''}${text}`);
       const firstEnabled = shown.findIndex((s) => s.enabled);
       picked = firstEnabled >= 0 ? firstEnabled : 0;
     }
     if (node.effects) {
-      await runEffects(node.effects, rt, questId);
-      effectsRun += node.effects.length;
+      const immediate = node.effects.filter((e) => !('dialogue' in e) && !('cutscene' in e) && !('encounter' in e) && !('quest' in e));
+      const nested = node.effects.filter((e) => ('dialogue' in e) || ('cutscene' in e) || ('encounter' in e) || ('quest' in e));
+      for (const e of immediate) { await runEffect(e, rt, questId); effectsRun++; }
+      if (nested.length) { await runEffects(nested, rt, questId); effectsRun += nested.length; }
     }
     const chosen = shown[Math.max(0, Math.min(picked, shown.length - 1))];
     if (!chosen || !chosen.enabled) break;
 
     if (chosen.c.effects) {
-      await runEffects(chosen.c.effects, rt, questId);
-      effectsRun += chosen.c.effects.length;
+      const immediate = chosen.c.effects.filter((e) => !('dialogue' in e) && !('cutscene' in e) && !('encounter' in e) && !('quest' in e));
+      const nested = chosen.c.effects.filter((e) => ('dialogue' in e) || ('cutscene' in e) || ('encounter' in e) || ('quest' in e));
+      for (const e of immediate) { await runEffect(e, rt, questId); effectsRun++; }
+      if (nested.length) { await runEffects(nested, rt, questId); effectsRun += nested.length; }
     }
     if (chosen.c.check) {
       const success = resolveCheck(dialogueId, nodeId, chosen.originalIndex, chosen.c.check, rt, speakerEntity);
@@ -237,7 +288,7 @@ export async function runDialogue(
     rt.requestState('explore');
   }
 
-  return { ended: true, lastNode, effectsRun };
+  return { ended: true, cancelled: false, lastNode, effectsRun };
 }
 
 /** 'speech' → 'Speech', 'axe-mace' → 'Axe & Mace' for the [Skill NN%] label. */
